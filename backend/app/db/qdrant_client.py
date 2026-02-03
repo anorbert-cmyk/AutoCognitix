@@ -23,11 +23,22 @@ class QdrantService:
 
     def __init__(self):
         """Initialize Qdrant client."""
-        self.client = QdrantClient(
-            host=settings.QDRANT_HOST,
-            port=settings.QDRANT_PORT,
-            prefer_grpc=True,
-        )
+        # Support both local Qdrant and Qdrant Cloud
+        if settings.QDRANT_URL:
+            # Qdrant Cloud configuration
+            self.client = QdrantClient(
+                url=settings.QDRANT_URL,
+                api_key=settings.QDRANT_API_KEY,
+            )
+            logger.info(f"Connected to Qdrant Cloud: {settings.QDRANT_URL}")
+        else:
+            # Local Qdrant configuration
+            self.client = QdrantClient(
+                host=settings.QDRANT_HOST,
+                port=settings.QDRANT_PORT,
+                prefer_grpc=True,
+            )
+            logger.info(f"Connected to local Qdrant: {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
         self.vector_size = settings.EMBEDDING_DIMENSION
 
     async def initialize_collections(self) -> None:

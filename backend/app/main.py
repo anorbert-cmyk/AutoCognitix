@@ -23,8 +23,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Startup
     setup_logging()
 
-    # Initialize Qdrant collections
-    await qdrant_client.initialize_collections()
+    # Initialize Qdrant collections (skip if not configured for cloud deployment)
+    try:
+        await qdrant_client.initialize_collections()
+    except Exception as e:
+        import logging
+        logging.warning(f"Qdrant initialization skipped: {e}")
 
     yield
 

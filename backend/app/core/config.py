@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_GRPC_PORT: int = 6334
+    QDRANT_URL: Optional[str] = None  # For Qdrant Cloud: https://xxx.cloud.qdrant.io:6333
+    QDRANT_API_KEY: Optional[str] = None  # For Qdrant Cloud authentication
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
