@@ -15,8 +15,8 @@ alembic==1.13.1
 pgvector==0.2.4
 
 # Database - Neo4j
+# Let neomodel handle neo4j version
 neomodel==5.3.0
-neo4j>=5.19.0
 
 # Database - Qdrant
 qdrant-client>=1.7.0
