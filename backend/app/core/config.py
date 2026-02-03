@@ -5,7 +5,7 @@ Supports Railway deployment with automatic environment variable detection.
 """
 
 from functools import lru_cache
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,13 +38,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    # CORS - Use Union type to handle both string (from env) and list formats
+    BACKEND_CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v):
+        """Convert comma-separated string to list, or return list as-is."""
         if isinstance(v, str):
+            # Handle comma-separated string format from environment variables
+            if v.startswith("["):
+                # JSON format - let pydantic handle it
+                import json
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    pass
+            # Comma-separated format
             return [i.strip() for i in v.split(",")]
         return v
 
