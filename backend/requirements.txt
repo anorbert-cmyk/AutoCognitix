@@ -16,7 +16,7 @@ pgvector==0.2.4
 
 # Database - Neo4j
 neomodel==5.3.0
-neo4j==5.17.0
+neo4j>=5.19.0
 
 # Database - Qdrant
 qdrant-client>=1.7.0
