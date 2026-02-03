@@ -99,5 +99,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Production command with multiple workers
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Production command - use shell form for Railway $PORT variable expansion
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4
