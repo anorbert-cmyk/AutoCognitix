@@ -4,7 +4,7 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 1 befejezve (Projekt scaffold)
+**Státusz:** Sprint 2 folyamatban (Core services implementálva)
 
 ## Tech Stack
 
@@ -37,16 +37,16 @@ AutoCognitix/
 │   │   ├── api/v1/   # API végpontok
 │   │   ├── core/     # Config, security, logging
 │   │   ├── db/       # PostgreSQL, Neo4j, Qdrant
-│   │   ├── services/ # Üzleti logika (TODO)
-│   │   └── nlp/      # Magyar NLP (TODO)
+│   │   ├── services/ # Üzleti logika (KÉSZ)
+│   │   └── nlp/      # Magyar NLP (services/embedding_service.py)
 │   └── alembic/      # Migrációk
 ├── frontend/          # React alkalmazás
 │   └── src/
 │       ├── pages/    # Oldalak
 │       ├── components/
 │       └── services/ # API kliens
-├── data/             # Adatfájlok (TODO)
-└── scripts/          # Import scriptek (TODO)
+├── data/             # Adatfájlok (63 DTC kód KÉSZ)
+└── scripts/          # Import scriptek (seed_database.py KÉSZ)
 ```
 
 ## Fontos Fájlok
@@ -92,26 +92,28 @@ AutoCognitix/
 
 ## TODO - Következő Sprintek
 
-### Sprint 2: Adatbázis réteg
+### Sprint 2: Adatbázis réteg (FOLYAMATBAN)
 - [ ] Alembic első migráció
-- [ ] Neo4j seed adatok
+- [x] Neo4j seed adatok (seed_database.py)
 - [ ] Qdrant collection inicializálás
 
 ### Sprint 3: API implementáció
 - [ ] Auth végpontok működőképessé
 - [ ] DTC CRUD műveletek
 - [ ] Vehicle repository
+- [ ] API végpontok frissítése új szolgáltatásokkal
 
-### Sprint 4: Adatforrás integráció
-- [ ] NHTSA API kliens
+### Sprint 4: Adatforrás integráció (KÉSZ)
+- [x] NHTSA API kliens (nhtsa_service.py)
 - [ ] OBDb import script
-- [ ] Generikus DTC kódok importálása
+- [x] Generikus DTC kódok importálása (63 kód)
 
-### Sprint 5: AI/RAG
-- [ ] huBERT embedding service
+### Sprint 5: AI/RAG (KÉSZ)
+- [x] huBERT embedding service (embedding_service.py)
 - [ ] Qdrant indexelés
-- [ ] LangChain RAG chain
-- [ ] Magyar prompt template
+- [x] LangChain RAG chain (rag_service.py)
+- [x] Magyar prompt template
+- [x] Diagnosis service (diagnosis_service.py)
 
 ## Gyakori Parancsok
 

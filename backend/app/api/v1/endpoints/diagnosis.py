@@ -2,10 +2,12 @@
 Diagnosis endpoints - core functionality for vehicle diagnostics.
 """
 
+import logging
 from typing import List, Optional
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.diagnosis import (
     DiagnosisRequest,
@@ -15,12 +17,23 @@ from app.api.v1.schemas.diagnosis import (
     RepairRecommendation,
     Source,
 )
+from app.db.postgres.session import get_db
+from app.services.diagnosis_service import (
+    DiagnosisService,
+    DiagnosisServiceError,
+    DTCValidationError,
+    VINDecodeError,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/analyze", response_model=DiagnosisResponse, status_code=status.HTTP_201_CREATED)
-async def analyze_vehicle(request: DiagnosisRequest):
+async def analyze_vehicle(
+    request: DiagnosisRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Analyze vehicle based on DTC codes and symptoms.
 
@@ -32,99 +45,97 @@ async def analyze_vehicle(request: DiagnosisRequest):
 
     Args:
         request: Diagnosis request with vehicle info, DTCs, and symptoms
+        db: Database session
 
     Returns:
         Comprehensive diagnosis with probable causes and repair recommendations
+
+    Raises:
+        400: Invalid DTC codes or VIN
+        500: Internal service error
     """
-    # TODO: Implement full RAG pipeline
-    # For now, return a placeholder response
+    try:
+        async with DiagnosisService(db) as service:
+            result = await service.analyze_vehicle(request)
+            return result
 
-    diagnosis_id = uuid4()
+    except DTCValidationError as e:
+        logger.warning(f"DTC validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
-    # Placeholder response structure
-    return DiagnosisResponse(
-        id=diagnosis_id,
-        vehicle_make=request.vehicle_make,
-        vehicle_model=request.vehicle_model,
-        vehicle_year=request.vehicle_year,
-        dtc_codes=request.dtc_codes,
-        symptoms=request.symptoms,
-        probable_causes=[
-            ProbableCause(
-                title="Levegőtömeg-mérő (MAF) szenzor hiba",
-                description="A P0101 hibakód a MAF szenzor jelproblémáját jelzi. A szenzor szennyeződése vagy meghibásodása okozhatja a tüneteket.",
-                confidence=0.85,
-                related_dtc_codes=["P0101"],
-                components=["Levegőtömeg-mérő szenzor", "Levegőszűrő"],
-            ),
-            ProbableCause(
-                title="Vákuumszivárgás a szívórendszerben",
-                description="A P0171 hibakód sovány keverékre utal, amit vákuumszivárgás okozhat. Ez kombinálva a MAF hibával erősítheti a tüneteket.",
-                confidence=0.72,
-                related_dtc_codes=["P0171"],
-                components=["Szívócső", "Tömítések", "Vákuumcsövek"],
-            ),
-        ],
-        recommended_repairs=[
-            RepairRecommendation(
-                title="MAF szenzor tisztítása vagy cseréje",
-                description="Először próbálja meg speciális MAF tisztítóval megtisztítani a szenzort. Ha nem segít, cserélje ki.",
-                estimated_cost_min=5000,
-                estimated_cost_max=45000,
-                estimated_cost_currency="HUF",
-                difficulty="beginner",
-                parts_needed=["MAF szenzor tisztító spray", "Új MAF szenzor (ha szükséges)"],
-            ),
-            RepairRecommendation(
-                title="Vákuumrendszer ellenőrzése",
-                description="Ellenőrizze az összes vákuumcsövet és tömítést szivárgás szempontjából. Füstpróbával könnyen megtalálhatók a szivárgások.",
-                estimated_cost_min=0,
-                estimated_cost_max=15000,
-                estimated_cost_currency="HUF",
-                difficulty="intermediate",
-                parts_needed=["Vákuumcsövek (ha szükséges)", "Szívócső tömítés (ha szükséges)"],
-            ),
-        ],
-        confidence_score=0.78,
-        sources=[
-            Source(
-                type="tsb",
-                title="VW TSB 01-23-01",
-                url=None,
-                relevance_score=0.9,
-            ),
-            Source(
-                type="forum",
-                title="VWVortex - Golf MAF problémák megoldása",
-                url="https://forums.vwvortex.com/example",
-                relevance_score=0.75,
-            ),
-        ],
-    )
+    except VINDecodeError as e:
+        logger.warning(f"VIN decode error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid VIN: {e}",
+        )
+
+    except DiagnosisServiceError as e:
+        logger.error(f"Diagnosis service error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during diagnosis. Please try again.",
+        )
+
+    except Exception as e:
+        logger.exception(f"Unexpected error in analyze_vehicle: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred.",
+        )
 
 
 @router.get("/{diagnosis_id}", response_model=DiagnosisResponse)
-async def get_diagnosis(diagnosis_id: UUID):
+async def get_diagnosis(
+    diagnosis_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get a specific diagnosis by ID.
 
     Args:
         diagnosis_id: UUID of the diagnosis
+        db: Database session
 
     Returns:
         The diagnosis result
+
+    Raises:
+        404: Diagnosis not found
     """
-    # TODO: Implement database lookup
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Diagnosis {diagnosis_id} not found",
-    )
+    try:
+        async with DiagnosisService(db) as service:
+            result = await service.get_diagnosis_by_id(diagnosis_id)
+
+            if result is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Diagnosis {diagnosis_id} not found",
+                )
+
+            return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.exception(f"Error retrieving diagnosis {diagnosis_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving the diagnosis.",
+        )
 
 
-@router.get("/history", response_model=List[DiagnosisHistoryItem])
+@router.get("/history/list", response_model=List[DiagnosisHistoryItem])
 async def get_diagnosis_history(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    # TODO: Add authentication dependency
+    # current_user: User = Depends(get_current_user),
 ):
     """
     Get diagnosis history for the current user.
@@ -132,9 +143,87 @@ async def get_diagnosis_history(
     Args:
         skip: Number of records to skip (pagination)
         limit: Maximum number of records to return
+        db: Database session
 
     Returns:
         List of previous diagnoses
     """
-    # TODO: Implement with database and authentication
-    return []
+    try:
+        async with DiagnosisService(db) as service:
+            # TODO: Get user_id from authenticated user
+            # For now, return empty list as placeholder
+            # history = await service.get_user_history(current_user.id, skip, limit)
+            return []
+
+    except Exception as e:
+        logger.exception(f"Error retrieving diagnosis history: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving diagnosis history.",
+        )
+
+
+@router.post("/quick-analyze")
+async def quick_analyze(
+    dtc_codes: List[str] = Query(..., min_length=1, max_length=10),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Quick analysis endpoint for single DTC code lookup.
+
+    This is a simplified endpoint that doesn't require vehicle info
+    and returns basic DTC information without full RAG analysis.
+
+    Args:
+        dtc_codes: List of DTC codes to analyze
+        db: Database session
+
+    Returns:
+        Basic DTC information and common causes
+    """
+    try:
+        async with DiagnosisService(db) as service:
+            # Validate DTC codes
+            for code in dtc_codes:
+                code = code.upper().strip()
+                if not (len(code) == 5 and code[0] in "PBCU" and code[1:].isdigit()):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid DTC code format: {code}",
+                    )
+
+            # Get DTC details from repository
+            dtc_details = []
+            for code in dtc_codes:
+                details = await service.dtc_repository.get_by_code(code)
+                if details:
+                    dtc_details.append({
+                        "code": details.code,
+                        "description": details.description_hu or details.description_en,
+                        "severity": details.severity,
+                        "symptoms": details.symptoms,
+                        "possible_causes": details.possible_causes,
+                    })
+                else:
+                    dtc_details.append({
+                        "code": code,
+                        "description": "Hibakód nem található az adatbázisban",
+                        "severity": "unknown",
+                        "symptoms": [],
+                        "possible_causes": [],
+                    })
+
+            return {
+                "dtc_codes": dtc_details,
+                "message": "Részletes diagnózishoz használja a /analyze végpontot járműadatokkal.",
+            }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.exception(f"Error in quick analyze: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred during quick analysis.",
+        )
