@@ -19,7 +19,7 @@ neomodel==5.3.0
 neo4j==5.17.0
 
 # Database - Qdrant
-qdrant-client==1.7.4
+qdrant-client>=1.7.0
 
 # Database - Redis
 redis==5.0.1
