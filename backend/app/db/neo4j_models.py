@@ -26,7 +26,7 @@ class CausesRel(StructuredRel):
     """Relationship: DTC causes Symptom."""
 
     confidence = FloatProperty(default=0.5)
-    source = StringProperty()
+    data_source = StringProperty()  # Renamed from 'source' - conflicts with neomodel internals
 
 
 class IndicatesFailureRel(StructuredRel):
