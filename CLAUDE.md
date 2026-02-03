@@ -4,7 +4,9 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 2 folyamatban (Core services implementálva)
+**Státusz:** Sprint 2 befejezve, Railway deployment konfigurálva
+
+**Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
 ## Tech Stack
 
@@ -115,7 +117,81 @@ AutoCognitix/
 - [x] Magyar prompt template
 - [x] Diagnosis service (diagnosis_service.py)
 
+## Deployment - Railway
+
+### Architektúra
+
+```
+Railway Project
+├── backend (FastAPI) ──────────┐
+│   └── Dockerfile build        │
+├── frontend (React) ───────────┤
+│   └── Nixpacks build          │
+├── PostgreSQL (Railway)        ├── Railway Private Network
+├── Redis (Railway)             │
+└── External Services           │
+    ├── Neo4j Aura (cloud.neo4j.com)
+    └── Qdrant Cloud (cloud.qdrant.io)
+```
+
+### Railway Services
+
+| Service | Config File | Build |
+|---------|-------------|-------|
+| backend | `backend/railway.toml` | Dockerfile |
+| frontend | `frontend/railway.toml` | Nixpacks |
+| PostgreSQL | Railway Add-on | - |
+| Redis | Railway Add-on | - |
+
+### Deployment Lépések
+
+1. **Railway Projekt létrehozása:**
+   ```bash
+   railway login
+   railway init
+   ```
+
+2. **Adatbázisok hozzáadása:**
+   - PostgreSQL: Railway Dashboard → New → Database → PostgreSQL
+   - Redis: Railway Dashboard → New → Database → Redis
+
+3. **Külső szolgáltatások:**
+   - Neo4j Aura: https://cloud.neo4j.com (Free tier)
+   - Qdrant Cloud: https://cloud.qdrant.io (Free tier)
+
+4. **Environment Variables:**
+   - Lásd: `.env.railway.example`
+   - Railway Dashboard → Service → Variables
+
+5. **Deploy:**
+   ```bash
+   # Backend
+   cd backend && railway up
+
+   # Frontend
+   cd frontend && railway up
+   ```
+
+### Fontos Environment Variables
+
+```
+# Railway automatikusan beállítja
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+PORT=...
+
+# Kézi beállítás szükséges
+NEO4J_URI=neo4j+s://xxx.databases.neo4j.io
+NEO4J_PASSWORD=...
+QDRANT_URL=https://xxx.cloud.qdrant.io:6333
+QDRANT_API_KEY=...
+ANTHROPIC_API_KEY=... (vagy OPENAI_API_KEY)
+JWT_SECRET_KEY=...
+```
+
 ## Gyakori Parancsok
+
+### Lokális Fejlesztés
 
 ```bash
 # Fejlesztői környezet indítása
@@ -132,6 +208,28 @@ cd backend && alembic revision --autogenerate -m "description"
 
 # Migráció futtatása
 cd backend && alembic upgrade head
+```
+
+### Railway Deployment
+
+```bash
+# Railway CLI telepítés
+npm install -g @railway/cli
+
+# Bejelentkezés
+railway login
+
+# Projekt inicializálás
+railway init
+
+# Deploy
+railway up
+
+# Logok megtekintése
+railway logs
+
+# Environment változók
+railway variables
 ```
 
 ## Kapcsolódó Dokumentumok
