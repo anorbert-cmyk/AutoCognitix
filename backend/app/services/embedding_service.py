@@ -6,14 +6,22 @@ and text preprocessing using HuSpaCy.
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
-import spacy
 import torch
 from transformers import AutoModel, AutoTokenizer
 
 from app.core.config import settings
+
+# Optional spacy import - not required for basic embedding functionality
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except ImportError:
+    spacy = None
+    SPACY_AVAILABLE = False
+    logging.warning("spacy not available - Hungarian preprocessing will be disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +56,7 @@ class HungarianEmbeddingService:
         self._device = self._detect_device()
         self._tokenizer: Optional[AutoTokenizer] = None
         self._model: Optional[AutoModel] = None
-        self._nlp: Optional[spacy.Language] = None
+        self._nlp = None  # Optional spacy.Language
 
         logger.info(f"HungarianEmbeddingService initialized with device: {self._device}")
 
@@ -90,6 +98,10 @@ class HungarianEmbeddingService:
     def _load_huspacy_model(self) -> None:
         """Load HuSpaCy model lazily."""
         if self._nlp is not None:
+            return
+
+        if not SPACY_AVAILABLE:
+            logger.warning("spacy not available - preprocessing will be disabled")
             return
 
         logger.info(f"Loading HuSpaCy model: {settings.HUSPACY_MODEL}")
@@ -152,10 +164,19 @@ class HungarianEmbeddingService:
         Returns:
             str: Preprocessed text with lemmatized tokens.
         """
-        self._load_huspacy_model()
-
         if not text or not text.strip():
             return ""
+
+        # If spacy is not available, return original text
+        if not SPACY_AVAILABLE:
+            logger.debug("spacy not available - returning original text")
+            return text.strip()
+
+        self._load_huspacy_model()
+
+        # If model still not loaded (e.g., spacy available but model missing), return original
+        if self._nlp is None:
+            return text.strip()
 
         doc = self._nlp(text)
 
@@ -365,7 +386,11 @@ class HungarianEmbeddingService:
         """
         logger.info("Warming up HungarianEmbeddingService...")
         self._load_hubert_model()
-        self._load_huspacy_model()
+
+        if SPACY_AVAILABLE:
+            self._load_huspacy_model()
+        else:
+            logger.info("Skipping HuSpaCy warmup - spacy not available")
 
         # Run a test embedding to warm up GPU
         _ = self.embed_text("Teszt szoveg a bemelegiteshez.")
