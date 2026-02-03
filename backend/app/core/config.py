@@ -1,6 +1,7 @@
 """
 Application configuration using Pydantic Settings.
 Loads configuration from environment variables and .env file.
+Supports Railway deployment with automatic environment variable detection.
 """
 
 from functools import lru_cache
@@ -26,6 +27,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     API_V1_PREFIX: str = "/api/v1"
 
+    # Railway-specific
+    RAILWAY_ENVIRONMENT: Optional[str] = None
+    PORT: int = 8000
+
     # Security
     SECRET_KEY: str = "development_secret_key_change_in_production"
     JWT_SECRET_KEY: str = "jwt_secret_key_change_in_production"
@@ -48,6 +53,18 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "autocognitix_dev"
     POSTGRES_DB: str = "autocognitix"
     DATABASE_URL: str = "postgresql+asyncpg://autocognitix:autocognitix_dev@localhost:5432/autocognitix"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def convert_database_url(cls, v: str) -> str:
+        """Convert Railway's DATABASE_URL to asyncpg format.
+
+        Railway provides DATABASE_URL with postgresql:// prefix,
+        but asyncpg requires postgresql+asyncpg:// prefix.
+        """
+        if v and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # Neo4j
     NEO4J_URI: str = "bolt://localhost:7687"
