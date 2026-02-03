@@ -44,15 +44,17 @@ langchain-openai==0.0.5
 sentence-transformers==2.3.1
 transformers==4.37.2
 torch==2.2.0
-huspacy==0.10.0
+# huspacy - commented out for Railway deployment (requires special installation)
+# huspacy==0.10.0
 
 # Data Processing
 pandas==2.2.0
 numpy==1.26.4
 
 # External APIs
-vpic-api==1.0.0
-youtube-data-api==0.0.21
+# vpic-api - NHTSA API handled via httpx
+# youtube-data-api - optional, commented for minimal deployment
+# youtube-data-api==0.0.21
 
 # Validation & Serialization
 email-validator==2.1.0.post1
