@@ -192,6 +192,8 @@ data/processed/
 !data/dtc_codes/*.json
 !frontend/package.json
 !frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/tsconfig.node.json
 
 # ============================================
 # Temporary files
