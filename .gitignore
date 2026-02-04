@@ -190,6 +190,8 @@ data/processed/
 *.json
 !data/**/.gitkeep
 !data/dtc_codes/*.json
+!frontend/package.json
+!frontend/package-lock.json
 
 # ============================================
 # Temporary files
