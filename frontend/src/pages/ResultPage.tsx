@@ -80,7 +80,9 @@ function getDifficultyColor(difficulty: string) {
 
 export default function ResultPage() {
   const { id } = useParams()
-  const result = placeholderResult // TODO: Fetch from API based on id
+  // TODO: Fetch from API based on id
+  console.log('Loading diagnosis result:', id)
+  const result = placeholderResult
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
