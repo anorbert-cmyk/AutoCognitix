@@ -1,0 +1,140 @@
+/**
+ * MechanicAI PRO - Design Tokens
+ *
+ * Central design system tokens for consistent styling across the application.
+ * These CSS custom properties are used by Tailwind and component styles.
+ */
+
+:root {
+  /* ============================================
+   * STATUS COLORS
+   * Used for badges, alerts, and status indicators
+   * ============================================ */
+
+  /* Success - "JAVÍTVA" (Fixed) */
+  --status-success: 22 163 74;
+  --status-success-light: 220 252 231;
+  --status-success-dark: 21 128 61;
+
+  /* Warning - "FOLYAMATBAN" (In Progress) */
+  --status-warning: 234 179 8;
+  --status-warning-light: 254 249 195;
+  --status-warning-dark: 161 98 7;
+
+  /* Pending - "FÜGGŐBEN" (Pending) */
+  --status-pending: 249 115 22;
+  --status-pending-light: 255 237 213;
+  --status-pending-dark: 194 65 12;
+
+  /* Error - "HIBA" (Error) */
+  --status-error: 239 68 68;
+  --status-error-light: 254 226 226;
+  --status-error-dark: 185 28 28;
+
+  /* Info */
+  --status-info: 59 130 246;
+  --status-info-light: 219 234 254;
+  --status-info-dark: 29 78 216;
+
+  /* ============================================
+   * LAYOUT DIMENSIONS
+   * Fixed sizes for layout components
+   * ============================================ */
+
+  /* Floating Bottom Bar */
+  --floating-bar-height: 72px;
+  --floating-bar-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1), 0 -2px 4px -2px rgb(0 0 0 / 0.1);
+
+  /* Header */
+  --header-height: 64px;
+  --header-height-mobile: 56px;
+
+  /* Sidebar (future) */
+  --sidebar-width: 256px;
+  --sidebar-width-collapsed: 64px;
+
+  /* ============================================
+   * SPACING SCALE
+   * Consistent spacing throughout the app
+   * ============================================ */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+  --space-20: 5rem;     /* 80px */
+  --space-24: 6rem;     /* 96px */
+
+  /* ============================================
+   * BORDER RADIUS
+   * Rounded corners scale
+   * ============================================ */
+  --radius-none: 0;
+  --radius-sm: 0.25rem;   /* 4px */
+  --radius-md: 0.375rem;  /* 6px */
+  --radius-lg: 0.5rem;    /* 8px */
+  --radius-xl: 0.75rem;   /* 12px */
+  --radius-2xl: 1rem;     /* 16px */
+  --radius-full: 9999px;
+
+  /* ============================================
+   * SHADOWS
+   * Box shadow scale
+   * ============================================ */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
+
+  /* ============================================
+   * Z-INDEX SCALE
+   * Layering system
+   * ============================================ */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-modal-backdrop: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-tooltip: 70;
+  --z-toast: 80;
+
+  /* ============================================
+   * TRANSITION DURATIONS
+   * Animation timing
+   * ============================================ */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+
+  /* ============================================
+   * BREAKPOINTS (for reference, used in Tailwind)
+   * ============================================ */
+  /*
+   * sm: 640px   - Mobile landscape
+   * md: 768px   - Tablet portrait (PRIORITY)
+   * lg: 1024px  - Tablet landscape / Small desktop
+   * xl: 1280px  - Desktop
+   * 2xl: 1536px - Large desktop
+   */
+}
+
+/* ============================================
+ * DARK MODE (future support)
+ * ============================================ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Override status colors for dark mode if needed */
+  }
+}

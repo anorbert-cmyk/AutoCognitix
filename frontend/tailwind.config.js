@@ -62,6 +62,34 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Status colors for badges and indicators
+        status: {
+          success: {
+            DEFAULT: 'rgb(var(--status-success) / <alpha-value>)',
+            light: 'rgb(var(--status-success-light) / <alpha-value>)',
+            dark: 'rgb(var(--status-success-dark) / <alpha-value>)',
+          },
+          warning: {
+            DEFAULT: 'rgb(var(--status-warning) / <alpha-value>)',
+            light: 'rgb(var(--status-warning-light) / <alpha-value>)',
+            dark: 'rgb(var(--status-warning-dark) / <alpha-value>)',
+          },
+          pending: {
+            DEFAULT: 'rgb(var(--status-pending) / <alpha-value>)',
+            light: 'rgb(var(--status-pending-light) / <alpha-value>)',
+            dark: 'rgb(var(--status-pending-dark) / <alpha-value>)',
+          },
+          error: {
+            DEFAULT: 'rgb(var(--status-error) / <alpha-value>)',
+            light: 'rgb(var(--status-error-light) / <alpha-value>)',
+            dark: 'rgb(var(--status-error-dark) / <alpha-value>)',
+          },
+          info: {
+            DEFAULT: 'rgb(var(--status-info) / <alpha-value>)',
+            light: 'rgb(var(--status-info-light) / <alpha-value>)',
+            dark: 'rgb(var(--status-info-dark) / <alpha-value>)',
+          },
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -71,6 +99,34 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
+      },
+      spacing: {
+        '18': '4.5rem',
+        '22': '5.5rem',
+        'header': 'var(--header-height)',
+        'header-mobile': 'var(--header-height-mobile)',
+        'floating-bar': 'var(--floating-bar-height)',
+      },
+      minHeight: {
+        'screen-minus-header': 'calc(100vh - var(--header-height))',
+      },
+      boxShadow: {
+        'floating-bar': 'var(--floating-bar-shadow)',
+      },
+      zIndex: {
+        'dropdown': 'var(--z-dropdown)',
+        'sticky': 'var(--z-sticky)',
+        'fixed': 'var(--z-fixed)',
+        'modal-backdrop': 'var(--z-modal-backdrop)',
+        'modal': 'var(--z-modal)',
+        'popover': 'var(--z-popover)',
+        'tooltip': 'var(--z-tooltip)',
+        'toast': 'var(--z-toast)',
+      },
+      transitionDuration: {
+        'fast': 'var(--duration-fast)',
+        'normal': 'var(--duration-normal)',
+        'slow': 'var(--duration-slow)',
       },
     },
   },
