@@ -479,7 +479,7 @@ class PerformanceLogger:
         self.extra_fields = extra_fields
         self.start_time: float | None = None
 
-    def __enter__(self) -> "PerformanceLogger":
+    def __enter__(self) -> PerformanceLogger:
         self.start_time = time.time()
         return self
 
@@ -829,7 +829,7 @@ class SpanContext:
         self.span_id: str | None = None
         self.logger = get_logger("tracing")
 
-    def __enter__(self) -> "SpanContext":
+    def __enter__(self) -> SpanContext:
         self.start_time = time.time()
         self.old_span_id = span_id_var.get()
         self.old_parent_span_id = parent_span_id_var.get()

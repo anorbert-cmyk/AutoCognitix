@@ -462,19 +462,84 @@ class DiagnosisService:
             # and allow rag_service to be created by another agent
             from app.services.rag_service import diagnose
 
-            # Build context for RAG
-            context = self._build_rag_context(
-                request=request,
-                dtc_details=dtc_details,
-                preprocessed_symptoms=preprocessed_symptoms,
-                recalls=recalls,
-                complaints=complaints,
-                vin_data=vin_data,
+            # Build vehicle info dict
+            vehicle_info = {
+                "make": request.vehicle_make,
+                "model": request.vehicle_model,
+                "year": request.vehicle_year,
+                "engine": request.vehicle_engine,
+                "vin": request.vin,
+                "vin_data": vin_data.model_dump() if vin_data else None,
+            }
+
+            # Convert recalls and complaints to dicts
+            recalls_dicts = [
+                {
+                    "campaign_number": r.campaign_number,
+                    "component": r.component,
+                    "summary": r.summary,
+                    "consequence": r.consequence,
+                    "remedy": r.remedy,
+                }
+                for r in recalls
+            ] if recalls else None
+
+            complaints_dicts = [
+                {
+                    "components": c.components,
+                    "summary": c.summary,
+                    "crash": c.crash,
+                    "fire": c.fire,
+                }
+                for c in complaints
+            ] if complaints else None
+
+            # Execute RAG diagnosis with correct parameters
+            result = await diagnose(
+                vehicle_info=vehicle_info,
+                dtc_codes=request.dtc_codes,
+                symptoms=preprocessed_symptoms,
+                recalls=recalls_dicts,
+                complaints=complaints_dicts,
+                db_session=self.db,
             )
 
-            # Execute RAG diagnosis
-            result = await diagnose(context)
-            return result
+            # Convert DiagnosisResult to dict format expected by _build_response
+            return {
+                "probable_causes": [
+                    {
+                        "title": cause.title,
+                        "description": cause.description,
+                        "confidence": cause.confidence,
+                        "related_dtc_codes": cause.related_dtc_codes,
+                        "components": cause.components,
+                    }
+                    for cause in result.probable_causes
+                ],
+                "recommended_repairs": [
+                    {
+                        "title": repair.title,
+                        "description": repair.description,
+                        "estimated_cost_min": repair.estimated_cost_min,
+                        "estimated_cost_max": repair.estimated_cost_max,
+                        "estimated_cost_currency": repair.estimated_cost_currency,
+                        "difficulty": repair.difficulty,
+                        "parts_needed": repair.parts_needed,
+                        "estimated_time_minutes": repair.estimated_time_minutes,
+                    }
+                    for repair in result.recommended_repairs
+                ],
+                "confidence_score": result.confidence_score,
+                "sources": [
+                    {
+                        "type": source.type,
+                        "title": source.title,
+                        "url": source.url,
+                        "relevance_score": source.relevance_score,
+                    }
+                    for source in result.sources
+                ],
+            }
 
         except ImportError:
             logger.warning(
