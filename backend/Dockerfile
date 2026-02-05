@@ -82,6 +82,7 @@ RUN pip install --no-cache /wheels/*
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini .
+COPY start.sh .
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -95,9 +96,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check - longer start period for migrations
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Production command - use shell form for Railway $PORT variable expansion
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4
+# Production command - run migrations then start server
+CMD ["./start.sh"]
