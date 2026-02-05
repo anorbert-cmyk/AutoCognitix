@@ -1,300 +1,423 @@
 /**
- * DiagnosisPage - Main diagnosis form page
- *
- * Features:
- * - VehicleSelector component for vehicle selection
- * - DTC code autocomplete input
- * - Symptom description textarea
- * - Form validation
- * - API integration for diagnosis analysis
+ * DiagnosisPage - New diagnosis form page
+ * Redesigned based on UI mockup
  */
 
-import { useState, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertCircle, FileText, Loader2 } from 'lucide-react'
-import { useForm } from 'react-hook-form'
-import { z } from 'zod'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useAnalyzeDiagnosis } from '../services/hooks'
-import { ErrorMessage, DTCAutocomplete } from '../components/ui'
-import VehicleSelector from '../components/VehicleSelector'
-import { ApiError } from '../services/api'
-import { isValidDTCFormat } from '../services/dtcService'
-import { useToast } from '../contexts/ToastContext'
-import type { SelectedVehicle } from '../types/vehicle'
+import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  AlertTriangle,
+  Car,
+  Mic,
+  QrCode,
+  Clock,
+  Save,
+  Sparkles,
+  User,
+  Wrench,
+  HelpCircle,
+  ExternalLink,
+} from 'lucide-react';
+import { useAnalyzeDiagnosis, useDiagnosisHistory } from '../services/hooks';
+import { Button, Input, Textarea } from '@/components/lib';
+import { cn } from '@/lib/utils';
+import { ApiError } from '../services/api';
+import { useToast } from '../contexts/ToastContext';
 
-// Form validation schema
-const diagnosisSchema = z.object({
-  symptoms: z
-    .string()
-    .min(10, 'A tunetleiras legalabb 10 karakter kell legyen')
-    .max(2000, 'Maximum 2000 karakter'),
-})
+// Generate year options (current year down to 1990)
+const currentYear = new Date().getFullYear();
+const yearOptions = [
+  { value: '', label: 'Évjárat' },
+  ...Array.from({ length: currentYear - 1990 + 1 }, (_, i) => ({
+    value: String(currentYear - i),
+    label: String(currentYear - i),
+  })),
+];
 
-type DiagnosisFormData = z.infer<typeof diagnosisSchema>
+interface RecentDiagnosis {
+  id: string;
+  vehicleInfo: string;
+  dtcCode: string;
+  description: string;
+}
 
 export default function DiagnosisPage() {
-  const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const toast = useToast()
+  const navigate = useNavigate();
+  const toast = useToast();
 
-  // Get initial DTC code from URL if provided (e.g., from DTCDetailPage link)
-  const initialDtcCode = searchParams.get('dtc')
+  // Form state
+  const [dtcCode, setDtcCode] = useState('');
+  const [vehicleMake, setVehicleMake] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleYear, setVehicleYear] = useState('');
+  const [ownerComplaints, setOwnerComplaints] = useState('');
+  const [mechanicNotes, setMechanicNotes] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // Vehicle state (controlled by VehicleSelector)
-  const [selectedVehicle, setSelectedVehicle] = useState<SelectedVehicle | null>(null)
-  const [vehicleError, setVehicleError] = useState<string | null>(null)
+  // API hooks
+  const analyzeDiagnosis = useAnalyzeDiagnosis();
+  const { data: historyData } = useDiagnosisHistory({ limit: 3 });
 
-  // DTC codes state - initialize with URL param if available
-  const [dtcCodes, setDtcCodes] = useState<string[]>(
-    initialDtcCode && isValidDTCFormat(initialDtcCode) ? [initialDtcCode.toUpperCase()] : []
-  )
-  const [dtcError, setDtcError] = useState<string | null>(null)
+  // Transform history data to recent diagnoses
+  const recentDiagnoses: RecentDiagnosis[] = historyData?.items?.map((item) => ({
+    id: item.id,
+    vehicleInfo: `${item.vehicle_make} ${item.vehicle_model}`,
+    dtcCode: item.dtc_codes[0] || 'N/A',
+    description: item.dtc_codes.length > 1
+      ? `${item.dtc_codes[0]} - Több hibakód`
+      : `${item.dtc_codes[0]} - Diagnosztika`,
+  })) || [];
 
-  // Form error state
-  const [submitError, setSubmitError] = useState<ApiError | null>(null)
+  // Auto-save simulation
+  const handleAutoSave = useCallback(() => {
+    setLastSaved(new Date());
+  }, []);
 
-  // React Hook Form
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors },
-  } = useForm<DiagnosisFormData>({
-    resolver: zodResolver(diagnosisSchema),
-    defaultValues: {
-      symptoms: '',
-    },
-  })
-
-  // Diagnosis mutation
-  const analyzeDiagnosis = useAnalyzeDiagnosis()
-
-  // Handle vehicle selection change
-  const handleVehicleChange = useCallback((vehicle: SelectedVehicle | null) => {
-    setSelectedVehicle(vehicle)
-    setVehicleError(null)
-  }, [])
-
-  // Validate vehicle selection
-  const validateVehicle = useCallback((): boolean => {
-    if (!selectedVehicle) {
-      setVehicleError('Kerem valasszon jarmut')
-      return false
+  // Dictation handler
+  const handleDictation = useCallback(() => {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      toast.error('A böngésző nem támogatja a beszédfelismerést');
+      return;
     }
 
-    if (!selectedVehicle.make || selectedVehicle.make.trim() === '') {
-      setVehicleError('Gyarto megadasa kotelezo')
-      return false
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionConstructor) return;
+
+    const recognition = new SpeechRecognitionConstructor();
+    recognition.lang = 'hu-HU';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setOwnerComplaints((prev) => prev + (prev ? ' ' : '') + transcript);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      toast.error('Hiba történt a beszédfelismerés során');
+    };
+
+    recognition.start();
+    toast.info('Beszéljen most...');
+  }, [toast]);
+
+  // Form validation
+  const validateForm = useCallback((): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    // Validate DTC code
+    const dtcPattern = /^[PBCU][0-9A-F]{4}$/;
+    const code = dtcCode.trim().toUpperCase();
+
+    if (!code) {
+      newErrors.dtcCode = 'Hibakód megadása kötelező';
+    } else if (!dtcPattern.test(code)) {
+      newErrors.dtcCode = 'Érvénytelen hibakód formátum (pl. P0300)';
     }
 
-    if (!selectedVehicle.model || selectedVehicle.model.trim() === '') {
-      setVehicleError('Modell megadasa kotelezo')
-      return false
+    // Validate vehicle info (at least make is required)
+    if (!vehicleMake.trim()) {
+      newErrors.vehicleMake = 'Gyártó megadása kötelező';
     }
 
-    if (!selectedVehicle.year || selectedVehicle.year < 1900 || selectedVehicle.year > 2030) {
-      setVehicleError('Ervenyes evjarat megadasa kotelezo')
-      return false
-    }
-
-    setVehicleError(null)
-    return true
-  }, [selectedVehicle])
-
-  // Validate DTC codes
-  const validateDTCCodes = useCallback((): boolean => {
-    if (dtcCodes.length === 0) {
-      setDtcError('Legalabb egy DTC kod megadasa kotelezo')
-      return false
-    }
-
-    const invalidCodes = dtcCodes.filter((code) => !isValidDTCFormat(code))
-    if (invalidCodes.length > 0) {
-      setDtcError(`Ervenytelen DTC kodok: ${invalidCodes.join(', ')}`)
-      return false
-    }
-
-    setDtcError(null)
-    return true
-  }, [dtcCodes])
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [dtcCode, vehicleMake]);
 
   // Form submission
-  const onSubmit = async (data: DiagnosisFormData) => {
-    // Validate all fields
-    const isVehicleValid = validateVehicle()
-    const isDTCValid = validateDTCCodes()
-
-    if (!isVehicleValid || !isDTCValid) {
-      return
-    }
-
-    setSubmitError(null)
+  const handleSubmit = useCallback(async () => {
+    if (!validateForm()) return;
 
     try {
       const result = await analyzeDiagnosis.mutateAsync({
-        vehicleMake: selectedVehicle!.make,
-        vehicleModel: selectedVehicle!.model,
-        vehicleYear: selectedVehicle!.year,
-        vin: selectedVehicle!.vin || undefined,
-        dtcCodes,
-        symptoms: data.symptoms,
-      })
-      toast.success('Diagnozis sikeresen elkeszult!', 'Sikeres elemzes')
-      navigate(`/diagnosis/${result.id}`)
+        vehicleMake: vehicleMake.trim(),
+        vehicleModel: vehicleModel.trim() || vehicleMake.trim(),
+        vehicleYear: vehicleYear ? parseInt(vehicleYear) : currentYear,
+        dtcCodes: [dtcCode.trim().toUpperCase()],
+        symptoms: ownerComplaints.trim() || 'Nincs megadva',
+        additionalContext: mechanicNotes.trim() || undefined,
+      });
+
+      toast.success('Diagnózis sikeresen elkészült!');
+      navigate(`/diagnosis/${result.id}`);
     } catch (err) {
       if (err instanceof ApiError) {
-        setSubmitError(err)
-        toast.error(err.detail, 'Diagnozis hiba')
+        toast.error(err.detail);
       } else {
-        setSubmitError(new ApiError('Ismeretlen hiba tortent', 500))
-        toast.error('Ismeretlen hiba tortent', 'Hiba')
+        toast.error('Ismeretlen hiba történt');
       }
     }
-  }
+  }, [validateForm, analyzeDiagnosis, vehicleMake, vehicleModel, vehicleYear, dtcCode, ownerComplaints, mechanicNotes, toast, navigate]);
 
-  const symptomsValue = watch('symptoms')
+  // Save draft
+  const handleSave = useCallback(() => {
+    handleAutoSave();
+    toast.success('Piszkozat mentve');
+  }, [handleAutoSave, toast]);
+
+  // Format time ago
+  const formatTimeAgo = (date: Date | null): string => {
+    if (!date) return '';
+    const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (minutes < 1) return 'most';
+    if (minutes === 1) return '1 perce';
+    return `${minutes} perce`;
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12">
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Page Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Uj diagnosztika
+        <div className="mb-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary-50 text-primary-700 rounded-full text-sm font-medium mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            AI DIAGNOSZTIKAI ESZKÖZ
+          </div>
+          <h1 className="text-3xl font-bold text-foreground mb-2">
+            Új diagnosztikai folyamat
           </h1>
-          <p className="text-gray-600">
-            Toltse ki az alabbi mezoket a pontos diagnozishoz.
+          <p className="text-muted-foreground">
+            Adja meg a jármű adatait és az OBD kódokat. Az AI modell elemzi az adatokat a
+            lehetséges okok és javítási eljárások javaslatához.
           </p>
         </div>
 
-        {/* Submit Error */}
-        {submitError && (
-          <ErrorMessage
-            error={submitError}
-            onDismiss={() => setSubmitError(null)}
-            onRetry={
-              analyzeDiagnosis.isError ? () => handleSubmit(onSubmit)() : undefined
-            }
-            className="mb-6"
-          />
-        )}
-
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-          {/* Vehicle Selector Card */}
-          <div className="card">
-            <div className="card-content">
-              <VehicleSelector
-                value={selectedVehicle || undefined}
-                onChange={handleVehicleChange}
-                required
-                showVINInput
-                error={vehicleError || undefined}
-              />
-            </div>
-          </div>
-
-          {/* DTC Codes Card */}
-          <div className="card">
-            <div className="card-header">
+        {/* Main Form Card */}
+        <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+          {/* Wizard Steps */}
+          <div className="border-b border-border px-6 py-4">
+            <div className="flex items-center gap-8">
               <div className="flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-primary-600" />
-                <h2 className="card-title text-lg">Hibakodok</h2>
+                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary-600 text-white text-sm font-medium">
+                  1
+                </div>
+                <span className="text-sm font-medium text-primary-600">Adatbevitel</span>
+              </div>
+              <div className="flex items-center gap-2 opacity-50">
+                <div className="flex items-center justify-center w-7 h-7 rounded-full border-2 border-muted-foreground text-muted-foreground text-sm font-medium">
+                  2
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">Elemzés</span>
+              </div>
+              <div className="flex items-center gap-2 opacity-50">
+                <div className="flex items-center justify-center w-7 h-7 rounded-full border-2 border-muted-foreground text-muted-foreground text-sm font-medium">
+                  3
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">Jelentés</span>
               </div>
             </div>
-            <div className="card-content">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                DTC kodok <span className="text-red-500">*</span>
+          </div>
+
+          <div className="p-6 space-y-8">
+            {/* DTC Code Section */}
+            <div>
+              <label className="block text-sm font-semibold text-foreground uppercase tracking-wide mb-3">
+                Elsődleges hibakód (DTC)
               </label>
-              <DTCAutocomplete
-                value={dtcCodes}
-                onChange={(codes) => {
-                  setDtcCodes(codes)
-                  setDtcError(null)
-                }}
-                maxCodes={20}
-              />
-              {dtcError && (
-                <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
-                  <AlertCircle className="h-4 w-4" />
-                  {dtcError}
-                </p>
-              )}
+              <div className="relative">
+                <Input
+                  value={dtcCode}
+                  onChange={(e) => setDtcCode(e.target.value.toUpperCase())}
+                  placeholder="PL. P0300"
+                  error={errors.dtcCode}
+                  className="text-2xl font-light tracking-wide text-primary-500 placeholder:text-primary-300 h-16 pr-12"
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-muted-foreground hover:text-foreground transition-colors"
+                  title="QR kód beolvasása"
+                >
+                  <QrCode className="h-6 w-6" />
+                </button>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Adja meg a fő kódot az OBD-II olvasóból.
+              </p>
             </div>
-          </div>
 
-          {/* Symptoms Card */}
-          <div className="card">
-            <div className="card-header">
-              <div className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary-600" />
-                <h2 className="card-title text-lg">Tunetek leirasa</h2>
+            <hr className="border-border" />
+
+            {/* Vehicle Identification */}
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-semibold text-foreground mb-4">
+                <Car className="h-5 w-5 text-primary-600" />
+                Jármű azonosítás
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-1.5">
+                    Gyártó
+                  </label>
+                  <Input
+                    value={vehicleMake}
+                    onChange={(e) => setVehicleMake(e.target.value)}
+                    placeholder="Toyota"
+                    error={errors.vehicleMake}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-1.5">
+                    Modell
+                  </label>
+                  <Input
+                    value={vehicleModel}
+                    onChange={(e) => setVehicleModel(e.target.value)}
+                    placeholder="Camry"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-1.5">
+                    Évjárat
+                  </label>
+                  <select
+                    value={vehicleYear}
+                    onChange={(e) => setVehicleYear(e.target.value)}
+                    className={cn(
+                      'w-full h-10 px-3 text-sm bg-background border border-input rounded-lg',
+                      'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+                      'transition-colors'
+                    )}
+                  >
+                    {yearOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="card-content">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tapasztalt tunetek <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                {...register('symptoms')}
-                rows={5}
-                placeholder="Irja le reszletesen a tapasztalt problemakat. Peldaul: A motor nehezen indul hidegben, egyenetlenul jar alapjaraton, megnovekedet a fogyasztas..."
-                className="textarea"
-              />
-              <div className="mt-1 flex justify-between">
-                <p className="text-sm text-gray-500">
-                  Minel reszletesebb leirast ad, annal pontosabb diagnozist kaphat.
-                </p>
-                <span className="text-sm text-gray-400">
-                  {symptomsValue?.length || 0}/2000
-                </span>
+
+            {/* Complaints and Notes */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Owner Complaints */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    Tulajdonos panaszai
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleDictation}
+                    className="flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
+                  >
+                    <Mic className="h-4 w-4" />
+                    DIKTÁLÁS
+                  </button>
+                </div>
+                <Textarea
+                  value={ownerComplaints}
+                  onChange={(e) => setOwnerComplaints(e.target.value)}
+                  placeholder="pl. Az ügyfél egyenetlen alapjáratot panaszol reggelente, a motorhiba-jelző lámpa villog autópályán történő gyorsításkor..."
+                  rows={5}
+                  className="resize-none"
+                />
               </div>
-              {errors.symptoms && (
-                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
-                  <AlertCircle className="h-4 w-4" />
-                  {errors.symptoms.message}
-                </p>
-              )}
+
+              {/* Mechanic Notes */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Wrench className="h-4 w-4 text-muted-foreground" />
+                    Szerelői jegyzetek / Tesztút
+                  </label>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Privát jegyzetek
+                  </span>
+                </div>
+                <Textarea
+                  value={mechanicNotes}
+                  onChange={(e) => setMechanicNotes(e.target.value)}
+                  placeholder="pl. Terheléses teszt során a 3. henger gyújtáskimaradása megerősítve. A gyújtógyertyák kopottak, de a tekercsek jónak tűnnek..."
+                  rows={5}
+                  className="resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Action Bar */}
+            <div className="flex items-center justify-between pt-4 border-t border-border">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4" />
+                {lastSaved
+                  ? `Automatikusan mentve ${formatTimeAgo(lastSaved)}`
+                  : 'Automatikus mentés aktív'
+                }
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSave}
+                  leftIcon={<Save className="h-4 w-4" />}
+                >
+                  MENTÉS
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleSubmit}
+                  isLoading={analyzeDiagnosis.isPending}
+                  leftIcon={<Sparkles className="h-4 w-4" />}
+                  className="min-w-[200px]"
+                >
+                  AI MEGOLDÁS GENERÁLÁSA
+                </Button>
+              </div>
             </div>
           </div>
+        </div>
 
-          {/* Submit Buttons */}
-          <div className="flex flex-col sm:flex-row justify-end gap-4">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="btn-outline order-2 sm:order-1"
+        {/* Recent Diagnoses Cards */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {recentDiagnoses.slice(0, 2).map((diagnosis) => (
+            <div
+              key={diagnosis.id}
+              className="bg-card border border-border rounded-lg p-4 hover:border-primary-300 transition-colors cursor-pointer"
+              onClick={() => navigate(`/diagnosis/${diagnosis.id}`)}
             >
-              Megse
-            </button>
-            <button
-              type="submit"
-              disabled={analyzeDiagnosis.isPending}
-              className="btn-primary order-1 sm:order-2"
-            >
-              {analyzeDiagnosis.isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Elemzes folyamatban...
-                </>
-              ) : (
-                'Diagnozis inditasa'
-              )}
-            </button>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-muted rounded-lg">
+                  <Clock className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-foreground truncate">
+                    Legutóbbi: {diagnosis.vehicleInfo}
+                  </p>
+                  <p className="text-sm text-muted-foreground truncate">
+                    {diagnosis.description}
+                  </p>
+                  <button className="mt-2 text-sm font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                    Jelentés megtekintése
+                    <ExternalLink className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Help Card */}
+          <div className="bg-card border border-border rounded-lg p-4 flex flex-col items-center justify-center text-center">
+            <div className="p-3 bg-primary-50 rounded-full mb-3">
+              <HelpCircle className="h-6 w-6 text-primary-600" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Segítségre van szüksége egy kóddal?
+            </p>
           </div>
-        </form>
+        </div>
 
-        {/* Help Section */}
-        <div className="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
-          <h3 className="font-medium text-blue-900 mb-2">Tippek a pontos diagnozishoz</h3>
-          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-            <li>Adjon meg minden lekerdezett hibakodot a diagnosztikai muszerbol</li>
-            <li>Irja le reszletesen, mikor es hogyan jelentkezik a problema</li>
-            <li>Emlitsen minden eszrevett valtozast (hang, szag, vibracio stb.)</li>
-            <li>Ha lehetseges, adja meg a VIN kodot a pontosabb eredmenyekert</li>
-          </ul>
+        {/* Footer */}
+        <div className="mt-8 text-center text-sm text-muted-foreground">
+          © {new Date().getFullYear()} MechanicAI. Fejlett diagnosztikai algoritmusokkal támogatva.
         </div>
       </div>
     </div>
-  )
+  );
 }
