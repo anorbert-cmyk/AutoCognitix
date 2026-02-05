@@ -31,7 +31,8 @@ COPY . .
 ARG VITE_API_URL
 ARG VITE_APP_VERSION
 
-ENV VITE_API_URL=${VITE_API_URL:-/api}
+# Default to Railway backend URL for production
+ENV VITE_API_URL=${VITE_API_URL:-https://autocognitix-production.up.railway.app}
 ENV VITE_APP_VERSION=${VITE_APP_VERSION:-1.0.0}
 ENV NODE_ENV=production
 
