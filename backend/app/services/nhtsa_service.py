@@ -31,6 +31,7 @@ from tenacity import (
 )
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -368,7 +369,7 @@ class NHTSAService:
         client = await self._get_client()
 
         try:
-            logger.debug(f"Making {method} request to {url} with params {params}")
+            logger.debug(f"Making {method} request to {sanitize_log(url)} with params {sanitize_log(str(params))}")
             response = await client.request(method, url, params=params)
 
             # Check for rate limiting
@@ -426,7 +427,7 @@ class NHTSAService:
             cache = await self._get_cache()
             cached = await cache.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for VIN {vin}")
+                logger.debug(f"Cache hit for VIN {sanitize_log(vin)}")
                 return VINDecodeResult(**json.loads(cached))
 
         # Make API request
@@ -464,11 +465,11 @@ class NHTSAService:
             if use_cache and result.is_valid:
                 await cache.set(cache_key, result.model_dump_json(), self.VIN_CACHE_TTL)
 
-            logger.info(f"Decoded VIN {vin}: {result.make} {result.model} {result.model_year}")
+            logger.info(f"Decoded VIN {sanitize_log(vin)}: {sanitize_log(result.make)} {sanitize_log(result.model)} {result.model_year}")
             return result
 
         except Exception as e:
-            logger.error(f"Failed to decode VIN {vin}: {e}")
+            logger.error(f"Failed to decode VIN {sanitize_log(vin)}: {sanitize_log(str(e))}")
             raise
 
     # =========================================================================
@@ -506,7 +507,7 @@ class NHTSAService:
             cache = await self._get_cache()
             cached = await cache.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for recalls: {make} {model} {year}")
+                logger.debug(f"Cache hit for recalls: {sanitize_log(make)} {sanitize_log(model)} {year}")
                 return [Recall(**r) for r in json.loads(cached)]
 
         # Make API request
@@ -547,11 +548,11 @@ class NHTSAService:
                     self.RECALLS_CACHE_TTL,
                 )
 
-            logger.info(f"Found {len(recalls)} recalls for {make} {model} {year}")
+            logger.info(f"Found {len(recalls)} recalls for {sanitize_log(make)} {sanitize_log(model)} {year}")
             return recalls
 
         except Exception as e:
-            logger.error(f"Failed to get recalls for {make} {model} {year}: {e}")
+            logger.error(f"Failed to get recalls for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}")
             raise
 
     # =========================================================================
@@ -589,7 +590,7 @@ class NHTSAService:
             cache = await self._get_cache()
             cached = await cache.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for complaints: {make} {model} {year}")
+                logger.debug(f"Cache hit for complaints: {sanitize_log(make)} {sanitize_log(model)} {year}")
                 return [Complaint(**c) for c in json.loads(cached)]
 
         # Make API request
@@ -632,11 +633,11 @@ class NHTSAService:
                     self.COMPLAINTS_CACHE_TTL,
                 )
 
-            logger.info(f"Found {len(complaints)} complaints for {make} {model} {year}")
+            logger.info(f"Found {len(complaints)} complaints for {sanitize_log(make)} {sanitize_log(model)} {year}")
             return complaints
 
         except Exception as e:
-            logger.error(f"Failed to get complaints for {make} {model} {year}: {e}")
+            logger.error(f"Failed to get complaints for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}")
             raise
 
     # =========================================================================
@@ -676,7 +677,7 @@ class NHTSAService:
 
         logger.info("NHTSA service closed")
 
-    async def __aenter__(self) -> "NHTSAService":
+    async def __aenter__(self) -> NHTSAService:
         """Async context manager entry."""
         return self
 

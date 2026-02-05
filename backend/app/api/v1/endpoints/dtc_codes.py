@@ -30,6 +30,7 @@ from app.api.v1.schemas.dtc import (
     DTCCreate,
     DTCSearchResult,
 )
+from app.core.log_sanitizer import sanitize_log
 from app.db.postgres.models import DTCCode as DTCCodeModel
 from app.db.postgres.repositories import DTCCodeRepository
 from app.db.postgres.session import get_db
@@ -304,7 +305,7 @@ async def _get_neo4j_relationships(code: str) -> dict[str, Any]:
         logger.warning("Neo4j models not available")
         return {}
     except Exception as e:
-        logger.warning(f"Error fetching Neo4j relationships for {code}: {e}")
+        logger.warning(f"Error fetching Neo4j relationships for {sanitize_log(code)}: {sanitize_log(str(e))}")
         return {}
 
 
@@ -436,7 +437,7 @@ async def search_dtc_codes(
     if not skip_cache:
         cached = await _get_cached_search_results(query, category_filter, limit)
         if cached:
-            logger.debug(f"Cache HIT for search: {query}")
+            logger.debug(f"Cache HIT for search: {sanitize_log(query)}")
             return [DTCSearchResult(**item) for item in cached]
 
     # Check if query looks like a DTC code (starts with P, B, C, or U)
@@ -519,7 +520,7 @@ async def search_dtc_codes(
     if not skip_cache:
         cache_data = [r.model_dump() for r in final_results]
         await _cache_search_results(query, cache_data, category_filter, limit)
-        logger.debug(f"Cached search results for: {query}")
+        logger.debug(f"Cached search results for: {sanitize_log(query)}")
 
     return final_results
 
@@ -645,7 +646,7 @@ async def get_dtc_code_detail(
     if not skip_cache:
         cached = await _get_cached_dtc_detail(cache_key)
         if cached:
-            logger.debug(f"Cache HIT for DTC detail: {code}")
+            logger.debug(f"Cache HIT for DTC detail: {sanitize_log(code)}")
             return DTCCodeDetail(**cached)
 
     # Fetch from PostgreSQL
@@ -668,7 +669,7 @@ async def get_dtc_code_detail(
     # Cache the result
     if not skip_cache:
         await _cache_dtc_detail(cache_key, result.model_dump())
-        logger.debug(f"Cached DTC detail: {code}")
+        logger.debug(f"Cached DTC detail: {sanitize_log(code)}")
 
     return result
 
@@ -750,7 +751,7 @@ async def get_related_codes(
                         results.append(_dtc_model_to_search_result(related_dtc, relevance_score=0.85))
                         existing_codes.add(related_node.code)
     except Exception as e:
-        logger.warning(f"Error fetching Neo4j related codes: {e}")
+        logger.warning(f"Error fetching Neo4j related codes: {sanitize_log(str(e))}")
 
     # If we still need more, find codes in the same category with similar prefix
     if len(results) < limit:
@@ -839,7 +840,7 @@ async def create_dtc_code(
 
     await db.commit()
 
-    logger.info(f"Created DTC code: {dtc.code}")
+    logger.info(f"Created DTC code: {sanitize_log(dtc.code)}")
 
     return DTCCode(
         code=dtc.code,
@@ -923,7 +924,7 @@ async def bulk_import_dtc_codes(
 
         except Exception as e:
             errors.append({"code": dtc_data.code, "error": str(e)})
-            logger.error(f"Error importing DTC {dtc_data.code}: {e}")
+            logger.error(f"Error importing DTC {sanitize_log(dtc_data.code)}: {sanitize_log(str(e))}")
 
     await db.commit()
 

@@ -28,6 +28,7 @@ from app.api.v1.schemas.diagnosis import (
     RepairRecommendation,
     Source,
 )
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import DTCCode
 from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
@@ -114,7 +115,7 @@ class DiagnosisService:
             self._diagnosis_repository = DiagnosisSessionRepository(self.db)
         return self._diagnosis_repository
 
-    async def __aenter__(self) -> "DiagnosisService":
+    async def __aenter__(self) -> DiagnosisService:
         """Async context manager entry."""
         return self
 
@@ -158,8 +159,8 @@ class DiagnosisService:
         """
         diagnosis_id = uuid4()
         logger.info(
-            f"Starting diagnosis {diagnosis_id} for {request.vehicle_make} "
-            f"{request.vehicle_model} {request.vehicle_year}"
+            f"Starting diagnosis {diagnosis_id} for {sanitize_log(request.vehicle_make)} "
+            f"{sanitize_log(request.vehicle_model)} {request.vehicle_year}"
         )
 
         try:
@@ -167,7 +168,7 @@ class DiagnosisService:
             vin_data: VINDecodeResult | None = None
             if request.vin:
                 vin_data = await self._decode_vin(request.vin)
-                logger.info(f"VIN decoded: {vin_data.make} {vin_data.model}")
+                logger.info(f"VIN decoded: {sanitize_log(vin_data.make)} {sanitize_log(vin_data.model)}")
 
             # Step 2: Validate and enrich DTC codes
             dtc_details = await self._validate_and_enrich_dtc_codes(request.dtc_codes)
@@ -175,7 +176,7 @@ class DiagnosisService:
 
             # Step 3: Preprocess Hungarian symptoms
             preprocessed_symptoms = self._preprocess_symptoms(request.symptoms)
-            logger.debug(f"Preprocessed symptoms: {preprocessed_symptoms[:100]}...")
+            logger.debug(f"Preprocessed symptoms: {sanitize_log(preprocessed_symptoms[:100])}...")
 
             # Step 4: Fetch NHTSA recalls and complaints (parallel)
             recalls, complaints = await self._fetch_nhtsa_data(
@@ -224,7 +225,7 @@ class DiagnosisService:
         except DiagnosisServiceError:
             raise
         except Exception as e:
-            logger.error(f"Diagnosis {diagnosis_id} failed: {e}", exc_info=True)
+            logger.error(f"Diagnosis {diagnosis_id} failed: {sanitize_log(str(e))}", exc_info=True)
             raise DiagnosisServiceError(
                 message=f"Diagnosis failed: {e!s}",
                 details={"diagnosis_id": str(diagnosis_id)},
@@ -260,7 +261,7 @@ class DiagnosisService:
             return result
 
         except NHTSAError as e:
-            logger.error(f"NHTSA VIN decode error: {e}")
+            logger.error(f"NHTSA VIN decode error: {sanitize_log(str(e))}")
             raise VINDecodeError(
                 message=f"VIN decoding service error: {e.message}",
                 details={"vin": vin},
@@ -299,7 +300,7 @@ class DiagnosisService:
 
             # Basic format validation
             if not self._is_valid_dtc_format(code_upper):
-                logger.warning(f"Invalid DTC format: {code}")
+                logger.warning(f"Invalid DTC format: {sanitize_log(code)}")
                 continue
 
             # Fetch from database
@@ -309,12 +310,12 @@ class DiagnosisService:
                 validated_codes.append(dtc_detail)
             else:
                 unknown_codes.append(code_upper)
-                logger.info(f"Unknown DTC code (not in database): {code_upper}")
+                logger.info(f"Unknown DTC code (not in database): {sanitize_log(code_upper)}")
 
         if unknown_codes:
             logger.warning(
                 f"Proceeding with {len(unknown_codes)} unknown DTC codes: "
-                f"{', '.join(unknown_codes)}"
+                f"{sanitize_log(', '.join(unknown_codes))}"
             )
 
         return validated_codes
@@ -366,7 +367,7 @@ class DiagnosisService:
         try:
             return preprocess_hungarian(symptoms)
         except Exception as e:
-            logger.warning(f"Symptom preprocessing failed: {e}, using raw text")
+            logger.warning(f"Symptom preprocessing failed: {sanitize_log(str(e))}, using raw text")
             return symptoms
 
     # =========================================================================
@@ -405,17 +406,17 @@ class DiagnosisService:
 
             # Handle exceptions gracefully
             if isinstance(recalls, Exception):
-                logger.warning(f"Failed to fetch recalls: {recalls}")
+                logger.warning(f"Failed to fetch recalls: {sanitize_log(str(recalls))}")
                 recalls = []
 
             if isinstance(complaints, Exception):
-                logger.warning(f"Failed to fetch complaints: {complaints}")
+                logger.warning(f"Failed to fetch complaints: {sanitize_log(str(complaints))}")
                 complaints = []
 
             return recalls, complaints
 
         except Exception as e:
-            logger.error(f"NHTSA data fetch error: {e}")
+            logger.error(f"NHTSA data fetch error: {sanitize_log(str(e))}")
             return [], []
 
     # =========================================================================
@@ -485,7 +486,7 @@ class DiagnosisService:
                 complaints=complaints,
             )
         except Exception as e:
-            logger.error(f"RAG pipeline error: {e}", exc_info=True)
+            logger.error(f"RAG pipeline error: {sanitize_log(str(e))}", exc_info=True)
             return self._fallback_diagnosis(
                 dtc_details=dtc_details,
                 recalls=recalls,
@@ -774,7 +775,7 @@ class DiagnosisService:
             logger.debug(f"Saved diagnosis session {diagnosis_id}")
 
         except Exception as e:
-            logger.error(f"Failed to save diagnosis session: {e}", exc_info=True)
+            logger.error(f"Failed to save diagnosis session: {sanitize_log(str(e))}", exc_info=True)
             # Don't raise - diagnosis should still be returned even if save fails
 
     async def get_diagnosis_by_id(self, diagnosis_id: UUID) -> DiagnosisResponse | None:
@@ -821,7 +822,7 @@ class DiagnosisService:
             )
 
         except Exception as e:
-            logger.error(f"Error retrieving diagnosis {diagnosis_id}: {e}")
+            logger.error(f"Error retrieving diagnosis {diagnosis_id}: {sanitize_log(str(e))}")
             raise DiagnosisServiceError(
                 message=f"Failed to retrieve diagnosis: {e!s}",
                 details={"diagnosis_id": str(diagnosis_id)},
@@ -865,7 +866,7 @@ class DiagnosisService:
             ]
 
         except Exception as e:
-            logger.error(f"Error retrieving user history for {user_id}: {e}")
+            logger.error(f"Error retrieving user history for {user_id}: {sanitize_log(str(e))}")
             raise DiagnosisServiceError(
                 message=f"Failed to retrieve diagnosis history: {e!s}",
                 details={"user_id": str(user_id)},

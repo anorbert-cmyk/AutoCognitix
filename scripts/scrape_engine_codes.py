@@ -249,11 +249,20 @@ class EngineCodesScraper:
                     href = "/" + href
                 links.add(href)
 
-            # Also check for full URLs
-            if "engine-codes.com" in href:
-                match = re.search(r'/([pbcu]\d{4})\.html', href, re.IGNORECASE)
-                if match:
-                    links.add(f"/{match.group(1).lower()}.html")
+            # Also check for full URLs - use secure domain validation
+            # This prevents "attacker-engine-codes.com" from passing validation
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(href)
+                if parsed.netloc:
+                    netloc = parsed.netloc.lower()
+                    allowed_domain = "engine-codes.com"
+                    if netloc == allowed_domain or netloc.endswith("." + allowed_domain):
+                        match = re.search(r'/([pbcu]\d{4})\.html', href, re.IGNORECASE)
+                        if match:
+                            links.add(f"/{match.group(1).lower()}.html")
+            except Exception:
+                pass  # Skip invalid URLs
 
         logger.debug(f"Found {len(links)} code links in index page")
         return links

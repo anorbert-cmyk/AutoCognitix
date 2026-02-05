@@ -139,7 +139,11 @@ def validate_url(url: str) -> bool:
         # Only allow HTTPS to obd-codes.com
         if parsed.scheme not in ("http", "https"):
             return False
-        if not parsed.netloc.endswith("obd-codes.com"):
+        # Secure domain validation - must match exactly or be a proper subdomain
+        # This prevents "attacker-obd-codes.com" from passing validation
+        netloc = parsed.netloc.lower()
+        allowed_domain = "obd-codes.com"
+        if netloc != allowed_domain and not netloc.endswith("." + allowed_domain):
             return False
         # Block any path traversal attempts
         if ".." in parsed.path or "//" in parsed.path[1:]:

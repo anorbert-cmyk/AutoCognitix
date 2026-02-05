@@ -424,8 +424,15 @@ def seed_postgres(dtc_codes: List[Dict[str, Any]]) -> None:
         # Create test user with random password
         created, test_password = seed_postgres_test_user(session)
         if created:
-            logger.info(f"Created test user: test@autocognitix.com")
-            logger.info(f"Test user password (SAVE THIS - only shown once): {test_password}")
+            # Print credentials to stdout only (not to logs) for security
+            print("\n" + "=" * 60)
+            print("TEST USER CREATED")
+            print("=" * 60)
+            print(f"Email: test@autocognitix.com")
+            print(f"Password: {test_password}")
+            print("=" * 60)
+            print("IMPORTANT: Save this password - it will not be shown again!\n")
+            logger.info("Test user created successfully - credentials printed to stdout only")
 
     logger.info("PostgreSQL seeding completed!")
 
