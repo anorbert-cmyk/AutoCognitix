@@ -1,7 +1,7 @@
 """Add comprehensive vehicle schema with engines, platforms, and DTC frequency.
 
-Revision ID: 005_vehicle_comprehensive_schema
-Revises: 004_add_performance_indexes
+Revision ID: 005_vehicle_schema
+Revises: 004_perf_indexes
 Create Date: 2026-02-05 16:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '005_vehicle_comprehensive_schema'
-down_revision: Union[str, None] = '004_add_performance_indexes'
+revision: str = '005_vehicle_schema'
+down_revision: Union[str, None] = '004_perf_indexes'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

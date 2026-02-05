@@ -1,6 +1,6 @@
 """Add vehicle_recalls and vehicle_complaints tables.
 
-Revision ID: 003_add_vehicle_recalls_complaints
+Revision ID: 003_vehicle_recalls
 Revises: 002_add_dtc_sources_column
 Create Date: 2026-02-05 14:00:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '003_add_vehicle_recalls_complaints'
+revision: str = '003_vehicle_recalls'
 down_revision: Union[str, None] = '002_add_dtc_sources_column'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
