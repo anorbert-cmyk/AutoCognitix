@@ -1174,3 +1174,31 @@ git diff
 # Commit with clear message
 git commit -m "feat/fix/chore: clear description"
 ```
+
+## 2026-02-05 - CI/CD és Railway Deployment Lessons
+
+### Docker Image Tag Lowercase
+- **Probléma:** `ghcr.io/user/AutoCognitix/backend:test` invalid - nagybetű a repo névben
+- **Megoldás:** `tr '[:upper:]' '[:lower:]'` a repo név lowercase-re alakításához
+- **Mindig:** Docker tag-eket lowercase-re kell alakítani
+
+### Railway Frontend Builder
+- **Probléma:** Nixpacks builder npm-et keres, de nginx image-ben nincs
+- **Megoldás:** `builder = "DOCKERFILE"` és `dockerfilePath = "Dockerfile.prod"`
+- **railway.toml** konfiguráció fontos
+
+### Dependency Conflict (neomodel + neo4j)
+- **Probléma:** `neomodel 5.3.0 depends on neo4j~=5.19.0`
+- **Megoldás:** `neo4j~=5.19.0` (nem `>=5.17.0`)
+- **Mindig:** Ellenőrizd a transitive dependencies verzióit
+
+### Python 3.9 Compatibility
+- **str | None** → `Optional[str]` (from typing)
+- **StrEnum** → Polyfill: `class StrEnum(str, Enum)`
+- **datetime.UTC** → `timezone.utc`
+- **zip(strict=True)** → `zip()` (nincs strict param Python 3.9-ben)
+
+### Backend-Frontend Kapcsolat
+- **FONTOS:** Ha a backend-et módosítod, ellenőrizd hogy a frontend-et is kell-e!
+- Railway külön service-ként futtatja őket
+- Mindkettőnek saját Dockerfile és railway.toml kell
