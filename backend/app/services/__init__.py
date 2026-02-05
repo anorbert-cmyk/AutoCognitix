@@ -2,7 +2,8 @@
 Services module for AutoCognitix.
 
 This module contains service classes and functions for various
-application functionalities including NLP, embeddings, and external APIs.
+application functionalities including NLP, embeddings, LLM providers,
+RAG pipeline, and external APIs.
 """
 
 from app.services.embedding_service import (
@@ -33,6 +34,22 @@ from app.services.diagnosis_service import (
     get_diagnosis_service,
     get_user_history,
 )
+from app.services.llm_provider import (
+    LLMProviderType,
+    LLMConfig,
+    LLMMessage,
+    LLMResponse,
+    BaseLLMProvider,
+    AnthropicProvider,
+    OpenAIProvider,
+    OllamaProvider,
+    RuleBasedProvider,
+    LLMProviderFactory,
+    get_llm_provider,
+    generate_response as llm_generate_response,
+    is_llm_available,
+    get_current_provider_info,
+)
 from app.services.rag_service import (
     RAGService,
     RAGContext,
@@ -40,11 +57,12 @@ from app.services.rag_service import (
     VehicleInfo,
     RepairRecommendation,
     ConfidenceLevel,
-    LLMProvider,
+    RetrievalSource,
+    RetrievedItem,
+    HybridRanker,
     get_rag_service,
     diagnose,
     get_context,
-    generate_response,
 )
 
 __all__ = [
@@ -73,6 +91,21 @@ __all__ = [
     "get_diagnosis_by_id",
     "get_diagnosis_service",
     "get_user_history",
+    # LLM Provider
+    "LLMProviderType",
+    "LLMConfig",
+    "LLMMessage",
+    "LLMResponse",
+    "BaseLLMProvider",
+    "AnthropicProvider",
+    "OpenAIProvider",
+    "OllamaProvider",
+    "RuleBasedProvider",
+    "LLMProviderFactory",
+    "get_llm_provider",
+    "llm_generate_response",
+    "is_llm_available",
+    "get_current_provider_info",
     # RAG Service
     "RAGService",
     "RAGContext",
@@ -80,9 +113,10 @@ __all__ = [
     "VehicleInfo",
     "RepairRecommendation",
     "ConfidenceLevel",
-    "LLMProvider",
+    "RetrievalSource",
+    "RetrievedItem",
+    "HybridRanker",
     "get_rag_service",
     "diagnose",
     "get_context",
-    "generate_response",
 ]

@@ -148,9 +148,17 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.env.production
 *.pem
 *.key
 secrets/
+
+# ============================================
+# Let's Encrypt / SSL Certificates
+# ============================================
+letsencrypt/
+acme.json
+traefik/acme.json
 
 # ============================================
 # Docker

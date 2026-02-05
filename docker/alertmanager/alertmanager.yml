@@ -1,0 +1,129 @@
+# ============================================
+# AutoCognitix - Alertmanager Configuration
+# Alert routing and notification settings
+# ============================================
+
+global:
+  # Time to wait before sending notifications for a group of alerts
+  resolve_timeout: 5m
+
+  # SMTP settings (configure for production email alerts)
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alertmanager@autocognitix.hu'
+  # smtp_auth_username: 'alertmanager'
+  # smtp_auth_password: ''
+  # smtp_require_tls: true
+
+  # Slack webhook URL (configure for Slack notifications)
+  # slack_api_url: 'https://hooks.slack.com/services/xxx/yyy/zzz'
+
+# Templates for notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration - defines how alerts are grouped and routed
+route:
+  # Default receiver
+  receiver: 'default-receiver'
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity', 'service']
+
+  # Wait time before sending first notification for a group
+  group_wait: 30s
+
+  # Wait time before sending notification about new alerts in a group
+  group_interval: 5m
+
+  # Wait time before re-sending notification for resolved alerts
+  repeat_interval: 4h
+
+  # Child routes for different severities
+  routes:
+    # Critical alerts - faster notification
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true
+
+    # Warning alerts - standard timing
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      group_wait: 1m
+      repeat_interval: 4h
+
+    # Info alerts - batch together
+    - match:
+        severity: info
+      receiver: 'default-receiver'
+      group_wait: 5m
+      repeat_interval: 24h
+
+# Inhibition rules - prevent lower priority alerts when higher priority exist
+inhibit_rules:
+  # Inhibit warning when critical exists for same alert
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service', 'instance']
+
+  # Inhibit info when warning exists
+  - source_match:
+      severity: 'warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'service']
+
+# Receiver configurations
+receivers:
+  # Default receiver - can be configured for email or webhook
+  - name: 'default-receiver'
+    # Webhook example (for custom notification service)
+    # webhook_configs:
+    #   - url: 'http://notification-service:5001/webhook'
+    #     send_resolved: true
+
+  # Critical alerts receiver - multiple notification channels
+  - name: 'critical-receiver'
+    # Email notification for critical alerts
+    # email_configs:
+    #   - to: 'oncall@autocognitix.hu'
+    #     send_resolved: true
+    #     headers:
+    #       Subject: '[CRITICAL] AutoCognitix Alert: {{ .GroupLabels.alertname }}'
+
+    # Slack notification for critical alerts
+    # slack_configs:
+    #   - channel: '#alerts-critical'
+    #     send_resolved: true
+    #     title: '{{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    #     color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+
+    # PagerDuty integration
+    # pagerduty_configs:
+    #   - service_key: '<pagerduty-service-key>'
+    #     send_resolved: true
+
+  # Warning alerts receiver
+  - name: 'warning-receiver'
+    # Slack notification for warnings
+    # slack_configs:
+    #   - channel: '#alerts-warning'
+    #     send_resolved: true
+    #     title: '{{ .GroupLabels.alertname }}'
+    #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    #     color: 'warning'
+
+# Mute time intervals (optional - for maintenance windows)
+# time_intervals:
+#   - name: 'maintenance-window'
+#     time_intervals:
+#       - weekdays: ['saturday', 'sunday']
+#         times:
+#           - start_time: '00:00'
+#             end_time: '06:00'

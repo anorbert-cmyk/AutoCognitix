@@ -1,0 +1,178 @@
+# Dependabot configuration for AutoCognitix
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  # ============================================
+  # Python (pip) dependencies - Backend
+  # ============================================
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Budapest"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "norbertbarna"
+    labels:
+      - "dependencies"
+      - "python"
+      - "backend"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group all minor and patch updates together
+      python-minor-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Security updates should be separate
+      python-security:
+        applies-to: security-updates
+    ignore:
+      # Ignore major version updates for ML libraries (require testing)
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "transformers"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "langchain*"
+        update-types: ["version-update:semver-major"]
+      # Ignore pre-release versions
+      - dependency-name: "*"
+        update-types: ["version-update:semver-prerelease"]
+
+  # ============================================
+  # NPM dependencies - Frontend
+  # ============================================
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Budapest"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "norbertbarna"
+    labels:
+      - "dependencies"
+      - "javascript"
+      - "frontend"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group React ecosystem updates
+      react-ecosystem:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+          - "react-router*"
+      # Group TanStack Query updates
+      tanstack:
+        patterns:
+          - "@tanstack/*"
+      # Group TypeScript and build tools
+      typescript-build:
+        patterns:
+          - "typescript"
+          - "vite"
+          - "@vitejs/*"
+          - "vitest"
+          - "eslint*"
+          - "@typescript-eslint/*"
+      # Group Tailwind CSS updates
+      tailwindcss:
+        patterns:
+          - "tailwindcss"
+          - "postcss"
+          - "autoprefixer"
+      # Minor and patch updates grouped
+      npm-minor-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "react*"
+          - "@tanstack/*"
+          - "typescript"
+          - "vite*"
+          - "eslint*"
+          - "tailwindcss"
+    ignore:
+      # Ignore pre-release versions
+      - dependency-name: "*"
+        update-types: ["version-update:semver-prerelease"]
+
+  # ============================================
+  # GitHub Actions
+  # ============================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Budapest"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "norbertbarna"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "ci-cd"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      # Group all GitHub Actions updates
+      github-actions:
+        patterns:
+          - "*"
+
+  # ============================================
+  # Docker dependencies
+  # ============================================
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Budapest"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "norbertbarna"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "backend"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Budapest"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "norbertbarna"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"

@@ -55,8 +55,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Data paths
-DTC_CODES_PATH = PROJECT_ROOT / "data" / "dtc_codes" / "generic_codes.json"
+# Data paths - use merged file with all codes (3579 codes from multiple sources)
+DTC_CODES_PATH = PROJECT_ROOT / "data" / "dtc_codes" / "all_codes_merged.json"
 
 
 # European vehicle manufacturers (Top 20)
@@ -307,6 +307,7 @@ def seed_postgres_dtc_codes(session: Session, dtc_codes: List[Dict[str, Any]]) -
             possible_causes=code_data.get("possible_causes", []),
             diagnostic_steps=code_data.get("diagnostic_steps", []),
             related_codes=code_data.get("related_codes", []),
+            sources=code_data.get("sources", []),
         )
         session.add(dtc)
         count += 1
@@ -363,8 +364,13 @@ def seed_postgres_vehicle_models(session: Session) -> int:
     return count
 
 
-def seed_postgres_test_user(session: Session) -> bool:
-    """Create test user for development."""
+def seed_postgres_test_user(session: Session) -> tuple[bool, str]:
+    """Create test user for development with a random secure password.
+
+    Returns:
+        Tuple of (created: bool, password: str). Password is only returned if user was created.
+    """
+    import secrets
     from passlib.hash import bcrypt
 
     test_email = "test@autocognitix.com"
@@ -372,9 +378,12 @@ def seed_postgres_test_user(session: Session) -> bool:
     existing = session.query(User).filter_by(email=test_email).first()
     if existing:
         logger.info("Test user already exists")
-        return False
+        return False, ""
 
-    hashed_password = bcrypt.hash("test123")
+    # Security: Generate a random 16-character password for the test user
+    # This ensures no hardcoded credentials exist in the codebase
+    test_password = secrets.token_urlsafe(16)
+    hashed_password = bcrypt.hash(test_password)
 
     user = User(
         email=test_email,
@@ -386,7 +395,7 @@ def seed_postgres_test_user(session: Session) -> bool:
     )
     session.add(user)
     session.commit()
-    return True
+    return True, test_password
 
 
 def seed_postgres(dtc_codes: List[Dict[str, Any]]) -> None:
@@ -412,9 +421,11 @@ def seed_postgres(dtc_codes: List[Dict[str, Any]]) -> None:
         models_count = seed_postgres_vehicle_models(session)
         logger.info(f"Seeded {models_count} vehicle models")
 
-        # Create test user
-        if seed_postgres_test_user(session):
-            logger.info("Created test user: test@autocognitix.com / test123")
+        # Create test user with random password
+        created, test_password = seed_postgres_test_user(session)
+        if created:
+            logger.info(f"Created test user: test@autocognitix.com")
+            logger.info(f"Test user password (SAVE THIS - only shown once): {test_password}")
 
     logger.info("PostgreSQL seeding completed!")
 

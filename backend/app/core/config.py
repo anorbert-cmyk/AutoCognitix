@@ -31,9 +31,10 @@ class Settings(BaseSettings):
     RAILWAY_ENVIRONMENT: Optional[str] = None
     PORT: int = 8000
 
-    # Security
-    SECRET_KEY: str = "development_secret_key_change_in_production"
-    JWT_SECRET_KEY: str = "jwt_secret_key_change_in_production"
+    # Security - IMPORTANT: These MUST be set via environment variables in production
+    # Generate with: openssl rand -hex 32
+    SECRET_KEY: str = ""  # Required - will fail startup if not set
+    JWT_SECRET_KEY: str = ""  # Required - will fail startup if not set
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -58,11 +59,11 @@ class Settings(BaseSettings):
             return [i.strip() for i in v.split(",")]
         return v
 
-    # PostgreSQL
+    # PostgreSQL - Set via environment variables
     POSTGRES_USER: str = "autocognitix"
-    POSTGRES_PASSWORD: str = "autocognitix_dev"
+    POSTGRES_PASSWORD: str = ""  # Required in production
     POSTGRES_DB: str = "autocognitix"
-    DATABASE_URL: str = "postgresql+asyncpg://autocognitix:autocognitix_dev@localhost:5432/autocognitix"
+    DATABASE_URL: str = ""  # Required - set via DATABASE_URL env var
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -76,10 +77,10 @@ class Settings(BaseSettings):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
 
-    # Neo4j
+    # Neo4j - Set via environment variables
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = "autocognitix_dev"
+    NEO4J_PASSWORD: str = ""  # Required in production
 
     # Qdrant
     QDRANT_HOST: str = "localhost"

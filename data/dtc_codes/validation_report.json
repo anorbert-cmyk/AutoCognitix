@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-02-05T12:49:56.204047",
+  "stats": {
+    "Összes kód": 3579,
+    "Egyedi kódok": 3579,
+    "Duplikált kódok": 0,
+    "Fordított kódok": 923,
+    "Fordítás %": "25.8%",
+    "Üres leírások": 0,
+    "Gyanús fordítások": 0,
+    "Érvénytelen formátum": 0,
+    "Kategória eltérések": 0
+  },
+  "error_count": 0,
+  "warning_count": 0,
+  "fixable_count": 0,
+  "errors": [],
+  "warnings": [],
+  "gibberish_translations": []
+}

@@ -604,8 +604,9 @@ class NHTSAService:
 
             complaints = []
             for item in results:
+                odi = item.get("odiNumber")
                 complaint = Complaint(
-                    odinumber=item.get("odiNumber"),
+                    odinumber=str(odi) if odi is not None else None,
                     manufacturer=item.get("manufacturer", make),
                     make=make,
                     model=model,

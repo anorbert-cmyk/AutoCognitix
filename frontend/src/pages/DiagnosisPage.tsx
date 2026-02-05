@@ -1,220 +1,299 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Car, AlertCircle, FileText, Loader2 } from 'lucide-react'
+/**
+ * DiagnosisPage - Main diagnosis form page
+ *
+ * Features:
+ * - VehicleSelector component for vehicle selection
+ * - DTC code autocomplete input
+ * - Symptom description textarea
+ * - Form validation
+ * - API integration for diagnosis analysis
+ */
 
-interface DiagnosisForm {
-  vehicleMake: string
-  vehicleModel: string
-  vehicleYear: string
-  dtcCodes: string
-  symptoms: string
-}
+import { useState, useCallback } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { AlertCircle, FileText, Loader2 } from 'lucide-react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useAnalyzeDiagnosis } from '../services/hooks'
+import { ErrorMessage, DTCAutocomplete } from '../components/ui'
+import VehicleSelector from '../components/VehicleSelector'
+import { ApiError } from '../services/api'
+import { isValidDTCFormat } from '../services/dtcService'
+import { useToast } from '../contexts/ToastContext'
+import type { SelectedVehicle } from '../types/vehicle'
+
+// Form validation schema
+const diagnosisSchema = z.object({
+  symptoms: z
+    .string()
+    .min(10, 'A tunetleiras legalabb 10 karakter kell legyen')
+    .max(2000, 'Maximum 2000 karakter'),
+})
+
+type DiagnosisFormData = z.infer<typeof diagnosisSchema>
 
 export default function DiagnosisPage() {
   const navigate = useNavigate()
-  const [isLoading, setIsLoading] = useState(false)
-  const [form, setForm] = useState<DiagnosisForm>({
-    vehicleMake: '',
-    vehicleModel: '',
-    vehicleYear: '',
-    dtcCodes: '',
-    symptoms: '',
+  const [searchParams] = useSearchParams()
+  const toast = useToast()
+
+  // Get initial DTC code from URL if provided (e.g., from DTCDetailPage link)
+  const initialDtcCode = searchParams.get('dtc')
+
+  // Vehicle state (controlled by VehicleSelector)
+  const [selectedVehicle, setSelectedVehicle] = useState<SelectedVehicle | null>(null)
+  const [vehicleError, setVehicleError] = useState<string | null>(null)
+
+  // DTC codes state - initialize with URL param if available
+  const [dtcCodes, setDtcCodes] = useState<string[]>(
+    initialDtcCode && isValidDTCFormat(initialDtcCode) ? [initialDtcCode.toUpperCase()] : []
+  )
+  const [dtcError, setDtcError] = useState<string | null>(null)
+
+  // Form error state
+  const [submitError, setSubmitError] = useState<ApiError | null>(null)
+
+  // React Hook Form
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm<DiagnosisFormData>({
+    resolver: zodResolver(diagnosisSchema),
+    defaultValues: {
+      symptoms: '',
+    },
   })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
+  // Diagnosis mutation
+  const analyzeDiagnosis = useAnalyzeDiagnosis()
+
+  // Handle vehicle selection change
+  const handleVehicleChange = useCallback((vehicle: SelectedVehicle | null) => {
+    setSelectedVehicle(vehicle)
+    setVehicleError(null)
+  }, [])
+
+  // Validate vehicle selection
+  const validateVehicle = useCallback((): boolean => {
+    if (!selectedVehicle) {
+      setVehicleError('Kerem valasszon jarmut')
+      return false
+    }
+
+    if (!selectedVehicle.make || selectedVehicle.make.trim() === '') {
+      setVehicleError('Gyarto megadasa kotelezo')
+      return false
+    }
+
+    if (!selectedVehicle.model || selectedVehicle.model.trim() === '') {
+      setVehicleError('Modell megadasa kotelezo')
+      return false
+    }
+
+    if (!selectedVehicle.year || selectedVehicle.year < 1900 || selectedVehicle.year > 2030) {
+      setVehicleError('Ervenyes evjarat megadasa kotelezo')
+      return false
+    }
+
+    setVehicleError(null)
+    return true
+  }, [selectedVehicle])
+
+  // Validate DTC codes
+  const validateDTCCodes = useCallback((): boolean => {
+    if (dtcCodes.length === 0) {
+      setDtcError('Legalabb egy DTC kod megadasa kotelezo')
+      return false
+    }
+
+    const invalidCodes = dtcCodes.filter((code) => !isValidDTCFormat(code))
+    if (invalidCodes.length > 0) {
+      setDtcError(`Ervenytelen DTC kodok: ${invalidCodes.join(', ')}`)
+      return false
+    }
+
+    setDtcError(null)
+    return true
+  }, [dtcCodes])
+
+  // Form submission
+  const onSubmit = async (data: DiagnosisFormData) => {
+    // Validate all fields
+    const isVehicleValid = validateVehicle()
+    const isDTCValid = validateDTCCodes()
+
+    if (!isVehicleValid || !isDTCValid) {
+      return
+    }
+
+    setSubmitError(null)
 
     try {
-      // TODO: Implement API call
-      // const response = await api.post('/diagnosis/analyze', form)
-      // navigate(`/diagnosis/${response.data.id}`)
-
-      // Placeholder: simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      navigate('/diagnosis/placeholder-id')
-    } catch (error) {
-      console.error('Diagnosis error:', error)
-    } finally {
-      setIsLoading(false)
+      const result = await analyzeDiagnosis.mutateAsync({
+        vehicleMake: selectedVehicle!.make,
+        vehicleModel: selectedVehicle!.model,
+        vehicleYear: selectedVehicle!.year,
+        vin: selectedVehicle!.vin || undefined,
+        dtcCodes,
+        symptoms: data.symptoms,
+      })
+      toast.success('Diagnozis sikeresen elkeszult!', 'Sikeres elemzes')
+      navigate(`/diagnosis/${result.id}`)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setSubmitError(err)
+        toast.error(err.detail, 'Diagnozis hiba')
+      } else {
+        setSubmitError(new ApiError('Ismeretlen hiba tortent', 500))
+        toast.error('Ismeretlen hiba tortent', 'Hiba')
+      }
     }
   }
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target
-    setForm((prev) => ({ ...prev, [name]: value }))
-  }
-
-  // Sample data for dropdowns
-  const makes = [
-    'Audi', 'BMW', 'Ford', 'Honda', 'Hyundai', 'Kia', 'Mazda',
-    'Mercedes-Benz', 'Nissan', 'Opel', 'Peugeot', 'Renault',
-    'SEAT', 'Škoda', 'Suzuki', 'Toyota', 'Volkswagen', 'Volvo'
-  ]
-
-  const currentYear = new Date().getFullYear()
-  const years = Array.from({ length: 35 }, (_, i) => currentYear - i)
+  const symptomsValue = watch('symptoms')
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+        {/* Page Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Új diagnosztika
+            Uj diagnosztika
           </h1>
           <p className="text-gray-600">
-            Töltse ki az alábbi mezőket a pontos diagnózishoz.
+            Toltse ki az alabbi mezoket a pontos diagnozishoz.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Vehicle Information */}
+        {/* Submit Error */}
+        {submitError && (
+          <ErrorMessage
+            error={submitError}
+            onDismiss={() => setSubmitError(null)}
+            onRetry={
+              analyzeDiagnosis.isError ? () => handleSubmit(onSubmit)() : undefined
+            }
+            className="mb-6"
+          />
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+          {/* Vehicle Selector Card */}
           <div className="card">
-            <div className="card-header">
-              <div className="flex items-center gap-2">
-                <Car className="h-5 w-5 text-primary-600" />
-                <h2 className="card-title text-lg">Jármű adatok</h2>
-              </div>
-            </div>
-            <div className="card-content space-y-4">
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Gyártó *
-                  </label>
-                  <select
-                    name="vehicleMake"
-                    value={form.vehicleMake}
-                    onChange={handleChange}
-                    required
-                    className="input"
-                  >
-                    <option value="">Válasszon...</option>
-                    {makes.map((make) => (
-                      <option key={make} value={make}>
-                        {make}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Modell *
-                  </label>
-                  <input
-                    type="text"
-                    name="vehicleModel"
-                    value={form.vehicleModel}
-                    onChange={handleChange}
-                    required
-                    placeholder="pl. Golf, Focus, Corolla"
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Évjárat *
-                  </label>
-                  <select
-                    name="vehicleYear"
-                    value={form.vehicleYear}
-                    onChange={handleChange}
-                    required
-                    className="input"
-                  >
-                    <option value="">Válasszon...</option>
-                    {years.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+            <div className="card-content">
+              <VehicleSelector
+                value={selectedVehicle || undefined}
+                onChange={handleVehicleChange}
+                required
+                showVINInput
+                error={vehicleError || undefined}
+              />
             </div>
           </div>
 
-          {/* DTC Codes */}
+          {/* DTC Codes Card */}
           <div className="card">
             <div className="card-header">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-5 w-5 text-primary-600" />
-                <h2 className="card-title text-lg">Hibakódok</h2>
+                <h2 className="card-title text-lg">Hibakodok</h2>
               </div>
             </div>
             <div className="card-content">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                DTC kódok *
+                DTC kodok <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                name="dtcCodes"
-                value={form.dtcCodes}
-                onChange={handleChange}
-                required
-                placeholder="pl. P0101, P0171, P0300"
-                className="input"
+              <DTCAutocomplete
+                value={dtcCodes}
+                onChange={(codes) => {
+                  setDtcCodes(codes)
+                  setDtcError(null)
+                }}
+                maxCodes={20}
               />
-              <p className="mt-1 text-sm text-gray-500">
-                Vesszővel elválasztva adja meg a hibakódokat.
-              </p>
+              {dtcError && (
+                <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {dtcError}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Symptoms */}
+          {/* Symptoms Card */}
           <div className="card">
             <div className="card-header">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-primary-600" />
-                <h2 className="card-title text-lg">Tünetek leírása</h2>
+                <h2 className="card-title text-lg">Tunetek leirasa</h2>
               </div>
             </div>
             <div className="card-content">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tapasztalt tünetek *
+                Tapasztalt tunetek <span className="text-red-500">*</span>
               </label>
               <textarea
-                name="symptoms"
-                value={form.symptoms}
-                onChange={handleChange}
-                required
+                {...register('symptoms')}
                 rows={5}
-                placeholder="Írja le részletesen a tapasztalt problémákat. Például: A motor nehezen indul hidegben, egyenetlenül jár alapjáraton, megnövekedett a fogyasztás..."
+                placeholder="Irja le reszletesen a tapasztalt problemakat. Peldaul: A motor nehezen indul hidegben, egyenetlenul jar alapjaraton, megnovekedet a fogyasztas..."
                 className="textarea"
               />
-              <p className="mt-1 text-sm text-gray-500">
-                Minél részletesebb leírást ad, annál pontosabb diagnózist kaphat.
-              </p>
+              <div className="mt-1 flex justify-between">
+                <p className="text-sm text-gray-500">
+                  Minel reszletesebb leirast ad, annal pontosabb diagnozist kaphat.
+                </p>
+                <span className="text-sm text-gray-400">
+                  {symptomsValue?.length || 0}/2000
+                </span>
+              </div>
+              {errors.symptoms && (
+                <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {errors.symptoms.message}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Submit */}
-          <div className="flex justify-end gap-4">
+          {/* Submit Buttons */}
+          <div className="flex flex-col sm:flex-row justify-end gap-4">
             <button
               type="button"
               onClick={() => navigate('/')}
-              className="btn-outline"
+              className="btn-outline order-2 sm:order-1"
             >
-              Mégse
+              Megse
             </button>
             <button
               type="submit"
-              disabled={isLoading}
-              className="btn-primary"
+              disabled={analyzeDiagnosis.isPending}
+              className="btn-primary order-1 sm:order-2"
             >
-              {isLoading ? (
+              {analyzeDiagnosis.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Elemzés folyamatban...
+                  Elemzes folyamatban...
                 </>
               ) : (
-                'Diagnózis indítása'
+                'Diagnozis inditasa'
               )}
             </button>
           </div>
         </form>
+
+        {/* Help Section */}
+        <div className="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <h3 className="font-medium text-blue-900 mb-2">Tippek a pontos diagnozishoz</h3>
+          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+            <li>Adjon meg minden lekerdezett hibakodot a diagnosztikai muszerbol</li>
+            <li>Irja le reszletesen, mikor es hogyan jelentkezik a problema</li>
+            <li>Emlitsen minden eszrevett valtozast (hang, szag, vibracio stb.)</li>
+            <li>Ha lehetseges, adja meg a VIN kodot a pontosabb eredmenyekert</li>
+          </ul>
+        </div>
       </div>
     </div>
   )

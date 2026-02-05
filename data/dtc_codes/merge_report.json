@@ -1,0 +1,29 @@
+{
+  "total_unique_codes": 3579,
+  "total_input_codes": 4527,
+  "sources_processed": [
+    "generic",
+    "klavkarr",
+    "mytrile"
+  ],
+  "codes_by_source": {
+    "generic": 63,
+    "klavkarr": 885,
+    "obd_codes_com": 0,
+    "mytrile": 3579
+  },
+  "codes_per_category": {
+    "powertrain": 1633,
+    "body": 1149,
+    "chassis": 492,
+    "network": 305
+  },
+  "conflicts_resolved": 0,
+  "new_descriptions_added": 3700,
+  "symptoms_combined": 0,
+  "causes_combined": 0,
+  "skipped_invalid": 0,
+  "decisions_count": 3721,
+  "started_at": "2026-02-05T12:01:47.903932+00:00",
+  "completed_at": "2026-02-05T12:01:48.035733+00:00"
+}

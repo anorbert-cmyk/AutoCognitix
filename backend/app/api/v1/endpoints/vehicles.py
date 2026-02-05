@@ -24,6 +24,176 @@ router = APIRouter()
 
 
 # =============================================================================
+# OpenAPI Response Examples
+# =============================================================================
+
+VIN_DECODE_RESPONSES = {
+    200: {
+        "description": "VIN successfully decoded",
+        "content": {
+            "application/json": {
+                "example": {
+                    "vin": "WVWZZZ3CZWE123456",
+                    "make": "Volkswagen",
+                    "model": "Golf",
+                    "year": 2018,
+                    "trim": "Hatchback",
+                    "engine": "2.0L 4-cyl Gasoline",
+                    "transmission": "Automatic",
+                    "drive_type": "FWD",
+                    "body_type": "Hatchback",
+                    "fuel_type": "Gasoline",
+                    "region": "Europe",
+                    "country_of_origin": "Germany"
+                }
+            }
+        }
+    },
+    400: {
+        "description": "Invalid VIN",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "invalid_length": {
+                        "summary": "VIN wrong length",
+                        "value": {"detail": "VIN must be exactly 17 characters"}
+                    },
+                    "invalid_chars": {
+                        "summary": "Invalid characters",
+                        "value": {"detail": "VIN contains invalid characters (I, O, Q are not allowed)"}
+                    }
+                }
+            }
+        }
+    },
+    502: {
+        "description": "NHTSA API error",
+        "content": {
+            "application/json": {
+                "example": {"detail": "NHTSA API error: Service temporarily unavailable"}
+            }
+        }
+    }
+}
+
+MAKES_RESPONSES = {
+    200: {
+        "description": "List of vehicle makes",
+        "content": {
+            "application/json": {
+                "example": [
+                    {"id": "volkswagen", "name": "Volkswagen", "country": "Germany", "logo_url": None},
+                    {"id": "audi", "name": "Audi", "country": "Germany", "logo_url": None},
+                    {"id": "bmw", "name": "BMW", "country": "Germany", "logo_url": None}
+                ]
+            }
+        }
+    }
+}
+
+MODELS_RESPONSES = {
+    200: {
+        "description": "List of vehicle models for the specified make",
+        "content": {
+            "application/json": {
+                "example": [
+                    {
+                        "id": "golf",
+                        "name": "Golf",
+                        "make_id": "volkswagen",
+                        "year_start": 1974,
+                        "year_end": None,
+                        "body_types": []
+                    },
+                    {
+                        "id": "passat",
+                        "name": "Passat",
+                        "make_id": "volkswagen",
+                        "year_start": 1973,
+                        "year_end": None,
+                        "body_types": []
+                    }
+                ]
+            }
+        }
+    }
+}
+
+YEARS_RESPONSES = {
+    200: {
+        "description": "Available vehicle years",
+        "content": {
+            "application/json": {
+                "example": {"years": [2027, 2026, 2025, 2024, 2023, 2022, 2021, 2020]}
+            }
+        }
+    }
+}
+
+RECALLS_RESPONSES = {
+    200: {
+        "description": "List of recalls for the specified vehicle",
+        "content": {
+            "application/json": {
+                "example": [
+                    {
+                        "campaign_number": "24V123000",
+                        "manufacturer": "Volkswagen",
+                        "subject": "Fuel Pump May Fail",
+                        "summary": "The fuel pump may fail causing the engine to stall without warning.",
+                        "consequence": "An engine stall while driving increases the risk of a crash.",
+                        "remedy": "Dealers will replace the fuel pump free of charge.",
+                        "report_received_date": "2024-01-15",
+                        "component": "FUEL SYSTEM"
+                    }
+                ]
+            }
+        }
+    },
+    502: {
+        "description": "NHTSA API error",
+        "content": {
+            "application/json": {
+                "example": {"detail": "NHTSA API error: Failed to fetch recalls"}
+            }
+        }
+    }
+}
+
+COMPLAINTS_RESPONSES = {
+    200: {
+        "description": "List of complaints for the specified vehicle",
+        "content": {
+            "application/json": {
+                "example": [
+                    {
+                        "odi_number": "12345678",
+                        "manufacturer": "Volkswagen",
+                        "crash": False,
+                        "fire": False,
+                        "number_of_injuries": 0,
+                        "number_of_deaths": 0,
+                        "date_of_incident": "2023-06-15",
+                        "date_complaint_filed": "2023-06-20",
+                        "summary": "The vehicle experienced sudden power loss while driving on the highway.",
+                        "components": "ENGINE"
+                    }
+                ]
+            }
+        }
+    },
+    502: {
+        "description": "NHTSA API error",
+        "content": {
+            "application/json": {
+                "example": {"detail": "NHTSA API error: Failed to fetch complaints"}
+            }
+        }
+    }
+}
+
+
+# =============================================================================
 # Response Models for new endpoints
 # =============================================================================
 
@@ -43,7 +213,26 @@ class ComplaintSummary(Complaint):
 # =============================================================================
 
 
-@router.post("/decode-vin", response_model=VINDecodeResponse)
+@router.post(
+    "/decode-vin",
+    response_model=VINDecodeResponse,
+    responses=VIN_DECODE_RESPONSES,
+    summary="Decode VIN",
+    description="""
+**Decode a Vehicle Identification Number (VIN)** to retrieve vehicle details.
+
+Uses the NHTSA vPIC API for decoding.
+
+**VIN Format:**
+- Exactly 17 characters
+- Characters I, O, Q are not allowed
+- Contains manufacturer, vehicle attributes, and serial number
+
+**Example VINs:**
+- `WVWZZZ3CZWE123456` - European Volkswagen
+- `1HGBH41JXMN109186` - North American Honda
+    """,
+)
 async def decode_vin(
     request: VINDecodeRequest,
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
@@ -148,7 +337,21 @@ async def decode_vin(
 # =============================================================================
 
 
-@router.get("/makes", response_model=List[VehicleMake])
+@router.get(
+    "/makes",
+    response_model=List[VehicleMake],
+    responses=MAKES_RESPONSES,
+    summary="Get vehicle makes",
+    description="""
+**Get list of vehicle manufacturers** (makes).
+
+Optionally filter by search term to find specific makes.
+
+**Examples:**
+- `/api/v1/vehicles/makes` - All makes
+- `/api/v1/vehicles/makes?search=volk` - Makes containing "volk"
+    """,
+)
 async def get_vehicle_makes(
     search: Optional[str] = Query(None, min_length=1, description="Search term for filtering makes"),
 ):
@@ -197,7 +400,21 @@ async def get_vehicle_makes(
 # =============================================================================
 
 
-@router.get("/models/{make_id}", response_model=List[VehicleModel])
+@router.get(
+    "/models/{make_id}",
+    response_model=List[VehicleModel],
+    responses=MODELS_RESPONSES,
+    summary="Get vehicle models",
+    description="""
+**Get list of vehicle models** for a specific manufacturer.
+
+Optionally filter by year to get models available for that year.
+
+**Examples:**
+- `/api/v1/vehicles/models/volkswagen` - All VW models
+- `/api/v1/vehicles/models/volkswagen?year=2020` - VW models from 2020
+    """,
+)
 async def get_vehicle_models(
     make_id: str,
     year: Optional[int] = Query(None, ge=1900, le=2030, description="Filter by year"),
@@ -243,7 +460,16 @@ async def get_vehicle_models(
 # =============================================================================
 
 
-@router.get("/years")
+@router.get(
+    "/years",
+    responses=YEARS_RESPONSES,
+    summary="Get available years",
+    description="""
+**Get list of available vehicle years** for selection.
+
+Returns years from 1980 to current year + 1 (for next model year vehicles).
+    """,
+)
 async def get_available_years():
     """
     Get list of available vehicle years.
@@ -264,7 +490,20 @@ async def get_available_years():
 # =============================================================================
 
 
-@router.get("/{make}/{model}/{year}/recalls", response_model=List[Recall])
+@router.get(
+    "/{make}/{model}/{year}/recalls",
+    response_model=List[Recall],
+    responses=RECALLS_RESPONSES,
+    summary="Get vehicle recalls",
+    description="""
+**Get recall information** for a specific vehicle from NHTSA.
+
+Recalls are safety-related defects reported to the National Highway Traffic Safety Administration.
+
+**Example:**
+`/api/v1/vehicles/Volkswagen/Golf/2018/recalls`
+    """,
+)
 async def get_vehicle_recalls(
     make: str = Path(..., description="Vehicle make (e.g., Toyota)"),
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
@@ -308,7 +547,21 @@ async def get_vehicle_recalls(
 # =============================================================================
 
 
-@router.get("/{make}/{model}/{year}/complaints", response_model=List[Complaint])
+@router.get(
+    "/{make}/{model}/{year}/complaints",
+    response_model=List[Complaint],
+    responses=COMPLAINTS_RESPONSES,
+    summary="Get vehicle complaints",
+    description="""
+**Get consumer complaints** for a specific vehicle from NHTSA.
+
+Complaints are consumer-reported issues submitted to NHTSA.
+Includes crash and injury information when reported.
+
+**Example:**
+`/api/v1/vehicles/Volkswagen/Golf/2018/complaints`
+    """,
+)
 async def get_vehicle_complaints(
     make: str = Path(..., description="Vehicle make (e.g., Toyota)"),
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),

@@ -1,0 +1,41 @@
+# ============================================
+# AutoCognitix - Grafana Datasource Provisioning
+# Automatic datasource configuration
+# ============================================
+
+apiVersion: 1
+
+# Delete datasources that are no longer in the config file
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+# Datasource definitions
+datasources:
+  # Prometheus - Primary metrics source
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "30s"
+      httpMethod: "POST"
+      manageAlerts: true
+      incrementalQuerying: true
+      incrementalQueryOverlapWindow: "10m"
+    version: 1
+    orgId: 1
+
+  # Loki - Log aggregation (optional)
+  # - name: Loki
+  #   type: loki
+  #   access: proxy
+  #   url: http://loki:3100
+  #   editable: false
+  #   jsonData:
+  #     maxLines: 1000
+  #   version: 1
+  #   orgId: 1

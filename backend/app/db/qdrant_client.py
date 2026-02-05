@@ -1,14 +1,21 @@
 """
-Qdrant vector database client and utilities.
+Qdrant vector database client and utilities with comprehensive error handling.
+
+This module provides a service class for interacting with Qdrant vector database,
+supporting both local and cloud deployments with Hungarian error messages.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.exceptions import (
+    QdrantException,
+    QdrantConnectionException,
+)
 
 logger = get_logger(__name__)
 
@@ -16,10 +23,17 @@ logger = get_logger(__name__)
 class QdrantService:
     """Service for interacting with Qdrant vector database."""
 
-    # Collection names
-    DTC_COLLECTION = "dtc_embeddings"
-    SYMPTOM_COLLECTION = "symptom_embeddings"
-    ISSUE_COLLECTION = "known_issue_embeddings"
+    # Collection names - Hungarian versions with huBERT embeddings (768-dim)
+    DTC_COLLECTION = "dtc_embeddings_hu"
+    SYMPTOM_COLLECTION = "symptom_embeddings_hu"
+    COMPONENT_COLLECTION = "component_embeddings_hu"
+    REPAIR_COLLECTION = "repair_embeddings_hu"
+    ISSUE_COLLECTION = "known_issue_embeddings_hu"
+
+    # Legacy collection names (English, for backwards compatibility)
+    DTC_COLLECTION_LEGACY = "dtc_embeddings"
+    SYMPTOM_COLLECTION_LEGACY = "symptom_embeddings"
+    ISSUE_COLLECTION_LEGACY = "known_issue_embeddings"
 
     def __init__(self):
         """Initialize Qdrant client."""
@@ -44,15 +58,18 @@ class QdrantService:
     async def initialize_collections(self) -> None:
         """Initialize all required collections."""
         collections = [
-            (self.DTC_COLLECTION, "DTC code embeddings"),
-            (self.SYMPTOM_COLLECTION, "Symptom text embeddings"),
-            (self.ISSUE_COLLECTION, "Known issue embeddings"),
+            (self.DTC_COLLECTION, "DTC code embeddings (Hungarian huBERT, 768-dim)"),
+            (self.SYMPTOM_COLLECTION, "Symptom text embeddings (Hungarian huBERT, 768-dim)"),
+            (self.COMPONENT_COLLECTION, "Vehicle component embeddings (Hungarian huBERT, 768-dim)"),
+            (self.REPAIR_COLLECTION, "Repair procedure embeddings (Hungarian huBERT, 768-dim)"),
+            (self.ISSUE_COLLECTION, "Known issue embeddings (Hungarian huBERT, 768-dim)"),
         ]
 
         for collection_name, description in collections:
             await self._create_collection_if_not_exists(collection_name)
+            logger.debug(f"  - {collection_name}: {description}")
 
-        logger.info("Qdrant collections initialized")
+        logger.info(f"Qdrant collections initialized ({len(collections)} collections)")
 
     async def _create_collection_if_not_exists(self, collection_name: str) -> None:
         """Create a collection if it doesn't exist."""
@@ -72,9 +89,25 @@ class QdrantService:
             else:
                 logger.info(f"Collection already exists: {collection_name}")
 
+        except ConnectionError as e:
+            logger.error(
+                f"Qdrant connection error while creating collection {collection_name}",
+                extra={"error_type": type(e).__name__, "error_message": str(e)},
+            )
+            raise QdrantConnectionException(
+                message="Nem sikerult csatlakozni a Qdrant adatbazishoz.",
+                original_error=e,
+            )
         except Exception as e:
-            logger.error(f"Error creating collection {collection_name}: {e}")
-            raise
+            logger.error(
+                f"Error creating collection {collection_name}",
+                extra={"error_type": type(e).__name__, "error_message": str(e)},
+            )
+            raise QdrantException(
+                message="Qdrant vektor adatbazis hiba.",
+                details={"collection": collection_name},
+                original_error=e,
+            )
 
     async def upsert_vectors(
         self,
@@ -150,16 +183,36 @@ class QdrantService:
         if score_threshold:
             search_params["score_threshold"] = score_threshold
 
-        results = self.client.search(**search_params)
+        try:
+            results = self.client.search(**search_params)
 
-        return [
-            {
-                "id": result.id,
-                "score": result.score,
-                "payload": result.payload,
-            }
-            for result in results
-        ]
+            return [
+                {
+                    "id": result.id,
+                    "score": result.score,
+                    "payload": result.payload,
+                }
+                for result in results
+            ]
+        except ConnectionError as e:
+            logger.error(
+                f"Qdrant connection error during search in {collection_name}",
+                extra={"error_type": type(e).__name__, "error_message": str(e)},
+            )
+            raise QdrantConnectionException(
+                message="Nem sikerult csatlakozni a Qdrant adatbazishoz.",
+                original_error=e,
+            )
+        except Exception as e:
+            logger.error(
+                f"Qdrant search error in {collection_name}",
+                extra={"error_type": type(e).__name__, "error_message": str(e)},
+            )
+            raise QdrantException(
+                message="Vektor kereses sikertelen.",
+                details={"collection": collection_name},
+                original_error=e,
+            )
 
     async def search_dtc(
         self,
@@ -221,12 +274,68 @@ class QdrantService:
             filter_conditions=filter_conditions if filter_conditions else None,
         )
 
+    async def search_components(
+        self,
+        query_vector: List[float],
+        limit: int = 10,
+        system: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Search for similar vehicle components.
+
+        Args:
+            query_vector: Query embedding vector
+            limit: Maximum number of results
+            system: Filter by vehicle system (engine, transmission, etc.)
+
+        Returns:
+            List of similar components with scores
+        """
+        filter_conditions = {}
+        if system:
+            filter_conditions["system"] = system
+
+        return await self.search(
+            collection_name=self.COMPONENT_COLLECTION,
+            query_vector=query_vector,
+            limit=limit,
+            filter_conditions=filter_conditions if filter_conditions else None,
+        )
+
+    async def search_repairs(
+        self,
+        query_vector: List[float],
+        limit: int = 10,
+        difficulty: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Search for similar repair procedures.
+
+        Args:
+            query_vector: Query embedding vector
+            limit: Maximum number of results
+            difficulty: Filter by difficulty level (beginner, intermediate, advanced, professional)
+
+        Returns:
+            List of similar repairs with scores
+        """
+        filter_conditions = {}
+        if difficulty:
+            filter_conditions["difficulty"] = difficulty
+
+        return await self.search(
+            collection_name=self.REPAIR_COLLECTION,
+            query_vector=query_vector,
+            limit=limit,
+            filter_conditions=filter_conditions if filter_conditions else None,
+        )
+
     async def delete_collection(self, collection_name: str) -> None:
         """Delete a collection."""
         self.client.delete_collection(collection_name=collection_name)
         logger.info(f"Deleted collection: {collection_name}")
 
-    def get_collection_info(self, collection_name: str) -> dict:
+    def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """Get information about a collection."""
         info = self.client.get_collection(collection_name=collection_name)
         return {

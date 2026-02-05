@@ -1,32 +1,57 @@
 """
 RAG (Retrieval-Augmented Generation) Service for AutoCognitix.
 
-This module provides Hungarian vehicle diagnostic RAG functionality using:
-- LangChain for LLM orchestration
-- Qdrant for vector similarity search
-- Neo4j for graph-based knowledge enrichment
-- Hungarian embedding service for semantic search
+This module provides a complete Hungarian vehicle diagnostic RAG pipeline:
+- Multi-source retrieval (Qdrant vectors, Neo4j graph, PostgreSQL text search)
+- Hybrid ranking combining semantic and keyword search
+- LLM provider abstraction (Anthropic, OpenAI, Ollama, rule-based fallback)
+- Hungarian language prompt templates
+- Response parsing and confidence scoring
+- Async processing with caching
+
+Author: AutoCognitix Team
 """
 
 import asyncio
+import hashlib
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
-from langchain.schema import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from sqlalchemy import select, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.neo4j_models import get_diagnostic_path, DTCNode, VehicleNode
 from app.db.qdrant_client import qdrant_client, QdrantService
+from app.db.postgres.models import DTCCode, KnownIssue
 from app.services.embedding_service import (
     embed_text,
     embed_batch,
     get_embedding_service,
+    preprocess_hungarian,
+)
+from app.services.llm_provider import (
+    LLMProviderType,
+    LLMConfig,
+    LLMResponse,
+    get_llm_provider,
+    is_llm_available,
+)
+from app.prompts.diagnosis_hu import (
+    SYSTEM_PROMPT_HU,
+    DiagnosisPromptContext,
+    build_diagnosis_prompt,
+    parse_diagnosis_response,
+    ParsedDiagnosisResponse,
+    format_dtc_context,
+    format_symptom_context,
+    format_repair_context,
+    format_recall_context,
+    generate_rule_based_diagnosis,
 )
 
 logger = get_logger(__name__)
@@ -37,19 +62,21 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-class LLMProvider(str, Enum):
-    """Supported LLM providers."""
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    OLLAMA = "ollama"
-
-
 class ConfidenceLevel(str, Enum):
     """Confidence levels for diagnosis."""
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
     UNKNOWN = "unknown"
+
+
+class RetrievalSource(str, Enum):
+    """Sources for context retrieval."""
+    QDRANT_DTC = "qdrant_dtc"
+    QDRANT_SYMPTOM = "qdrant_symptom"
+    NEO4J_GRAPH = "neo4j_graph"
+    POSTGRES_TEXT = "postgres_text"
+    NHTSA = "nhtsa"
 
 
 @dataclass
@@ -71,6 +98,62 @@ class VehicleInfo:
             "engine_code": self.engine_code,
             "mileage_km": self.mileage_km,
         }
+
+
+@dataclass
+class RetrievedItem:
+    """Item retrieved from any source."""
+    content: Dict[str, Any]
+    source: RetrievalSource
+    score: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RAGContext:
+    """Context assembled for RAG generation."""
+    dtc_items: List[RetrievedItem] = field(default_factory=list)
+    symptom_items: List[RetrievedItem] = field(default_factory=list)
+    graph_items: List[RetrievedItem] = field(default_factory=list)
+    text_items: List[RetrievedItem] = field(default_factory=list)
+    recall_items: List[RetrievedItem] = field(default_factory=list)
+
+    # Formatted context strings
+    dtc_context: str = ""
+    symptom_context: str = ""
+    repair_context: str = ""
+    recall_context: str = ""
+
+    # Graph data for structured access
+    graph_data: Dict[str, Any] = field(default_factory=dict)
+
+    def get_all_items(self) -> List[RetrievedItem]:
+        """Get all retrieved items from all sources."""
+        return (
+            self.dtc_items +
+            self.symptom_items +
+            self.graph_items +
+            self.text_items +
+            self.recall_items
+        )
+
+    def to_formatted_string(self) -> str:
+        """Format all context for LLM prompt."""
+        sections = []
+
+        if self.dtc_context:
+            sections.append(f"## DTC Kod Informaciok:\n{self.dtc_context}")
+
+        if self.symptom_context:
+            sections.append(f"## Hasonlo Tunetek:\n{self.symptom_context}")
+
+        if self.repair_context:
+            sections.append(f"## Kapcsolodo Javitasok:\n{self.repair_context}")
+
+        if self.recall_context:
+            sections.append(f"## Visszahivasok es Panaszok:\n{self.recall_context}")
+
+        return "\n\n".join(sections) if sections else "Nincs elerheto kontextus."
 
 
 @dataclass
@@ -99,151 +182,162 @@ class DiagnosisResult:
     confidence: ConfidenceLevel
     confidence_score: float  # 0.0 - 1.0
 
-    # Recommendations
+    # Structured results
+    probable_causes: List[Dict[str, Any]] = field(default_factory=list)
     repair_recommendations: List[RepairRecommendation] = field(default_factory=list)
     safety_warnings: List[str] = field(default_factory=list)
+    diagnostic_steps: List[str] = field(default_factory=list)
 
     # Context used
     similar_cases: List[Dict[str, Any]] = field(default_factory=list)
     related_dtc_info: List[Dict[str, Any]] = field(default_factory=list)
+    sources: List[Dict[str, Any]] = field(default_factory=list)
 
     # Metadata
     generated_at: datetime = field(default_factory=datetime.utcnow)
     model_used: str = ""
+    provider_used: str = ""
     processing_time_ms: int = 0
-
-
-@dataclass
-class RAGContext:
-    """Context assembled for RAG generation."""
-    dtc_context: List[Dict[str, Any]] = field(default_factory=list)
-    symptom_context: List[Dict[str, Any]] = field(default_factory=list)
-    graph_context: Dict[str, Any] = field(default_factory=dict)
-    vehicle_specific: Dict[str, Any] = field(default_factory=dict)
-    recalls: List[Dict[str, Any]] = field(default_factory=list)
-
-    def to_formatted_string(self) -> str:
-        """Format context for LLM prompt."""
-        sections = []
-
-        # DTC context
-        if self.dtc_context:
-            dtc_section = "## Kapcsolodo DTC informaciok:\n"
-            for dtc in self.dtc_context:
-                dtc_section += f"- **{dtc.get('code', 'N/A')}**: {dtc.get('description', 'N/A')}\n"
-                dtc_section += f"  Sulyossag: {dtc.get('severity', 'N/A')}, Kategoria: {dtc.get('category', 'N/A')}\n"
-            sections.append(dtc_section)
-
-        # Symptom context
-        if self.symptom_context:
-            symptom_section = "## Hasonlo tunetek korabbi esetekbol:\n"
-            for idx, symptom in enumerate(self.symptom_context[:5], 1):
-                symptom_section += f"{idx}. {symptom.get('description', 'N/A')} "
-                symptom_section += f"(hasonlosag: {symptom.get('score', 0):.2%})\n"
-            sections.append(symptom_section)
-
-        # Graph context (components, repairs)
-        if self.graph_context:
-            if self.graph_context.get("components"):
-                comp_section = "## Erintett komponensek:\n"
-                for comp in self.graph_context["components"]:
-                    comp_section += f"- {comp.get('name', 'N/A')} ({comp.get('system', 'N/A')})\n"
-                sections.append(comp_section)
-
-            if self.graph_context.get("repairs"):
-                repair_section = "## Lehetseges javitasok:\n"
-                for repair in self.graph_context["repairs"]:
-                    repair_section += f"- **{repair.get('name', 'N/A')}**\n"
-                    repair_section += f"  Nehezseg: {repair.get('difficulty', 'N/A')}, "
-                    repair_section += f"Ido: {repair.get('estimated_time_minutes', 'N/A')} perc\n"
-                    if repair.get("parts"):
-                        repair_section += f"  Alkatreszek: {', '.join(p.get('name', '') for p in repair['parts'])}\n"
-                sections.append(repair_section)
-
-        # Recalls
-        if self.recalls:
-            recall_section = "## Aktiv visszahivasok:\n"
-            for recall in self.recalls:
-                recall_section += f"- {recall.get('component', 'N/A')}: {recall.get('summary', 'N/A')[:100]}...\n"
-            sections.append(recall_section)
-
-        return "\n".join(sections) if sections else "Nincs elérhető kontextus."
+    used_fallback: bool = False
 
 
 # =============================================================================
-# Hungarian Prompt Templates
+# Hybrid Ranking
 # =============================================================================
 
 
-HUNGARIAN_DIAGNOSIS_TEMPLATE = """Te egy tapasztalt magyar gepjarmu-diagnosztikai szakerto vagy.
-A feladatod, hogy alapos es ertelmezheto diagnosztikai elemzest adj a jarmu problemairol.
+class HybridRanker:
+    """
+    Hybrid ranking combining multiple retrieval sources.
 
-## Jarmu adatok:
-- Gyarto: {make}
-- Modell: {model}
-- Evjarat: {year}
-- Kilometerora: {mileage_km} km
-- Motorkod: {engine_code}
-- VIN: {vin}
+    Implements Reciprocal Rank Fusion (RRF) for combining
+    semantic similarity scores with keyword match scores.
+    """
 
-## Bejelentett hibakodok (DTC):
-{dtc_codes}
+    def __init__(self, k: int = 60):
+        """
+        Initialize the hybrid ranker.
 
-## Ugyfel altal leirt tunetek:
-{symptoms}
+        Args:
+            k: RRF parameter (higher = more weight to lower ranks)
+        """
+        self.k = k
 
-## Kapcsolodo informaciok az adatbazisbol:
-{context}
+    def reciprocal_rank_fusion(
+        self,
+        ranked_lists: List[List[RetrievedItem]],
+        weights: Optional[List[float]] = None,
+    ) -> List[RetrievedItem]:
+        """
+        Combine multiple ranked lists using RRF.
 
----
+        Args:
+            ranked_lists: List of ranked item lists from different sources.
+            weights: Optional weights for each list (default: equal weights).
 
-Kerlek, keszits reszletes diagnosztikai elemzest az alabbi struktura szerint:
+        Returns:
+            Combined and re-ranked list of items.
+        """
+        if not ranked_lists:
+            return []
 
-### 1. OSSZEFOGLALO
-Rovid, erthetoo osszefoglaloja a problemanak (max 2-3 mondat).
+        if weights is None:
+            weights = [1.0] * len(ranked_lists)
 
-### 2. LEHETSEGES OKOK
-Sorold fel a lehetseges hibaokok-at valoszinuseguk sorrendjeben:
-1. [Legvaloszinubb ok] - [magyarazat]
-2. [Masodik legvaloszinubb ok] - [magyarazat]
-3. stb.
+        # Calculate RRF scores
+        item_scores: Dict[str, float] = {}
+        item_objects: Dict[str, RetrievedItem] = {}
 
-### 3. JAVASOLT ELLENORZESEK
-Milyen diagnosztikai lepeseket kell elvegezni a pontos hibaokok meghatarozasahoz:
-1. [Ellenorzes 1]
-2. [Ellenorzes 2]
-stb.
+        for weight, ranked_list in zip(weights, ranked_lists):
+            for rank, item in enumerate(ranked_list, 1):
+                # Create unique key for item
+                item_key = self._get_item_key(item)
 
-### 4. JAVITASI JAVASLATOK
-Ajanlott javitasi muveletek prioritas sorrendben:
-- [Javitas 1]: [becsult koltseg es munkaido]
-- [Javitas 2]: [becsult koltseg es munkaido]
+                # RRF score formula: 1 / (k + rank)
+                rrf_score = weight * (1 / (self.k + rank))
 
-### 5. BIZTONSAGI FIGYELMEZTETESEK
-Ha vannak biztonsagi kockazatok, sorold fel oket.
+                if item_key in item_scores:
+                    item_scores[item_key] += rrf_score
+                else:
+                    item_scores[item_key] = rrf_score
+                    item_objects[item_key] = item
 
-### 6. MEGJEGYZESEK
-Egyeb fontos informaciok, tanacs a jarmu tulajdonosnak.
+        # Sort by combined score
+        sorted_keys = sorted(item_scores.keys(), key=lambda k: item_scores[k], reverse=True)
 
-Valaszolj magyarul, szakmailag pontosan, de erthetoen a laikusok szamara is!"""
+        # Update item scores and return
+        result = []
+        for key in sorted_keys:
+            item = item_objects[key]
+            item.score = item_scores[key]
+            result.append(item)
+
+        return result
+
+    def _get_item_key(self, item: RetrievedItem) -> str:
+        """Generate unique key for an item."""
+        content_str = str(item.content)
+        return hashlib.md5(content_str.encode()).hexdigest()
+
+    def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
+        """Normalize scores to 0-1 range."""
+        if not items:
+            return items
+
+        max_score = max(item.score for item in items)
+        min_score = min(item.score for item in items)
+
+        if max_score == min_score:
+            for item in items:
+                item.score = 1.0
+        else:
+            for item in items:
+                item.score = (item.score - min_score) / (max_score - min_score)
+
+        return items
 
 
-CONFIDENCE_ASSESSMENT_TEMPLATE = """Ertekeld a kovetkezo diagnosztikai kontextus megbizhatosagat 0 es 1 kozotti skalan:
+# =============================================================================
+# Context Cache
+# =============================================================================
 
-Kontextus:
-- DTC kodok szama: {dtc_count}
-- Talalat a DTC adatbazisban: {dtc_matches}
-- Hasonlo tunetek szama: {symptom_matches}
-- Graf kapcsolatok szama: {graph_connections}
-- Jarmu-specifikus adatok: {vehicle_specific}
 
-Valaszolj CSAK egy szammal 0.0 es 1.0 kozott, ahol:
-- 0.0-0.3: Alacsony megbizhatosag (kevés vagy ellentmondásos adat)
-- 0.3-0.6: Kozepes megbizhatosag (reszleges egyezes)
-- 0.6-0.8: Jo megbizhatosag (tobb forras egyezik)
-- 0.8-1.0: Magas megbizhatosag (erős egyezés több forrásból)
+class ContextCache:
+    """Simple in-memory cache for retrieval results."""
 
-Konfidencia score:"""
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 300):
+        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+
+    def _make_key(self, *args) -> str:
+        """Create cache key from arguments."""
+        return hashlib.md5(str(args).encode()).hexdigest()
+
+    def get(self, *args) -> Optional[Any]:
+        """Get item from cache if not expired."""
+        key = self._make_key(*args)
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp < self.ttl_seconds:
+                return value
+            else:
+                del self._cache[key]
+        return None
+
+    def set(self, value: Any, *args) -> None:
+        """Set item in cache."""
+        if len(self._cache) >= self.max_size:
+            # Remove oldest entry
+            oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][1])
+            del self._cache[oldest_key]
+
+        key = self._make_key(*args)
+        self._cache[key] = (value, time.time())
+
+    def clear(self) -> None:
+        """Clear the cache."""
+        self._cache.clear()
 
 
 # =============================================================================
@@ -256,17 +350,19 @@ class RAGService:
     RAG (Retrieval-Augmented Generation) Service for vehicle diagnostics.
 
     Features:
-    - Multi-source context retrieval (Qdrant vectors, Neo4j graph)
+    - Multi-source context retrieval (Qdrant, Neo4j, PostgreSQL)
+    - Hybrid ranking with Reciprocal Rank Fusion
     - Configurable LLM backend (Anthropic, OpenAI, Ollama)
+    - Rule-based fallback when no LLM available
     - Hungarian language prompt templates
-    - Confidence scoring
-    - Async processing
+    - Confidence scoring based on retrieval quality
+    - Async processing with caching
     """
 
     _instance: Optional["RAGService"] = None
 
     def __new__(cls) -> "RAGService":
-        """Singleton pattern to reuse LLM connections."""
+        """Singleton pattern to reuse connections."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -278,55 +374,17 @@ class RAGService:
             return
 
         self._initialized = True
-        self._llm = None
-        self._embedding_service = None
         self._qdrant: QdrantService = qdrant_client
+        self._embedding_service = None
+        self._ranker = HybridRanker()
+        self._cache = ContextCache()
+        self._db_session: Optional[AsyncSession] = None
 
-        logger.info(f"RAGService initialized with LLM provider: {settings.LLM_PROVIDER}")
+        logger.info("RAGService initialized")
 
-    def _get_llm(self):
-        """Get or create LLM instance based on configuration."""
-        if self._llm is not None:
-            return self._llm
-
-        provider = LLMProvider(settings.LLM_PROVIDER.lower())
-
-        if provider == LLMProvider.ANTHROPIC:
-            from langchain_anthropic import ChatAnthropic
-
-            self._llm = ChatAnthropic(
-                model=settings.ANTHROPIC_MODEL,
-                anthropic_api_key=settings.ANTHROPIC_API_KEY,
-                temperature=0.3,
-                max_tokens=4096,
-            )
-            logger.info(f"Using Anthropic model: {settings.ANTHROPIC_MODEL}")
-
-        elif provider == LLMProvider.OPENAI:
-            from langchain_openai import ChatOpenAI
-
-            self._llm = ChatOpenAI(
-                model=settings.OPENAI_MODEL,
-                openai_api_key=settings.OPENAI_API_KEY,
-                temperature=0.3,
-                max_tokens=4096,
-            )
-            logger.info(f"Using OpenAI model: {settings.OPENAI_MODEL}")
-
-        elif provider == LLMProvider.OLLAMA:
-            from langchain_community.llms import Ollama
-
-            self._llm = Ollama(
-                model=settings.OLLAMA_MODEL,
-                base_url=settings.OLLAMA_BASE_URL,
-                temperature=0.3,
-            )
-            logger.info(f"Using Ollama model: {settings.OLLAMA_MODEL}")
-
-        else:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
-
-        return self._llm
+    def set_db_session(self, session: AsyncSession) -> None:
+        """Set the database session for PostgreSQL queries."""
+        self._db_session = session
 
     def _get_embedding_service(self):
         """Get embedding service instance."""
@@ -335,274 +393,380 @@ class RAGService:
         return self._embedding_service
 
     # =========================================================================
-    # Context Retrieval
+    # Retrieval Layer
     # =========================================================================
 
-    async def get_context(
+    async def retrieve_from_qdrant(
         self,
         query: str,
+        collection: str,
         top_k: int = 10,
-        collection_name: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        score_threshold: float = 0.5,
+    ) -> List[RetrievedItem]:
         """
-        Retrieve relevant context from Qdrant vector store.
+        Retrieve items from Qdrant vector store.
 
         Args:
-            query: Search query text
-            top_k: Number of results to return
-            collection_name: Specific collection to search (default: search all)
-            filters: Optional filter conditions
+            query: Search query text.
+            collection: Qdrant collection name.
+            top_k: Number of results to return.
+            filters: Optional filter conditions.
+            score_threshold: Minimum similarity score.
 
         Returns:
-            List of matching documents with scores
+            List of RetrievedItem from Qdrant.
         """
+        # Check cache
+        cached = self._cache.get("qdrant", collection, query, filters)
+        if cached is not None:
+            return cached
+
         # Generate embedding for query
         query_embedding = embed_text(query, preprocess=True)
 
-        results = []
-
-        # Determine which collections to search
-        if collection_name:
-            collections = [collection_name]
-        else:
-            collections = [
-                QdrantService.DTC_COLLECTION,
-                QdrantService.SYMPTOM_COLLECTION,
-                QdrantService.ISSUE_COLLECTION,
-            ]
-
-        # Search each collection
-        for coll in collections:
-            try:
-                search_results = await self._qdrant.search(
-                    collection_name=coll,
-                    query_vector=query_embedding,
-                    limit=top_k,
-                    filter_conditions=filters,
-                    score_threshold=0.5,  # Minimum similarity threshold
-                )
-
-                for result in search_results:
-                    result["collection"] = coll
-                    results.append(result)
-
-            except Exception as e:
-                logger.warning(f"Error searching collection {coll}: {e}")
-                continue
-
-        # Sort by score and limit
-        results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        return results[:top_k]
-
-    async def _get_dtc_context(
-        self,
-        dtc_codes: List[str],
-        vehicle_make: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve context for specific DTC codes."""
-        context = []
-
-        for code in dtc_codes:
-            # Search Qdrant for similar DTCs
-            query_text = f"DTC hibakod {code}"
-            embedding = embed_text(query_text)
-
-            try:
-                results = await self._qdrant.search_dtc(
-                    query_vector=embedding,
-                    limit=5,
-                )
-
-                for result in results:
-                    payload = result.get("payload", {})
-                    context.append({
-                        "code": payload.get("code", code),
-                        "description": payload.get("description_hu") or payload.get("description", ""),
-                        "severity": payload.get("severity", "unknown"),
-                        "category": payload.get("category", "unknown"),
-                        "score": result.get("score", 0),
-                    })
-
-            except Exception as e:
-                logger.warning(f"Error getting DTC context for {code}: {e}")
-
-            # Also get graph context from Neo4j
-            try:
-                graph_data = await get_diagnostic_path(code)
-                if graph_data:
-                    context.append({
-                        "code": code,
-                        "description": graph_data.get("dtc", {}).get("description", ""),
-                        "severity": graph_data.get("dtc", {}).get("severity", ""),
-                        "symptoms": graph_data.get("symptoms", []),
-                        "components": graph_data.get("components", []),
-                        "repairs": graph_data.get("repairs", []),
-                        "source": "neo4j_graph",
-                    })
-            except Exception as e:
-                logger.warning(f"Error getting graph context for {code}: {e}")
-
-        return context
-
-    async def _get_symptom_context(
-        self,
-        symptoms: str,
-        vehicle_make: Optional[str] = None,
-        top_k: int = 5,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve context for symptom description."""
-        if not symptoms or not symptoms.strip():
-            return []
-
-        embedding = embed_text(symptoms, preprocess=True)
-
         try:
-            results = await self._qdrant.search_similar_symptoms(
-                query_vector=embedding,
+            results = await self._qdrant.search(
+                collection_name=collection,
+                query_vector=query_embedding,
                 limit=top_k,
-                vehicle_make=vehicle_make,
+                filter_conditions=filters,
+                score_threshold=score_threshold,
             )
 
-            context = []
+            items = []
             for result in results:
-                payload = result.get("payload", {})
-                context.append({
-                    "description": payload.get("description", ""),
-                    "related_dtc": payload.get("related_dtc", []),
-                    "vehicle_make": payload.get("vehicle_make", ""),
-                    "resolution": payload.get("resolution", ""),
-                    "score": result.get("score", 0),
-                })
+                source = (RetrievalSource.QDRANT_DTC
+                         if collection == QdrantService.DTC_COLLECTION
+                         else RetrievalSource.QDRANT_SYMPTOM)
 
-            return context
+                items.append(RetrievedItem(
+                    content=result.get("payload", {}),
+                    source=source,
+                    score=result.get("score", 0),
+                    metadata={"id": result.get("id")},
+                ))
+
+            # Cache results
+            self._cache.set(items, "qdrant", collection, query, filters)
+            return items
 
         except Exception as e:
-            logger.warning(f"Error getting symptom context: {e}")
+            logger.warning(f"Qdrant search error for {collection}: {e}")
             return []
 
-    async def _get_graph_context(
+    async def retrieve_from_neo4j(
         self,
         dtc_codes: List[str],
-        vehicle_info: VehicleInfo,
-    ) -> Dict[str, Any]:
-        """Retrieve comprehensive graph context from Neo4j."""
-        combined_context = {
+    ) -> Tuple[List[RetrievedItem], Dict[str, Any]]:
+        """
+        Retrieve graph context from Neo4j.
+
+        Args:
+            dtc_codes: List of DTC codes to look up.
+
+        Returns:
+            Tuple of (RetrievedItem list, combined graph data dict).
+        """
+        items = []
+        combined_data = {
             "components": [],
             "repairs": [],
             "symptoms": [],
         }
 
         for code in dtc_codes:
-            try:
-                path_data = await get_diagnostic_path(code)
-                if path_data:
-                    combined_context["components"].extend(
-                        path_data.get("components", [])
-                    )
-                    combined_context["repairs"].extend(
-                        path_data.get("repairs", [])
-                    )
-                    combined_context["symptoms"].extend(
-                        path_data.get("symptoms", [])
-                    )
-            except Exception as e:
-                logger.warning(f"Error getting graph context for {code}: {e}")
+            # Check cache
+            cached = self._cache.get("neo4j", code)
+            if cached is not None:
+                path_data = cached
+            else:
+                try:
+                    path_data = await get_diagnostic_path(code)
+                    self._cache.set(path_data, "neo4j", code)
+                except Exception as e:
+                    logger.warning(f"Neo4j error for {code}: {e}")
+                    path_data = {}
 
-        # Check for vehicle-specific common issues
+            if path_data:
+                # Create item for DTC
+                items.append(RetrievedItem(
+                    content=path_data.get("dtc", {}),
+                    source=RetrievalSource.NEO4J_GRAPH,
+                    score=1.0,  # High confidence for direct match
+                    metadata={"code": code},
+                ))
+
+                # Combine graph data
+                combined_data["components"].extend(path_data.get("components", []))
+                combined_data["repairs"].extend(path_data.get("repairs", []))
+                combined_data["symptoms"].extend(path_data.get("symptoms", []))
+
+        return items, combined_data
+
+    async def retrieve_from_postgres(
+        self,
+        query: str,
+        dtc_codes: List[str],
+        vehicle_make: Optional[str] = None,
+        top_k: int = 10,
+    ) -> List[RetrievedItem]:
+        """
+        Retrieve items from PostgreSQL using text search.
+
+        Args:
+            query: Search query text.
+            dtc_codes: List of DTC codes for direct lookup.
+            vehicle_make: Optional vehicle make filter.
+            top_k: Number of results to return.
+
+        Returns:
+            List of RetrievedItem from PostgreSQL.
+        """
+        if self._db_session is None:
+            logger.warning("No database session available for PostgreSQL search")
+            return []
+
+        items = []
+
         try:
-            vehicle_node = VehicleNode.nodes.filter(
-                make=vehicle_info.make,
-                model=vehicle_info.model,
-            ).first()
+            # Direct DTC code lookup
+            if dtc_codes:
+                stmt = select(DTCCode).where(
+                    DTCCode.code.in_([c.upper() for c in dtc_codes])
+                )
+                result = await self._db_session.execute(stmt)
+                dtc_records = result.scalars().all()
 
-            if vehicle_node:
-                for dtc in vehicle_node.has_common_issue.all():
-                    rel = vehicle_node.has_common_issue.relationship(dtc)
-                    if rel.year_start <= vehicle_info.year <= (rel.year_end or 9999):
-                        combined_context["vehicle_specific_issues"] = {
-                            "dtc": dtc.code,
-                            "frequency": rel.frequency,
-                        }
+                for dtc in dtc_records:
+                    items.append(RetrievedItem(
+                        content={
+                            "code": dtc.code,
+                            "description": dtc.description_hu or dtc.description_en,
+                            "description_hu": dtc.description_hu,
+                            "description_en": dtc.description_en,
+                            "category": dtc.category,
+                            "severity": dtc.severity,
+                            "symptoms": dtc.symptoms,
+                            "possible_causes": dtc.possible_causes,
+                            "diagnostic_steps": dtc.diagnostic_steps,
+                        },
+                        source=RetrievalSource.POSTGRES_TEXT,
+                        score=1.0,  # Direct match
+                        metadata={"id": dtc.id},
+                    ))
+
+            # Text search in DTC descriptions and symptoms
+            if query:
+                # Use ILIKE for simple text matching
+                # In production, use PostgreSQL full-text search with tsvector
+                search_stmt = select(DTCCode).where(
+                    or_(
+                        DTCCode.description_en.ilike(f"%{query}%"),
+                        DTCCode.description_hu.ilike(f"%{query}%"),
+                        func.array_to_string(DTCCode.symptoms, ' ').ilike(f"%{query}%"),
+                    )
+                ).limit(top_k)
+
+                result = await self._db_session.execute(search_stmt)
+                search_records = result.scalars().all()
+
+                for dtc in search_records:
+                    # Skip if already added via direct lookup
+                    if any(i.content.get("code") == dtc.code for i in items):
+                        continue
+
+                    items.append(RetrievedItem(
+                        content={
+                            "code": dtc.code,
+                            "description": dtc.description_hu or dtc.description_en,
+                            "description_hu": dtc.description_hu,
+                            "description_en": dtc.description_en,
+                            "category": dtc.category,
+                            "severity": dtc.severity,
+                            "symptoms": dtc.symptoms,
+                            "possible_causes": dtc.possible_causes,
+                            "diagnostic_steps": dtc.diagnostic_steps,
+                        },
+                        source=RetrievalSource.POSTGRES_TEXT,
+                        score=0.7,  # Lower score for text match
+                        metadata={"id": dtc.id},
+                    ))
+
+            # Search known issues
+            if query or vehicle_make:
+                issue_stmt = select(KnownIssue)
+
+                conditions = []
+                if query:
+                    conditions.append(
+                        or_(
+                            KnownIssue.title.ilike(f"%{query}%"),
+                            KnownIssue.description.ilike(f"%{query}%"),
+                        )
+                    )
+                if vehicle_make:
+                    conditions.append(
+                        KnownIssue.applicable_makes.any(vehicle_make)
+                    )
+
+                if conditions:
+                    issue_stmt = issue_stmt.where(or_(*conditions)).limit(top_k)
+                    result = await self._db_session.execute(issue_stmt)
+                    issue_records = result.scalars().all()
+
+                    for issue in issue_records:
+                        items.append(RetrievedItem(
+                            content={
+                                "title": issue.title,
+                                "description": issue.description,
+                                "symptoms": issue.symptoms,
+                                "causes": issue.causes,
+                                "solutions": issue.solutions,
+                                "related_dtc_codes": issue.related_dtc_codes,
+                            },
+                            source=RetrievalSource.POSTGRES_TEXT,
+                            score=issue.confidence,
+                            metadata={"id": issue.id, "type": "known_issue"},
+                        ))
+
         except Exception as e:
-            logger.debug(f"No vehicle-specific data found: {e}")
+            logger.error(f"PostgreSQL search error: {e}")
 
-        return combined_context
+        return items
 
-    async def _assemble_context(
+    # =========================================================================
+    # Context Assembly
+    # =========================================================================
+
+    async def assemble_context(
         self,
         vehicle_info: VehicleInfo,
         dtc_codes: List[str],
         symptoms: str,
+        recalls: List[Dict[str, Any]] = None,
+        complaints: List[Dict[str, Any]] = None,
     ) -> RAGContext:
-        """Assemble complete context from all sources."""
-        # Gather context from multiple sources in parallel
-        dtc_task = self._get_dtc_context(dtc_codes, vehicle_info.make)
-        symptom_task = self._get_symptom_context(symptoms, vehicle_info.make)
-        graph_task = self._get_graph_context(dtc_codes, vehicle_info)
-
-        dtc_context, symptom_context, graph_context = await asyncio.gather(
-            dtc_task, symptom_task, graph_task
-        )
-
-        return RAGContext(
-            dtc_context=dtc_context,
-            symptom_context=symptom_context,
-            graph_context=graph_context,
-        )
-
-    # =========================================================================
-    # Response Generation
-    # =========================================================================
-
-    async def generate_response(
-        self,
-        context: RAGContext,
-        query: str,
-        vehicle_info: Optional[VehicleInfo] = None,
-    ) -> str:
         """
-        Generate response using LLM with provided context.
+        Assemble complete context from all sources.
+
+        Performs parallel retrieval from multiple sources and combines
+        results using hybrid ranking.
 
         Args:
-            context: Assembled RAG context
-            query: User query or symptom description
-            vehicle_info: Optional vehicle information
+            vehicle_info: Vehicle information.
+            dtc_codes: List of DTC codes.
+            symptoms: Symptom description in Hungarian.
+            recalls: Optional NHTSA recalls.
+            complaints: Optional NHTSA complaints.
 
         Returns:
-            Generated response text
+            RAGContext with all retrieved and formatted context.
         """
-        llm = self._get_llm()
+        context = RAGContext()
 
-        # Build prompt with context
-        prompt = ChatPromptTemplate.from_template(
-            """A kovetkezo kontextus alapjan valaszolj a kerdesre magyarul:
+        # Preprocess symptoms for search
+        preprocessed_symptoms = preprocess_hungarian(symptoms) if symptoms else ""
 
-Kontextus:
-{context}
+        # Build search query combining symptoms and DTC codes
+        search_query = f"{' '.join(dtc_codes)} {preprocessed_symptoms}".strip()
 
-Kerdes/Problema leirasa:
-{query}
+        # Parallel retrieval from all sources
+        tasks = [
+            # Qdrant DTC search
+            self.retrieve_from_qdrant(
+                query=search_query,
+                collection=QdrantService.DTC_COLLECTION,
+                top_k=10,
+            ),
+            # Qdrant symptom search
+            self.retrieve_from_qdrant(
+                query=preprocessed_symptoms or search_query,
+                collection=QdrantService.SYMPTOM_COLLECTION,
+                top_k=5,
+                filters={"vehicle_make": vehicle_info.make} if vehicle_info.make else None,
+            ),
+            # Neo4j graph retrieval
+            self.retrieve_from_neo4j(dtc_codes),
+            # PostgreSQL text search
+            self.retrieve_from_postgres(
+                query=preprocessed_symptoms,
+                dtc_codes=dtc_codes,
+                vehicle_make=vehicle_info.make,
+            ),
+        ]
 
-Reszletes valasz:"""
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results
+        qdrant_dtc_items = results[0] if not isinstance(results[0], Exception) else []
+        qdrant_symptom_items = results[1] if not isinstance(results[1], Exception) else []
+        neo4j_result = results[2] if not isinstance(results[2], Exception) else ([], {})
+        postgres_items = results[3] if not isinstance(results[3], Exception) else []
+
+        neo4j_items, graph_data = neo4j_result if isinstance(neo4j_result, tuple) else ([], {})
+
+        # Store raw items
+        context.dtc_items = qdrant_dtc_items
+        context.symptom_items = qdrant_symptom_items
+        context.graph_items = neo4j_items
+        context.text_items = postgres_items
+        context.graph_data = graph_data
+
+        # Process recalls and complaints
+        if recalls:
+            for recall in recalls:
+                context.recall_items.append(RetrievedItem(
+                    content=recall,
+                    source=RetrievalSource.NHTSA,
+                    score=0.95,  # High relevance for recalls
+                    metadata={"type": "recall"},
+                ))
+
+        if complaints:
+            for complaint in complaints[:5]:  # Limit complaints
+                context.recall_items.append(RetrievedItem(
+                    content=complaint,
+                    source=RetrievalSource.NHTSA,
+                    score=0.6,
+                    metadata={"type": "complaint"},
+                ))
+
+        # Hybrid ranking of DTC results
+        all_dtc_lists = [context.dtc_items, context.text_items]
+        combined_dtc = self._ranker.reciprocal_rank_fusion(
+            [items for items in all_dtc_lists if items],
+            weights=[1.0, 0.8]
         )
 
-        # Create chain
-        chain = prompt | llm | StrOutputParser()
+        # Format context strings
+        dtc_data = [item.content for item in combined_dtc[:10]]
+        context.dtc_context = format_dtc_context(dtc_data)
 
-        # Generate response
-        response = await chain.ainvoke({
-            "context": context.to_formatted_string(),
-            "query": query,
-        })
+        symptom_data = [
+            {
+                "description": item.content.get("description", ""),
+                "score": item.score,
+                "resolution": item.content.get("resolution", ""),
+                "related_dtc": item.content.get("related_dtc", []),
+            }
+            for item in context.symptom_items[:5]
+        ]
+        context.symptom_context = format_symptom_context(symptom_data)
 
-        return response
+        context.repair_context = format_repair_context(graph_data)
+
+        recall_data = [item.content for item in context.recall_items if item.metadata.get("type") == "recall"]
+        complaint_data = [item.content for item in context.recall_items if item.metadata.get("type") == "complaint"]
+        context.recall_context = format_recall_context(recall_data, complaint_data)
+
+        return context
 
     # =========================================================================
     # Confidence Scoring
     # =========================================================================
 
-    def _calculate_confidence(
+    def calculate_confidence(
         self,
         context: RAGContext,
         dtc_codes: List[str],
@@ -611,58 +775,60 @@ Reszletes valasz:"""
         Calculate confidence score for diagnosis.
 
         Args:
-            context: Assembled RAG context
-            dtc_codes: Input DTC codes
+            context: Assembled RAG context.
+            dtc_codes: Input DTC codes.
 
         Returns:
-            Tuple of (ConfidenceLevel, score between 0.0 and 1.0)
+            Tuple of (ConfidenceLevel, score between 0.0 and 1.0).
         """
         score = 0.0
         factors = 0
 
         # Factor 1: DTC context quality (0-0.3)
-        if context.dtc_context:
-            dtc_scores = [d.get("score", 0) for d in context.dtc_context if "score" in d]
+        if context.dtc_items:
+            dtc_scores = [item.score for item in context.dtc_items]
             if dtc_scores:
-                avg_dtc_score = sum(dtc_scores) / len(dtc_scores)
-                score += avg_dtc_score * 0.3
+                avg_score = sum(dtc_scores) / len(dtc_scores)
+                score += avg_score * 0.3
             factors += 0.3
 
-        # Factor 2: Symptom matching (0-0.25)
-        if context.symptom_context:
-            symptom_scores = [s.get("score", 0) for s in context.symptom_context]
-            if symptom_scores:
-                avg_symptom_score = sum(symptom_scores) / len(symptom_scores)
-                score += avg_symptom_score * 0.25
-            factors += 0.25
-
-        # Factor 3: Graph context richness (0-0.25)
-        if context.graph_context:
-            graph_score = 0.0
-            if context.graph_context.get("components"):
-                graph_score += 0.1
-            if context.graph_context.get("repairs"):
-                graph_score += 0.1
-            if context.graph_context.get("symptoms"):
-                graph_score += 0.05
-            score += graph_score
-            factors += 0.25
-
-        # Factor 4: DTC coverage (0-0.2)
+        # Factor 2: PostgreSQL direct matches (0-0.2)
+        direct_matches = sum(1 for item in context.text_items if item.score >= 1.0)
         if dtc_codes:
-            found_codes = set()
-            for dtc in context.dtc_context:
-                if dtc.get("code") in dtc_codes:
-                    found_codes.add(dtc.get("code"))
-            coverage = len(found_codes) / len(dtc_codes)
-            score += coverage * 0.2
+            match_ratio = direct_matches / len(dtc_codes)
+            score += match_ratio * 0.2
             factors += 0.2
+
+        # Factor 3: Symptom matching (0-0.2)
+        if context.symptom_items:
+            symptom_scores = [item.score for item in context.symptom_items]
+            if symptom_scores:
+                avg_symptom = sum(symptom_scores) / len(symptom_scores)
+                score += avg_symptom * 0.2
+            factors += 0.2
+
+        # Factor 4: Graph context richness (0-0.2)
+        if context.graph_data:
+            graph_score = 0.0
+            if context.graph_data.get("components"):
+                graph_score += 0.08
+            if context.graph_data.get("repairs"):
+                graph_score += 0.08
+            if context.graph_data.get("symptoms"):
+                graph_score += 0.04
+            score += graph_score
+            factors += 0.2
+
+        # Factor 5: NHTSA data available (0-0.1)
+        if context.recall_items:
+            score += 0.1
+            factors += 0.1
 
         # Normalize score
         if factors > 0:
             normalized_score = min(1.0, score / factors)
         else:
-            normalized_score = 0.1  # Minimal confidence if no context
+            normalized_score = 0.1
 
         # Determine confidence level
         if normalized_score >= 0.75:
@@ -677,6 +843,107 @@ Reszletes valasz:"""
         return level, normalized_score
 
     # =========================================================================
+    # Response Generation
+    # =========================================================================
+
+    async def generate_diagnosis(
+        self,
+        vehicle_info: VehicleInfo,
+        dtc_codes: List[str],
+        symptoms: str,
+        context: RAGContext,
+        additional_context: Optional[str] = None,
+    ) -> ParsedDiagnosisResponse:
+        """
+        Generate diagnosis using LLM with assembled context.
+
+        Falls back to rule-based diagnosis if no LLM is available.
+
+        Args:
+            vehicle_info: Vehicle information.
+            dtc_codes: List of DTC codes.
+            symptoms: Symptom description.
+            context: Assembled RAG context.
+            additional_context: Optional additional context from user.
+
+        Returns:
+            ParsedDiagnosisResponse with diagnosis results.
+        """
+        # Build prompt context
+        prompt_context = DiagnosisPromptContext(
+            make=vehicle_info.make,
+            model=vehicle_info.model,
+            year=vehicle_info.year,
+            engine_code=vehicle_info.engine_code,
+            mileage_km=vehicle_info.mileage_km,
+            vin=vehicle_info.vin,
+            dtc_codes=dtc_codes,
+            symptoms=symptoms,
+            additional_context=additional_context,
+            dtc_context=context.dtc_context,
+            symptom_context=context.symptom_context,
+            repair_context=context.repair_context,
+            recall_context=context.recall_context,
+        )
+
+        user_prompt = build_diagnosis_prompt(prompt_context)
+
+        # Check if LLM is available
+        if not is_llm_available():
+            logger.info("No LLM available, using rule-based diagnosis")
+            # Prepare DTC data for rule-based diagnosis
+            dtc_data = [item.content for item in context.dtc_items + context.text_items]
+            recall_data = [item.content for item in context.recall_items
+                         if item.metadata.get("type") == "recall"]
+            complaint_data = [item.content for item in context.recall_items
+                            if item.metadata.get("type") == "complaint"]
+
+            return generate_rule_based_diagnosis(
+                dtc_codes=dtc_data,
+                vehicle_info=vehicle_info.to_dict(),
+                recalls=recall_data,
+                complaints=complaint_data,
+            )
+
+        # Get LLM provider and generate
+        try:
+            provider = get_llm_provider()
+            llm_config = LLMConfig(
+                temperature=0.3,
+                max_tokens=4096,
+            )
+
+            response = await provider.generate_with_system(
+                system_prompt=SYSTEM_PROMPT_HU,
+                user_prompt=user_prompt,
+                config=llm_config,
+            )
+
+            # Parse the response
+            parsed = parse_diagnosis_response(response.content)
+
+            # Add metadata
+            parsed.raw_response = response.content
+
+            return parsed
+
+        except Exception as e:
+            logger.error(f"LLM generation error: {e}, falling back to rule-based")
+
+            # Fallback to rule-based
+            dtc_data = [item.content for item in context.dtc_items + context.text_items]
+            recall_data = [item.content for item in context.recall_items
+                         if item.metadata.get("type") == "recall"]
+
+            result = generate_rule_based_diagnosis(
+                dtc_codes=dtc_data,
+                vehicle_info=vehicle_info.to_dict(),
+                recalls=recall_data,
+            )
+            result.parse_error = f"LLM error: {str(e)}"
+            return result
+
+    # =========================================================================
     # Main Diagnosis Method
     # =========================================================================
 
@@ -685,19 +952,26 @@ Reszletes valasz:"""
         vehicle_info: Dict[str, Any],
         dtc_codes: List[str],
         symptoms: str,
+        recalls: List[Dict[str, Any]] = None,
+        complaints: List[Dict[str, Any]] = None,
+        additional_context: Optional[str] = None,
     ) -> DiagnosisResult:
         """
         Perform complete vehicle diagnosis using RAG.
 
+        This is the main entry point for the diagnosis pipeline.
+
         Args:
-            vehicle_info: Dictionary with vehicle information (make, model, year, etc.)
-            dtc_codes: List of DTC codes (e.g., ["P0300", "P0171"])
-            symptoms: Free-text description of symptoms in Hungarian
+            vehicle_info: Dictionary with vehicle information.
+            dtc_codes: List of DTC codes.
+            symptoms: Free-text description of symptoms in Hungarian.
+            recalls: Optional NHTSA recalls.
+            complaints: Optional NHTSA complaints.
+            additional_context: Optional additional context.
 
         Returns:
-            DiagnosisResult with complete diagnosis information
+            DiagnosisResult with complete diagnosis information.
         """
-        import time
         start_time = time.time()
 
         # Parse vehicle info
@@ -714,137 +988,125 @@ Reszletes valasz:"""
         dtc_codes = [code.upper().strip() for code in dtc_codes if code.strip()]
 
         logger.info(
-            f"Starting diagnosis for {vehicle.make} {vehicle.model} {vehicle.year}, "
+            f"Starting RAG diagnosis for {vehicle.make} {vehicle.model} {vehicle.year}, "
             f"DTCs: {dtc_codes}"
         )
 
-        # Assemble context
-        context = await self._assemble_context(vehicle, dtc_codes, symptoms)
-
-        # Calculate confidence
-        confidence_level, confidence_score = self._calculate_confidence(
-            context, dtc_codes
+        # Assemble context from all sources
+        context = await self.assemble_context(
+            vehicle_info=vehicle,
+            dtc_codes=dtc_codes,
+            symptoms=symptoms,
+            recalls=recalls,
+            complaints=complaints,
         )
 
-        # Generate diagnosis using LLM
-        llm = self._get_llm()
+        # Calculate confidence
+        confidence_level, confidence_score = self.calculate_confidence(context, dtc_codes)
 
-        prompt = ChatPromptTemplate.from_template(HUNGARIAN_DIAGNOSIS_TEMPLATE)
-        chain = prompt | llm | StrOutputParser()
+        # Generate diagnosis
+        diagnosis = await self.generate_diagnosis(
+            vehicle_info=vehicle,
+            dtc_codes=dtc_codes,
+            symptoms=symptoms,
+            context=context,
+            additional_context=additional_context,
+        )
 
-        # Format DTC codes for prompt
-        dtc_formatted = "\n".join([f"- {code}" for code in dtc_codes]) if dtc_codes else "Nincs hibakod"
+        # Determine provider info
+        provider = get_llm_provider()
+        model_name = provider.model_name
+        provider_name = provider.provider_type.value
 
-        diagnosis_text = await chain.ainvoke({
-            "make": vehicle.make,
-            "model": vehicle.model,
-            "year": vehicle.year,
-            "mileage_km": vehicle.mileage_km or "N/A",
-            "engine_code": vehicle.engine_code or "N/A",
-            "vin": vehicle.vin or "N/A",
-            "dtc_codes": dtc_formatted,
-            "symptoms": symptoms or "Nincs leirva",
-            "context": context.to_formatted_string(),
-        })
+        used_fallback = (provider.provider_type == LLMProviderType.RULE_BASED or
+                        diagnosis.parse_error is not None)
 
-        # Parse diagnosis sections
-        diagnosis_summary = self._extract_section(diagnosis_text, "OSSZEFOGLALO", "LEHETSEGES OKOK")
-        root_cause = self._extract_section(diagnosis_text, "LEHETSEGES OKOK", "JAVASOLT ELLENORZESEK")
-
-        # Extract safety warnings
-        safety_section = self._extract_section(diagnosis_text, "BIZTONSAGI FIGYELMEZTETESEK", "MEGJEGYZESEK")
-        safety_warnings = [w.strip() for w in safety_section.split("\n") if w.strip() and w.strip() != "-"]
-
-        # Build repair recommendations from graph context
+        # Build repair recommendations
         repair_recommendations = []
-        for repair in context.graph_context.get("repairs", []):
+        for repair in diagnosis.recommended_repairs:
             repair_recommendations.append(RepairRecommendation(
-                name=repair.get("name", ""),
+                name=repair.get("title", ""),
                 description=repair.get("description", ""),
                 difficulty=repair.get("difficulty", "intermediate"),
                 estimated_time_minutes=repair.get("estimated_time_minutes"),
                 estimated_cost_min=repair.get("estimated_cost_min"),
                 estimated_cost_max=repair.get("estimated_cost_max"),
-                parts=repair.get("parts", []),
-                diagnostic_steps=repair.get("diagnostic_steps", []),
+                parts=repair.get("parts_needed", []),
             ))
+
+        # Build sources
+        sources = []
+        seen_sources = set()
+
+        for item in context.get_all_items()[:10]:
+            source_name = f"{item.source.value}"
+            if source_name not in seen_sources:
+                sources.append({
+                    "type": item.source.value,
+                    "title": item.content.get("code") or item.content.get("title", source_name),
+                    "relevance_score": item.score,
+                })
+                seen_sources.add(source_name)
 
         processing_time = int((time.time() - start_time) * 1000)
 
-        # Determine model name
-        provider = LLMProvider(settings.LLM_PROVIDER.lower())
-        if provider == LLMProvider.ANTHROPIC:
-            model_name = settings.ANTHROPIC_MODEL
-        elif provider == LLMProvider.OPENAI:
-            model_name = settings.OPENAI_MODEL
-        else:
-            model_name = settings.OLLAMA_MODEL
+        # Combine confidence from context and diagnosis
+        final_confidence = max(confidence_score, diagnosis.confidence_score) if diagnosis.probable_causes else confidence_score
 
         result = DiagnosisResult(
             dtc_codes=dtc_codes,
             symptoms=symptoms,
             vehicle_info=vehicle,
-            diagnosis_summary=diagnosis_summary,
-            root_cause_analysis=root_cause,
+            diagnosis_summary=diagnosis.summary,
+            root_cause_analysis="\n".join(
+                f"- {cause.get('title', '')}: {cause.get('description', '')}"
+                for cause in diagnosis.probable_causes[:3]
+            ),
             confidence=confidence_level,
-            confidence_score=confidence_score,
+            confidence_score=final_confidence,
+            probable_causes=diagnosis.probable_causes,
             repair_recommendations=repair_recommendations,
-            safety_warnings=safety_warnings,
-            similar_cases=context.symptom_context[:5],
-            related_dtc_info=context.dtc_context,
+            safety_warnings=diagnosis.safety_warnings,
+            diagnostic_steps=diagnosis.diagnostic_steps,
+            similar_cases=[item.content for item in context.symptom_items[:5]],
+            related_dtc_info=[item.content for item in context.dtc_items[:10]],
+            sources=sources,
             model_used=model_name,
+            provider_used=provider_name,
             processing_time_ms=processing_time,
+            used_fallback=used_fallback,
         )
 
         logger.info(
             f"Diagnosis completed in {processing_time}ms, "
-            f"confidence: {confidence_level.value} ({confidence_score:.2%})"
+            f"provider: {provider_name}, "
+            f"confidence: {confidence_level.value} ({final_confidence:.2%})"
         )
 
         return result
-
-    def _extract_section(
-        self,
-        text: str,
-        start_marker: str,
-        end_marker: str,
-    ) -> str:
-        """Extract text section between markers."""
-        try:
-            start_idx = text.find(start_marker)
-            if start_idx == -1:
-                return ""
-
-            start_idx = text.find("\n", start_idx) + 1
-
-            end_idx = text.find(end_marker, start_idx)
-            if end_idx == -1:
-                end_idx = len(text)
-
-            section = text[start_idx:end_idx].strip()
-
-            # Remove markdown headers
-            lines = section.split("\n")
-            cleaned_lines = [
-                line for line in lines
-                if not line.strip().startswith("###")
-            ]
-
-            return "\n".join(cleaned_lines).strip()
-
-        except Exception:
-            return ""
 
     # =========================================================================
     # Utility Methods
     # =========================================================================
 
     def warmup(self) -> None:
-        """Warm up service by initializing LLM and embedding service."""
+        """Warm up service by initializing components."""
         logger.info("Warming up RAG service...")
-        self._get_llm()
         self._get_embedding_service().warmup()
+
+        # Check LLM availability
+        if is_llm_available():
+            provider = get_llm_provider()
+            logger.info(f"LLM provider ready: {provider.provider_type.value}")
+        else:
+            logger.warning("No LLM API available, will use rule-based fallback")
+
         logger.info("RAG service warmup complete")
+
+    def clear_cache(self) -> None:
+        """Clear the retrieval cache."""
+        self._cache.clear()
+        logger.info("RAG cache cleared")
 
 
 # =============================================================================
@@ -872,20 +1134,36 @@ async def diagnose(
     vehicle_info: Dict[str, Any],
     dtc_codes: List[str],
     symptoms: str,
+    recalls: List[Dict[str, Any]] = None,
+    complaints: List[Dict[str, Any]] = None,
+    db_session: Optional[AsyncSession] = None,
 ) -> DiagnosisResult:
     """
     Convenience function to perform vehicle diagnosis.
 
     Args:
-        vehicle_info: Dictionary with vehicle information
-        dtc_codes: List of DTC codes
-        symptoms: Free-text description of symptoms
+        vehicle_info: Dictionary with vehicle information.
+        dtc_codes: List of DTC codes.
+        symptoms: Free-text description of symptoms.
+        recalls: Optional NHTSA recalls.
+        complaints: Optional NHTSA complaints.
+        db_session: Optional database session for PostgreSQL queries.
 
     Returns:
-        DiagnosisResult with complete diagnosis information
+        DiagnosisResult with complete diagnosis information.
     """
     service = get_rag_service()
-    return await service.diagnose(vehicle_info, dtc_codes, symptoms)
+
+    if db_session:
+        service.set_db_session(db_session)
+
+    return await service.diagnose(
+        vehicle_info=vehicle_info,
+        dtc_codes=dtc_codes,
+        symptoms=symptoms,
+        recalls=recalls,
+        complaints=complaints,
+    )
 
 
 async def get_context(
@@ -896,40 +1174,23 @@ async def get_context(
     Convenience function to retrieve context from vector store.
 
     Args:
-        query: Search query text
-        top_k: Number of results to return
+        query: Search query text.
+        top_k: Number of results to return.
 
     Returns:
-        List of matching documents with scores
+        List of matching documents with scores.
     """
     service = get_rag_service()
-    return await service.get_context(query, top_k)
-
-
-async def generate_response(
-    context: Dict[str, Any],
-    query: str,
-) -> str:
-    """
-    Convenience function to generate response with context.
-
-    Args:
-        context: Context dictionary
-        query: User query
-
-    Returns:
-        Generated response text
-    """
-    service = get_rag_service()
-
-    # Convert dict to RAGContext if needed
-    if isinstance(context, dict):
-        rag_context = RAGContext(
-            dtc_context=context.get("dtc_context", []),
-            symptom_context=context.get("symptom_context", []),
-            graph_context=context.get("graph_context", {}),
-        )
-    else:
-        rag_context = context
-
-    return await service.generate_response(rag_context, query)
+    items = await service.retrieve_from_qdrant(
+        query=query,
+        collection=QdrantService.DTC_COLLECTION,
+        top_k=top_k,
+    )
+    return [
+        {
+            "content": item.content,
+            "score": item.score,
+            "source": item.source.value,
+        }
+        for item in items
+    ]

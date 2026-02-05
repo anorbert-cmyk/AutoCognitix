@@ -3,7 +3,7 @@
 Qdrant Vector Database Indexer for AutoCognitix.
 
 This script indexes DTC codes and symptoms into Qdrant vector database
-for semantic search capabilities.
+for semantic search capabilities using Hungarian huBERT embeddings.
 
 Usage:
     python scripts/index_qdrant.py --dtc         # Index DTC codes only
@@ -12,29 +12,34 @@ Usage:
 
 Requirements:
     - Qdrant running on localhost:6333
-    - huBERT model available for embeddings
+    - huBERT model available for embeddings (SZTAKI-HLT/hubert-base-cc)
 """
 
 import argparse
-import asyncio
 import json
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
+
+import numpy as np
+import torch
+from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
 
 # Add project root to path for imports
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from tqdm import tqdm
-from qdrant_client import QdrantClient
-from qdrant_client.http import models as qdrant_models
-
-# Import project modules
-from backend.app.core.config import settings
-from backend.app.services.embedding_service import embed_text, embed_batch
+# Configuration - can be overridden by environment variables
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+HUBERT_MODEL = os.getenv("HUBERT_MODEL", "SZTAKI-HLT/hubert-base-cc")
+EMBEDDING_DIMENSION = 768  # huBERT output dimension
 
 # Configure logging
 logging.basicConfig(
@@ -45,9 +50,134 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Collection names
-DTC_COLLECTION = "dtc_embeddings"
-SYMPTOM_COLLECTION = "symptom_embeddings"
+# Collection names - Hungarian versions with huBERT embeddings (768-dim)
+DTC_COLLECTION = "dtc_embeddings_hu"
+SYMPTOM_COLLECTION = "symptom_embeddings_hu"
+
+# Legacy collection names (English, all-MiniLM-L6-v2, 384-dim)
+DTC_COLLECTION_LEGACY = "dtc_embeddings"
+SYMPTOM_COLLECTION_LEGACY = "symptom_embeddings"
+
+
+class HuBERTEmbedder:
+    """Handles Hungarian text embedding using huBERT model."""
+
+    def __init__(self, model_name: str = HUBERT_MODEL):
+        """Initialize the huBERT model."""
+        self.model_name = model_name
+        self.device = self._detect_device()
+        self._tokenizer: Optional[AutoTokenizer] = None
+        self._model: Optional[AutoModel] = None
+        logger.info(f"HuBERTEmbedder initialized with device: {self.device}")
+
+    def _detect_device(self) -> torch.device:
+        """Detect the best available device."""
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+            logger.info(f"CUDA device detected: {torch.cuda.get_device_name(0)}")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+            logger.info("Apple MPS device detected")
+        else:
+            device = torch.device("cpu")
+            logger.info("Using CPU device")
+        return device
+
+    def _load_model(self) -> None:
+        """Load huBERT model and tokenizer lazily."""
+        if self._model is not None and self._tokenizer is not None:
+            return
+
+        logger.info(f"Loading huBERT model: {self.model_name}")
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModel.from_pretrained(self.model_name)
+        self._model.to(self.device)
+        self._model.eval()
+        logger.info("huBERT model loaded successfully")
+
+    def _mean_pooling(
+        self, model_output: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Apply mean pooling to token embeddings."""
+        token_embeddings = model_output.last_hidden_state
+        input_mask_expanded = (
+            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        )
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, dim=1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(dim=1), min=1e-9)
+        return sum_embeddings / sum_mask
+
+    def embed_batch(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
+        """Generate embeddings for multiple texts."""
+        self._load_model()
+
+        if not texts:
+            return []
+
+        all_embeddings = []
+
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i : i + batch_size]
+
+            # Handle empty texts
+            non_empty_indices = []
+            non_empty_texts = []
+            for idx, text in enumerate(batch_texts):
+                if text and text.strip():
+                    non_empty_indices.append(idx)
+                    non_empty_texts.append(text)
+
+            # Initialize batch embeddings with zeros
+            batch_embeddings = [[0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))]
+
+            if non_empty_texts:
+                # Tokenize batch
+                encoded = self._tokenizer(
+                    non_empty_texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                    return_tensors="pt",
+                )
+
+                # Move to device
+                encoded = {k: v.to(self.device) for k, v in encoded.items()}
+
+                # Generate embeddings
+                with torch.no_grad():
+                    model_output = self._model(**encoded)
+
+                # Apply mean pooling
+                embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
+
+                # Normalize embeddings
+                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
+
+                # Convert to list
+                embeddings_list = embeddings.cpu().tolist()
+                for orig_idx, embedding in zip(non_empty_indices, embeddings_list):
+                    batch_embeddings[orig_idx] = embedding
+
+            all_embeddings.extend(batch_embeddings)
+
+        return all_embeddings
+
+
+# Global embedder instance
+_embedder: Optional[HuBERTEmbedder] = None
+
+
+def get_embedder() -> HuBERTEmbedder:
+    """Get or create the global embedder instance."""
+    global _embedder
+    if _embedder is None:
+        _embedder = HuBERTEmbedder()
+    return _embedder
+
+
+def embed_batch(texts: List[str], preprocess: bool = False) -> List[List[float]]:
+    """Generate embeddings for multiple texts using huBERT."""
+    return get_embedder().embed_batch(texts)
 
 
 class QdrantIndexer:
@@ -56,13 +186,11 @@ class QdrantIndexer:
     def __init__(self):
         """Initialize the Qdrant client."""
         self.client = QdrantClient(
-            host=settings.QDRANT_HOST,
-            port=settings.QDRANT_PORT,
+            host=QDRANT_HOST,
+            port=QDRANT_PORT,
         )
-        self.vector_size = settings.EMBEDDING_DIMENSION
-        logger.info(
-            f"Connected to Qdrant at {settings.QDRANT_HOST}:{settings.QDRANT_PORT}"
-        )
+        self.vector_size = EMBEDDING_DIMENSION
+        logger.info(f"Connected to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
 
     def create_collection(self, collection_name: str, recreate: bool = False) -> None:
         """
@@ -354,7 +482,7 @@ def print_summary(indexer: QdrantIndexer) -> None:
     print("INDEXING SUMMARY")
     print("=" * 60)
 
-    for collection_name in [DTC_COLLECTION, SYMPTOM_COLLECTION]:
+    for collection_name in [DTC_COLLECTION, SYMPTOM_COLLECTION, DTC_COLLECTION_LEGACY, SYMPTOM_COLLECTION_LEGACY]:
         info = indexer.get_collection_info(collection_name)
         print(f"\nCollection: {info['name']}")
         if info.get("status") == "not_found":

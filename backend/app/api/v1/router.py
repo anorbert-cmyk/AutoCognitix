@@ -4,7 +4,7 @@ API v1 router - aggregates all endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, diagnosis, dtc_codes, vehicles
+from app.api.v1.endpoints import auth, diagnosis, dtc_codes, health, metrics, vehicles
 
 api_router = APIRouter()
 
@@ -31,4 +31,16 @@ api_router.include_router(
     dtc_codes.router,
     prefix="/dtc",
     tags=["DTC Codes"],
+)
+
+api_router.include_router(
+    health.router,
+    prefix="/health",
+    tags=["Health"],
+)
+
+api_router.include_router(
+    metrics.router,
+    prefix="/metrics",
+    tags=["Metrics"],
 )

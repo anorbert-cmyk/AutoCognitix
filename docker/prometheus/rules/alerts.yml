@@ -1,0 +1,268 @@
+# ============================================
+# AutoCognitix - Prometheus Alert Rules
+# Alert definitions for common issues
+# ============================================
+
+groups:
+  # ===========================================
+  # Backend Service Alerts
+  # ===========================================
+  - name: autocognitix-backend
+    rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(autocognitix_http_requests_total{status_class="5xx"}[5m]))
+            /
+            sum(rate(autocognitix_http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          runbook_url: "https://docs.autocognitix.hu/runbooks/high-error-rate"
+
+      # High request latency
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(autocognitix_http_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "High request latency on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value | humanizeDuration }} (threshold: 2s)"
+
+      # Service down
+      - alert: BackendServiceDown
+        expr: up{job="autocognitix-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "Backend service is down"
+          description: "AutoCognitix backend has been unreachable for more than 1 minute"
+
+      # Too many in-flight requests
+      - alert: TooManyInFlightRequests
+        expr: autocognitix_http_requests_in_progress > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "Too many in-flight requests"
+          description: "{{ $value }} requests currently in progress (threshold: 100)"
+
+      # High exception rate
+      - alert: HighExceptionRate
+        expr: |
+          sum(rate(autocognitix_exceptions_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "High exception rate"
+          description: "{{ $value | humanize }} exceptions per second"
+
+  # ===========================================
+  # Database Alerts
+  # ===========================================
+  - name: autocognitix-database
+    rules:
+      # Slow database queries
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(autocognitix_db_query_duration_seconds_bucket[5m])) by (le, database)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "Slow database queries on {{ $labels.database }}"
+          description: "P95 query latency is {{ $value | humanizeDuration }}"
+
+      # Database connection pool exhaustion
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          autocognitix_db_connections{state="waiting"} > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "Database connection pool exhausted"
+          description: "{{ $value }} connections waiting for {{ $labels.database }}"
+
+      # High database error rate
+      - alert: HighDatabaseErrorRate
+        expr: |
+          sum(rate(autocognitix_db_query_errors_total[5m])) by (database) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "High database error rate for {{ $labels.database }}"
+          description: "{{ $value | humanize }} errors per second"
+
+  # ===========================================
+  # External API Alerts
+  # ===========================================
+  - name: autocognitix-external-apis
+    rules:
+      # External API failure
+      - alert: ExternalAPIFailure
+        expr: |
+          sum(rate(autocognitix_external_api_errors_total[5m])) by (service) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "External API {{ $labels.service }} failing"
+          description: "{{ $value | humanize }} errors per second"
+
+      # External API slow
+      - alert: ExternalAPISlow
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(autocognitix_external_api_duration_seconds_bucket[5m])) by (le, service)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "External API {{ $labels.service }} responding slowly"
+          description: "P95 latency is {{ $value | humanizeDuration }}"
+
+  # ===========================================
+  # LLM Service Alerts
+  # ===========================================
+  - name: autocognitix-llm
+    rules:
+      # LLM API errors
+      - alert: LLMAPIErrors
+        expr: |
+          sum(rate(autocognitix_llm_requests_total{status="error"}[5m])) by (provider, model) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "LLM API errors for {{ $labels.provider }}/{{ $labels.model }}"
+          description: "{{ $value | humanize }} errors per second"
+
+      # LLM high latency
+      - alert: LLMHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(autocognitix_llm_duration_seconds_bucket[5m])) by (le, provider)
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "LLM {{ $labels.provider }} responding slowly"
+          description: "P95 latency is {{ $value | humanizeDuration }}"
+
+  # ===========================================
+  # System Resource Alerts
+  # ===========================================
+  - name: autocognitix-resources
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: autocognitix_system_cpu_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value | humanize }}%"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: autocognitix_system_memory_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize }}%"
+
+      # Process memory growing
+      - alert: MemoryLeakSuspected
+        expr: |
+          increase(autocognitix_process_memory_bytes{type="rss"}[1h]) > 500000000
+        for: 1h
+        labels:
+          severity: warning
+          service: autocognitix
+        annotations:
+          summary: "Possible memory leak detected"
+          description: "Process RSS increased by {{ $value | humanize1024 }} in the last hour"
+
+  # ===========================================
+  # Infrastructure Alerts
+  # ===========================================
+  - name: autocognitix-infrastructure
+    rules:
+      # Redis down
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache service is unreachable"
+
+      # PostgreSQL down
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is unreachable"
+
+      # Neo4j down
+      - alert: Neo4jDown
+        expr: up{job="neo4j"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "Neo4j is down"
+          description: "Neo4j graph database is unreachable"
+
+      # Traefik down
+      - alert: TraefikDown
+        expr: up{job="traefik"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: autocognitix
+        annotations:
+          summary: "Traefik is down"
+          description: "Traefik reverse proxy is unreachable"

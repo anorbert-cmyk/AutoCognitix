@@ -56,6 +56,31 @@ class HasCommonIssueRel(StructuredRel):
     frequency = StringProperty(default="common")  # rare, uncommon, common, very_common
     year_start = IntegerProperty()
     year_end = IntegerProperty()
+    occurrence_count = IntegerProperty()
+    data_source = StringProperty()  # nhtsa, tsb, forum
+
+
+class RequiresRepairRel(StructuredRel):
+    """Relationship: DTC requires Repair for specific vehicle."""
+
+    confidence = FloatProperty(default=0.7)
+    is_primary_fix = StringProperty(default="false")  # true/false as string for neomodel
+    estimated_labor_hours = FloatProperty()
+
+
+class UsesEngineRel(StructuredRel):
+    """Relationship: Vehicle uses Engine."""
+
+    year_start = IntegerProperty()
+    year_end = IntegerProperty()
+    is_base_engine = StringProperty(default="false")
+    variant_name = StringProperty()  # e.g., "2.0 TSI 190HP"
+
+
+class SharesPlatformRel(StructuredRel):
+    """Relationship: Vehicle shares platform with another vehicle."""
+
+    platform_code = StringProperty()
 
 
 # Node models
@@ -77,26 +102,33 @@ class DTCNode(StructuredNode):
 
 
 class SymptomNode(StructuredNode):
-    """Symptom node."""
+    """Symptom node representing vehicle symptoms."""
 
     uid = UniqueIdProperty()
-    name = StringProperty(required=True)
-    description = StringProperty()
-    description_hu = StringProperty()
-    severity = StringProperty(default="medium")
+    symptom_id = StringProperty(index=True)  # e.g., "ENG001", "BRK002"
+    name = StringProperty(required=True, index=True)  # Hungarian name (primary)
+    name_en = StringProperty()  # English name
+    description = StringProperty()  # English description
+    description_hu = StringProperty()  # Hungarian description
+    category = StringProperty(index=True)  # engine, transmission, brakes, etc.
+    severity = StringProperty(default="medium")  # critical, high, medium, low
+    keywords = ArrayProperty(StringProperty())  # Search keywords in Hungarian
+    possible_causes = ArrayProperty(StringProperty())  # List of possible causes
+    diagnostic_steps = ArrayProperty(StringProperty())  # Diagnostic procedures
 
     # Relationships
     caused_by = RelationshipFrom("DTCNode", "CAUSES", model=CausesRel)
     requires_check = RelationshipTo("TestPointNode", "REQUIRES_CHECK")
+    related_symptoms = RelationshipTo("SymptomNode", "RELATED_TO")
 
 
 class ComponentNode(StructuredNode):
     """Vehicle component node."""
 
     uid = UniqueIdProperty()
-    name = StringProperty(required=True)
+    name = StringProperty(required=True, index=True)
     name_hu = StringProperty()
-    system = StringProperty()  # engine, transmission, brakes, etc.
+    system = StringProperty(index=True)  # engine, transmission, brakes, etc.
     part_number = StringProperty()
 
     # Relationships
@@ -110,7 +142,7 @@ class RepairNode(StructuredNode):
     """Repair action node."""
 
     uid = UniqueIdProperty()
-    name = StringProperty(required=True)
+    name = StringProperty(required=True, index=True)
     description = StringProperty()
     description_hu = StringProperty()
     difficulty = StringProperty(default="intermediate")  # beginner, intermediate, advanced, professional
@@ -128,9 +160,9 @@ class PartNode(StructuredNode):
     """Replacement part node."""
 
     uid = UniqueIdProperty()
-    name = StringProperty(required=True)
+    name = StringProperty(required=True, index=True)
     name_hu = StringProperty()
-    part_number = StringProperty()
+    part_number = StringProperty(index=True)
     oem_part_number = StringProperty()
     price_min = IntegerProperty()
     price_max = IntegerProperty()
@@ -144,7 +176,7 @@ class TestPointNode(StructuredNode):
     """Diagnostic test point node."""
 
     uid = UniqueIdProperty()
-    name = StringProperty(required=True)
+    name = StringProperty(required=True, index=True)
     description = StringProperty()
     description_hu = StringProperty()
     test_type = StringProperty()  # visual, multimeter, scanner, oscilloscope
@@ -162,16 +194,70 @@ class VehicleNode(StructuredNode):
     """Vehicle type node."""
 
     uid = UniqueIdProperty()
-    make = StringProperty(required=True)
-    model = StringProperty(required=True)
+    make = StringProperty(required=True, index=True)
+    model = StringProperty(required=True, index=True)
     year_start = IntegerProperty()
     year_end = IntegerProperty()
-    platform = StringProperty()
+    platform = StringProperty(index=True)
     engine_codes = ArrayProperty(StringProperty())
+    body_types = ArrayProperty(StringProperty())
+    country = StringProperty()
+    segment = StringProperty()  # A, B, C, D, E, F
 
     # Relationships
     has_common_issue = RelationshipTo("DTCNode", "HAS_COMMON_ISSUE", model=HasCommonIssueRel)
     uses_component = RelationshipTo("ComponentNode", "USES_COMPONENT")
+    uses_engine = RelationshipTo("EngineNode", "USES_ENGINE", model=UsesEngineRel)
+    common_repair = RelationshipTo("RepairNode", "COMMON_REPAIR", model=RequiresRepairRel)
+    shares_platform_with = RelationshipTo("VehicleNode", "SHARES_PLATFORM", model=SharesPlatformRel)
+
+
+class EngineNode(StructuredNode):
+    """Engine specification node."""
+
+    uid = UniqueIdProperty()
+    code = StringProperty(unique_index=True, required=True)
+    name = StringProperty(index=True)
+    family = StringProperty(index=True)  # EA888, B58, M264, etc.
+    manufacturer = StringProperty(index=True)
+
+    # Specifications
+    displacement_cc = IntegerProperty()
+    displacement_l = FloatProperty()
+    cylinders = IntegerProperty()
+    configuration = StringProperty()  # inline, v, boxer, rotary, electric
+    fuel_type = StringProperty(required=True, index=True)  # gasoline, diesel, hybrid, electric
+    aspiration = StringProperty()  # naturally_aspirated, turbo, supercharged, electric
+
+    # Power output
+    power_hp = IntegerProperty()
+    power_kw = IntegerProperty()
+    torque_nm = IntegerProperty()
+
+    # Production years
+    year_start = IntegerProperty()
+    year_end = IntegerProperty()
+
+    # Relationships
+    used_in = RelationshipFrom("VehicleNode", "USES_ENGINE", model=UsesEngineRel)
+    common_issues = RelationshipTo("DTCNode", "HAS_COMMON_ISSUE", model=HasCommonIssueRel)
+    requires_repair = RelationshipTo("RepairNode", "COMMON_REPAIR", model=RequiresRepairRel)
+
+
+class PlatformNode(StructuredNode):
+    """Vehicle platform node."""
+
+    uid = UniqueIdProperty()
+    code = StringProperty(unique_index=True, required=True)
+    name = StringProperty(required=True, index=True)
+    manufacturer = StringProperty(index=True)
+    segment = StringProperty()  # A, B, C, D, E, F
+    year_start = IntegerProperty()
+    year_end = IntegerProperty()
+    drivetrain_options = ArrayProperty(StringProperty())  # FWD, RWD, AWD
+
+    # Relationships
+    vehicles = RelationshipFrom("VehicleNode", "SHARES_PLATFORM", model=SharesPlatformRel)
 
 
 # Utility functions
@@ -265,3 +351,162 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
         result["components"].append(comp_data)
 
     return result
+
+
+async def get_vehicle_common_issues(make: str, model: str, year: int = None) -> dict:
+    """
+    Get common DTC codes and issues for a specific vehicle.
+
+    Args:
+        make: Vehicle manufacturer ID (e.g., 'volkswagen')
+        model: Vehicle model name (e.g., 'Golf VIII')
+        year: Optional model year for filtering
+
+    Returns:
+        Dictionary with common DTCs, repairs, and components for the vehicle.
+    """
+    vehicle = VehicleNode.nodes.filter(make=make, model=model).first_or_none()
+    if not vehicle:
+        return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
+
+    result = {
+        "vehicle": {
+            "make": vehicle.make,
+            "model": vehicle.model,
+            "year_start": vehicle.year_start,
+            "year_end": vehicle.year_end,
+            "platform": vehicle.platform,
+            "engine_codes": vehicle.engine_codes or [],
+        },
+        "common_dtcs": [],
+        "common_repairs": [],
+    }
+
+    # Get common DTC issues
+    for dtc in vehicle.has_common_issue.all():
+        rel = vehicle.has_common_issue.relationship(dtc)
+
+        # Filter by year if specified
+        if year:
+            rel_year_start = rel.year_start or vehicle.year_start
+            rel_year_end = rel.year_end or vehicle.year_end or 2030
+            if not (rel_year_start <= year <= rel_year_end):
+                continue
+
+        dtc_data = {
+            "code": dtc.code,
+            "description": dtc.description_hu or dtc.description_en,
+            "severity": dtc.severity,
+            "frequency": rel.frequency,
+            "occurrence_count": rel.occurrence_count,
+        }
+
+        # Get repair recommendations for this DTC
+        dtc_data["recommended_repairs"] = []
+        for component in dtc.indicates_failure_of.all():
+            for repair in component.repaired_by.all():
+                repair_rel = component.repaired_by.relationship(repair)
+                dtc_data["recommended_repairs"].append({
+                    "name": repair.description_hu or repair.name,
+                    "difficulty": repair.difficulty,
+                    "estimated_time_minutes": repair.estimated_time_minutes,
+                    "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+                })
+
+        result["common_dtcs"].append(dtc_data)
+
+    # Get common repairs directly linked to vehicle
+    for repair in vehicle.common_repair.all():
+        rel = vehicle.common_repair.relationship(repair)
+        result["common_repairs"].append({
+            "name": repair.description_hu or repair.name,
+            "difficulty": repair.difficulty,
+            "confidence": rel.confidence,
+            "is_primary_fix": rel.is_primary_fix == "true",
+            "estimated_time_minutes": repair.estimated_time_minutes,
+            "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+        })
+
+    return result
+
+
+async def get_engine_common_issues(engine_code: str) -> dict:
+    """
+    Get common issues for a specific engine code.
+
+    Args:
+        engine_code: Engine code (e.g., 'EA888_GEN3_2.0_190')
+
+    Returns:
+        Dictionary with engine info and common DTCs.
+    """
+    engine = EngineNode.nodes.get_or_none(code=engine_code)
+    if not engine:
+        return {"engine": None, "common_dtcs": [], "vehicles_using": []}
+
+    result = {
+        "engine": {
+            "code": engine.code,
+            "name": engine.name,
+            "family": engine.family,
+            "manufacturer": engine.manufacturer,
+            "displacement_l": engine.displacement_l,
+            "fuel_type": engine.fuel_type,
+            "power_hp": engine.power_hp,
+            "torque_nm": engine.torque_nm,
+        },
+        "common_dtcs": [],
+        "vehicles_using": [],
+    }
+
+    # Get common DTC issues
+    for dtc in engine.common_issues.all():
+        rel = engine.common_issues.relationship(dtc)
+        result["common_dtcs"].append({
+            "code": dtc.code,
+            "description": dtc.description_hu or dtc.description_en,
+            "severity": dtc.severity,
+            "frequency": rel.frequency,
+        })
+
+    # Get vehicles using this engine
+    for vehicle in engine.used_in.all():
+        rel = engine.used_in.relationship(vehicle)
+        result["vehicles_using"].append({
+            "make": vehicle.make,
+            "model": vehicle.model,
+            "year_start": rel.year_start or vehicle.year_start,
+            "year_end": rel.year_end or vehicle.year_end,
+            "variant": rel.variant_name,
+        })
+
+    return result
+
+
+async def find_similar_vehicles(make: str, model: str) -> list:
+    """
+    Find vehicles that share the same platform (likely similar issues).
+
+    Args:
+        make: Vehicle manufacturer ID
+        model: Vehicle model name
+
+    Returns:
+        List of similar vehicles sharing the same platform.
+    """
+    vehicle = VehicleNode.nodes.filter(make=make, model=model).first_or_none()
+    if not vehicle or not vehicle.platform:
+        return []
+
+    similar = []
+    for other_vehicle in vehicle.shares_platform_with.all():
+        rel = vehicle.shares_platform_with.relationship(other_vehicle)
+        similar.append({
+            "make": other_vehicle.make,
+            "model": other_vehicle.model,
+            "platform": rel.platform_code,
+            "year_start": other_vehicle.year_start,
+            "year_end": other_vehicle.year_end,
+        })
+
+    return similar

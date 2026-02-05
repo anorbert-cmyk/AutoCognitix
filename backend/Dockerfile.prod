@@ -1,0 +1,107 @@
+# ============================================
+# AutoCognitix Backend - Production Dockerfile
+# Multi-stage build for optimized image size
+# ============================================
+
+# ============================================
+# Stage 1: Builder - Compile dependencies
+# ============================================
+FROM python:3.11-slim-bookworm AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment for isolation
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY requirements.txt .
+
+# Create production requirements (exclude dev dependencies)
+RUN grep -v -E "^(pytest|black|isort|flake8|mypy|pre-commit)" requirements.txt > requirements.prod.txt || true
+
+# Install production dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir gunicorn uvicorn[standard] && \
+    pip install --no-cache-dir -r requirements.prod.txt
+
+# ============================================
+# Stage 2: Production - Minimal runtime image
+# ============================================
+FROM python:3.11-slim-bookworm AS production
+
+# Set labels for container metadata
+LABEL maintainer="AutoCognitix Team"
+LABEL version="1.0"
+LABEL description="AutoCognitix Backend API - Production"
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && rm -rf /var/cache/apt/archives/*
+
+# Create non-root user with specific UID/GID for security
+RUN groupadd --gid 1000 appgroup && \
+    useradd --uid 1000 --gid appgroup --shell /bin/false --create-home appuser
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code (only necessary files)
+COPY --chown=appuser:appgroup app ./app
+COPY --chown=appuser:appgroup alembic ./alembic
+COPY --chown=appuser:appgroup alembic.ini .
+
+# Create directories for logs and temp files
+RUN mkdir -p /app/logs /app/tmp && \
+    chown -R appuser:appgroup /app
+
+# Environment variables
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check with proper timeout and retries
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Production command with Gunicorn + Uvicorn workers
+# - Workers: 2 * CPU cores + 1 (configurable via env)
+# - Graceful timeout for zero-downtime deploys
+# - Access log to stdout for container logging
+CMD ["gunicorn", "app.main:app", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "4", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--timeout", "120", \
+     "--graceful-timeout", "30", \
+     "--keep-alive", "5", \
+     "--max-requests", "10000", \
+     "--max-requests-jitter", "1000", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--capture-output", \
+     "--enable-stdio-inheritance"]

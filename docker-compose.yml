@@ -132,6 +132,50 @@ services:
     networks:
       - autocognitix-network
 
+  # ===========================================
+  # Prometheus - Metrics (Development)
+  # ===========================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: autocognitix-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - autocognitix-network
+    profiles:
+      - monitoring
+
+  # ===========================================
+  # Grafana - Dashboards (Development)
+  # ===========================================
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: autocognitix-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - autocognitix-network
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
 volumes:
   postgres_data:
   neo4j_data:
@@ -139,6 +183,8 @@ volumes:
   neo4j_plugins:
   qdrant_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   autocognitix-network:
