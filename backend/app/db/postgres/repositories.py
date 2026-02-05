@@ -12,6 +12,8 @@ Performance Optimizations:
 - Full-text search using PostgreSQL GIN indexes
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID

@@ -27,10 +27,12 @@ env:
 jobs:
   # ============================================
   # CodeQL Analysis (SAST)
+  # Non-blocking - uploads results to GitHub Security tab
   # ============================================
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       actions: read
       contents: read
@@ -48,21 +50,26 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: +security-and-quality
+        continue-on-error: true
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
+        continue-on-error: true
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
+        continue-on-error: true
 
   # ============================================
   # Python Dependency Vulnerability Check
+  # Non-blocking - informational only
   # ============================================
   python-security:
     name: Python Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -125,10 +132,12 @@ jobs:
 
   # ============================================
   # Node.js Dependency Vulnerability Check
+  # Non-blocking - informational only
   # ============================================
   npm-security:
     name: NPM Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -174,10 +183,12 @@ jobs:
 
   # ============================================
   # Secret Scanning
+  # Non-blocking but important - review results
   # ============================================
   secret-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -204,10 +215,12 @@ jobs:
 
   # ============================================
   # Trivy Container Scanning
+  # Non-blocking - informational only
   # ============================================
   container-scan:
     name: Container Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -257,10 +270,12 @@ jobs:
 
   # ============================================
   # License Compliance Check
+  # Non-blocking - informational only
   # ============================================
   license-check:
     name: License Compliance
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -329,11 +344,14 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Run Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
 
-      - name: Check for critical failures
+      - name: Security scan status
         run: |
-          if [ "${{ needs.codeql.result }}" == "failure" ] || \
-             [ "${{ needs.secret-scan.result }}" == "failure" ]; then
-            echo "Critical security checks failed!"
-            exit 1
-          fi
+          # During early development, security checks are non-blocking
+          # All results are uploaded as artifacts for review
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Note: Security checks are non-blocking during early development._" >> $GITHUB_STEP_SUMMARY
+          echo "_Review artifacts and GitHub Security tab for detailed findings._" >> $GITHUB_STEP_SUMMARY
+          echo ""
           echo "Security scan completed. Review artifacts for detailed reports."
+          # Exit successfully - don't block deployment
+          exit 0

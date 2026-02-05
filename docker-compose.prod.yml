@@ -3,8 +3,7 @@
 # Complete stack with Traefik, health checks,
 # resource limits, and logging
 # ============================================
-
-version: "3.9"
+# Note: 'version' field is omitted (deprecated in Docker Compose V2)
 
 services:
   # ==========================================

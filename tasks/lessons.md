@@ -718,3 +718,459 @@ RUN npm ci --omit=dev
 ```bash
 docker build -f frontend/Dockerfile.prod -t test frontend/
 ```
+
+---
+
+## 2026-02-05 - SQLAlchemy Reserved Words (CRITICAL)
+
+### A `metadata` Oszlopnév Probléma
+
+**Problem:** SQLAlchemy `metadata` oszlopnév használata hibát okoz, mert a `metadata` fenntartott szó a SQLAlchemy-ben.
+
+**Root Cause:** A SQLAlchemy `DeclarativeBase` osztály a `metadata` attribútumot használja a tábla metaadatokhoz. Ha ugyanezt a nevet használjuk oszlopnévként, ütközés keletkezik.
+
+**Hibás kód:**
+```python
+# HELYTELEN - metadata fenntartott szó!
+class NHTSAVehicleSyncTracking(Base):
+    __tablename__ = "nhtsa_vehicle_sync_tracking"
+
+    metadata: Mapped[dict | None] = mapped_column(JSONB)  # HIBA!
+```
+
+**Hiba típusa:**
+```
+AttributeError: 'Column' object has no attribute 'tables'
+# vagy
+TypeError: 'MetaData' object is not callable
+```
+
+**Megoldás:**
+```python
+# HELYES - használj alternatív nevet
+class NHTSAVehicleSyncTracking(Base):
+    __tablename__ = "nhtsa_vehicle_sync_tracking"
+
+    sync_metadata: Mapped[dict | None] = mapped_column(JSONB)  # OK!
+```
+
+**További SQLAlchemy Fenntartott Szavak:**
+
+| Fenntartott szó | Alternatíva |
+|-----------------|-------------|
+| `metadata` | `sync_metadata`, `item_metadata`, `extra_data` |
+| `registry` | `item_registry`, `data_registry` |
+| `query` | `search_query`, `query_text` |
+| `columns` | `column_list`, `field_columns` |
+| `tables` | `table_list`, `related_tables` |
+
+**Prevention Rules:**
+
+1. **Migrációk írása előtt:**
+   - Ellenőrizd a SQLAlchemy dokumentációt fenntartott szavakra
+   - Használj prefixet: `sync_`, `item_`, `data_`, stb.
+
+2. **Code review checklist:**
+   - Új oszlopnév? Ellenőrizd: `hasattr(Base, column_name)`
+   - Ha True, használj másik nevet
+
+3. **Naming convention:**
+   ```python
+   # Projekt-szintű szabály: JSONB oszlopok prefixe
+   sync_metadata: Mapped[dict | None] = mapped_column(JSONB)
+   extra_data: Mapped[dict | None] = mapped_column(JSONB)
+   raw_response: Mapped[dict | None] = mapped_column(JSONB)  # OK, specifikus
+   ```
+
+---
+
+## 2026-02-05 - npm package-lock.json Sync Issues (CRITICAL)
+
+### Lock File Szinkronizáció
+
+**Problem:** Docker build vagy CI `npm ci` sikertelen: "Missing: package@version from lock file"
+
+**Root Cause:** `package.json` és `package-lock.json` nincs szinkronban. Új package hozzáadva, de `npm install` nem futott.
+
+**Hibaüzenet:**
+```
+npm ERR! Missing: @tanstack/react-query@^5.59.20 from lock file
+npm ERR! Missing: lucide-react@^0.460.0 from lock file
+
+npm ERR! `npm ci` can only install packages when your package.json and package-lock.json are in sync.
+```
+
+**Megoldás:**
+```bash
+# 1. Lokálisan szinkronizáld
+cd frontend && npm install
+
+# 2. Commit-old mindkét fájlt
+git add package.json package-lock.json
+git commit -m "chore: sync package-lock.json"
+```
+
+**npm ci vs npm install:**
+
+| Parancs | Használat | Lock file |
+|---------|-----------|-----------|
+| `npm install` | Fejlesztés, új package hozzáadása | Frissíti |
+| `npm ci` | CI/CD, Docker build | Nem frissíti, hibázik ha nem szinkron |
+
+**Prevention Rules:**
+
+1. **Package hozzáadása után MINDIG:**
+   ```bash
+   npm install <package>
+   git add package.json package-lock.json
+   ```
+
+2. **Docker build előtt MINDIG:**
+   ```bash
+   npm ci  # Lokálisan tesztelés
+   docker build -f Dockerfile.prod -t test .
+   ```
+
+3. **CI/CD workflow:**
+   ```yaml
+   - name: Install dependencies
+     run: |
+       cd frontend
+       npm ci  # NEM npm install!
+   ```
+
+4. **Pre-commit hook (opcionális):**
+   ```bash
+   # .husky/pre-commit
+   if git diff --cached --name-only | grep -q "package.json"; then
+       if ! git diff --cached --name-only | grep -q "package-lock.json"; then
+           echo "ERROR: package.json changed but package-lock.json wasn't updated"
+           exit 1
+       fi
+   fi
+   ```
+
+### npm Deprecated Flags
+
+**Problem:** `npm ci --only=production=false` deprecated npm 10+
+
+**Hiba:**
+```
+npm warn invalid config only="production=false" set in command line options
+npm warn invalid config Must be one of: null, prod, production
+```
+
+**Megoldás:**
+```dockerfile
+# Build fázis (kell devDependencies TypeScript-hez)
+RUN npm ci
+
+# Production runtime (csak dependencies)
+RUN npm ci --omit=dev
+```
+
+---
+
+## 2026-02-05 - GitHub Actions Conditional Execution
+
+### Job Dependencies és Conditional Logic
+
+**Problem:** CD workflow futott CI nélkül, sikertelen deployment.
+
+**Root Cause:** Nem volt `needs` és `if` kondíció a deployment job-on.
+
+**Megoldás - Job Dependencies:**
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps: [...]
+
+  test:
+    runs-on: ubuntu-latest
+    steps: [...]
+
+  deploy:
+    needs: [lint, test]  # Várd meg mindkettőt
+    if: needs.lint.result == 'success' && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    steps: [...]
+```
+
+**Fontos `if` Kondíciók:**
+
+| Kondíció | Jelentés |
+|----------|----------|
+| `if: always()` | Mindig fut, függetlenül a korábbi job-ok eredményétől |
+| `if: success()` | Csak ha minden korábbi job sikeres (default) |
+| `if: failure()` | Csak ha valamelyik korábbi job sikertelen |
+| `if: cancelled()` | Csak ha a workflow cancelled |
+| `if: needs.job-name.result == 'success'` | Specifikus job eredménye alapján |
+
+**CI Success Gate Pattern:**
+```yaml
+# Központi "gate" job ami összefoglalja az összes ellenőrzést
+ci-success:
+  name: CI Success
+  runs-on: ubuntu-latest
+  needs:
+    - backend-lint
+    - backend-type-check
+    - backend-test
+    - frontend-lint
+    - frontend-build
+    - docker-build
+  if: always()  # Mindig fusson, hogy jelenthessen
+  steps:
+    - name: Check all jobs passed
+      run: |
+        if [ "${{ needs.backend-lint.result }}" != "success" ] || \
+           [ "${{ needs.backend-test.result }}" != "success" ] || \
+           [ "${{ needs.frontend-build.result }}" != "success" ]; then
+          echo "One or more required jobs failed"
+          exit 1
+        fi
+        echo "All CI checks passed!"
+```
+
+**Branch Protection Integration:**
+```yaml
+# A ci-success job-ot add hozzá required status check-ként
+# GitHub Settings → Branches → Branch protection rules
+# Require status checks: "CI Success"
+```
+
+### Workflow Triggers
+
+**Helyes trigger konfiguráció:**
+```yaml
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'  # Csak ha backend változott
+      - 'frontend/**'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true  # Korábbi futó workflow-t állítsd le
+```
+
+### Environment és Secrets
+
+**Environment-specifikus deployment:**
+```yaml
+deploy-railway:
+  environment:
+    name: ${{ needs.prepare.outputs.environment }}  # staging/production
+    url: ${{ steps.deploy.outputs.url }}
+  steps:
+    - name: Deploy
+      env:
+        RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}  # Environment secret
+```
+
+---
+
+## 2026-02-05 - Railway Deployment Patterns
+
+### Railway.toml Konfiguráció
+
+**Backend (backend/railway.toml):**
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.prod"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+```
+
+**Frontend (frontend/railway.toml):**
+```toml
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+```
+
+### Environment Variables Pattern
+
+**Railway Auto-Provided:**
+```
+DATABASE_URL=postgresql://...  # Railway PostgreSQL
+REDIS_URL=redis://...           # Railway Redis
+PORT=...                        # Railway port
+```
+
+**Manual Configuration Required:**
+```
+# External services
+NEO4J_URI=neo4j+s://xxx.databases.neo4j.io
+NEO4J_PASSWORD=...
+QDRANT_URL=https://xxx.cloud.qdrant.io:6333
+QDRANT_API_KEY=...
+
+# API keys
+ANTHROPIC_API_KEY=...
+JWT_SECRET_KEY=...
+
+# App config
+ENVIRONMENT=production
+ALLOWED_ORIGINS=https://yourdomain.com
+```
+
+### Health Check Implementation
+
+**Backend health endpoint:**
+```python
+@router.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
+    }
+```
+
+**CD Workflow Smoke Test:**
+```yaml
+- name: Health check - Backend
+  run: |
+    for i in {1..10}; do
+      status=$(curl -s -o /dev/null -w "%{http_code}" "${{ vars.API_URL }}/health" || echo "000")
+      if [ "$status" == "200" ]; then
+        echo "Backend is healthy!"
+        exit 0
+      fi
+      echo "Attempt $i: Backend returned $status, waiting..."
+      sleep 10
+    done
+    echo "Backend health check failed after 10 attempts"
+    exit 1
+```
+
+### Rollback Strategy
+
+**Automatikus rollback issue creation:**
+```yaml
+rollback:
+  needs: [prepare, smoke-tests]
+  if: failure() && needs.smoke-tests.result == 'failure'
+  steps:
+    - name: Create rollback issue
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Deployment Failed - Rollback Required (${context.sha.substring(0, 8)})`,
+            body: `## Deployment Failure\n\n- **Version:** ...\n- **Environment:** ...\n\nSmoke tests failed. Manual rollback may be required.`,
+            labels: ['deployment', 'urgent', 'bug']
+          })
+```
+
+### Alembic Migrations on Railway
+
+**Fontos:** Migráció futtatása deployment után:
+```yaml
+run-migrations:
+  needs: [deploy-railway]
+  steps:
+    - name: Run Alembic migrations
+      run: |
+        cd backend
+        alembic upgrade head
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      continue-on-error: true  # Ne bukjon el a deployment ha a migráció már lefutott
+```
+
+### Railway Deployment Rules
+
+1. **Mindig teszteld lokálisan Docker-rel:**
+   ```bash
+   docker build -f Dockerfile.prod -t test .
+   docker run -p 8000:8000 test
+   ```
+
+2. **Health check legyen gyors (< 5 sec):**
+   - Ne csatlakozz adatbázishoz a health check-ben
+   - Csak az alkalmazás állapotát ellenőrizd
+
+3. **Environment variables:**
+   - Soha ne hardcode-olj secret-eket
+   - Használj Railway Variables vagy GitHub Secrets-et
+
+4. **Logging:**
+   - Railway automatikusan gyűjti a stdout/stderr-t
+   - Használj strukturált JSON logging-ot
+
+5. **Cost management:**
+   - Használj scale-to-zero staging-en
+   - Figyelj a resource usage-re a dashboard-on
+
+---
+
+## CI/CD Checklist - Minden Commit Előtt
+
+### Backend
+```bash
+# 1. Ruff linting
+cd backend && python3 -m ruff check app tests --fix
+
+# 2. Ruff formatting
+cd backend && python3 -m ruff format app tests
+
+# 3. Type check
+cd backend && mypy app --ignore-missing-imports
+
+# 4. Unit tests
+cd backend && pytest tests -v --ignore=tests/integration --ignore=tests/e2e
+```
+
+### Frontend
+```bash
+# 1. Sync lock file
+cd frontend && npm install
+
+# 2. Lint
+cd frontend && npm run lint
+
+# 3. Type check
+cd frontend && npx tsc --noEmit
+
+# 4. Build
+cd frontend && npm run build
+```
+
+### Docker
+```bash
+# Backend
+docker build -f backend/Dockerfile.prod -t backend-test backend/
+
+# Frontend
+docker build -f frontend/Dockerfile.prod -t frontend-test frontend/
+```
+
+### Git
+```bash
+# Verify tracked files
+git status
+
+# Check for unintended changes
+git diff
+
+# Commit with clear message
+git commit -m "feat/fix/chore: clear description"
+```

@@ -324,6 +324,46 @@ A következő hibák IGNORÁLVA vannak:
 3. Type hibák: `mypy app --ignore-missing-imports`
 4. Test hibák: `pytest tests -v`
 
+## CI/CD Tanulságok - KRITIKUS SZABÁLYOK
+
+### SQLAlchemy Fenntartott Szavak
+**SOHA** ne használd ezeket oszlopnévként:
+- `metadata` → használj `sync_metadata`, `extra_data`
+- `registry`, `query`, `columns`, `tables`
+
+```python
+# HELYTELEN
+metadata: Mapped[dict | None] = mapped_column(JSONB)
+
+# HELYES
+sync_metadata: Mapped[dict | None] = mapped_column(JSONB)
+```
+
+### npm package-lock.json Sync
+**MINDIG** futtasd `npm install`-t package.json változtatás után:
+```bash
+cd frontend && npm install
+git add package.json package-lock.json
+```
+
+CI-ben **MINDIG** `npm ci`-t használj (nem `npm install`-t)!
+
+### GitHub Actions Conditional Execution
+```yaml
+# Deployment CSAK ha minden check sikeres
+deploy:
+  needs: [lint, test, build]
+  if: needs.lint.result == 'success' && needs.test.result == 'success'
+```
+
+### Railway Deployment
+1. Dockerfile.prod tesztelése lokálisan
+2. Health endpoint implementálása
+3. Environment variables Railway Variables-ben
+4. Alembic migráció CD workflow-ban
+
+**Részletes dokumentáció:** `tasks/lessons.md`
+
 ## Kapcsolódó Dokumentumok
 
 - `AutoCognitix_Teljeskoeru_Elemzes.docx` - Részletes elemzés

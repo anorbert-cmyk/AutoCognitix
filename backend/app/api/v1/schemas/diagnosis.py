@@ -2,6 +2,8 @@
 Diagnosis schemas - core diagnostic request/response models.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from uuid import UUID
 

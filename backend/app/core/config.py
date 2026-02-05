@@ -4,6 +4,8 @@ Loads configuration from environment variables and .env file.
 Supports Railway deployment with automatic environment variable detection.
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
 
 from pydantic import field_validator

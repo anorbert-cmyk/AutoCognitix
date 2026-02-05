@@ -5,6 +5,8 @@ This module provides a service class for interacting with Qdrant vector database
 supporting both local and cloud deployments with Hungarian error messages.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 from qdrant_client import QdrantClient

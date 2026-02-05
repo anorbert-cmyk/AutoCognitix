@@ -7,10 +7,12 @@ including system prompts, user prompts, and response parsing utilities.
 Author: AutoCognitix Team
 """
 
+from __future__ import annotations
+
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 # =============================================================================
 # System Prompts

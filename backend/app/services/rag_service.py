@@ -12,6 +12,8 @@ This module provides a complete Hungarian vehicle diagnostic RAG pipeline:
 Author: AutoCognitix Team
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import time

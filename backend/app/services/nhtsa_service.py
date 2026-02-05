@@ -13,6 +13,8 @@ Features:
 - Optional Redis caching
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json

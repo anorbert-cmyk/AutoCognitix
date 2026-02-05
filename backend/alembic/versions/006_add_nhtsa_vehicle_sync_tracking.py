@@ -56,8 +56,8 @@ def upgrade() -> None:
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
 
-        # Metadata
-        sa.Column('metadata', postgresql.JSONB(), nullable=True),  # Additional sync info
+        # Extra data (JSONB) - NOTE: 'metadata' is a reserved word in SQLAlchemy!
+        sa.Column('sync_metadata', postgresql.JSONB(), nullable=True),  # Additional sync info
     )
 
     # Create indexes

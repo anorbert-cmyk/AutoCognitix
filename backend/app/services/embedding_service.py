@@ -13,6 +13,8 @@ Performance Optimizations:
 - Async-compatible embedding generation
 """
 
+from __future__ import annotations
+
 import asyncio
 import gc
 import logging

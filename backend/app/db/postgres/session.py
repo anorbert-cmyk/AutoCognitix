@@ -9,6 +9,8 @@ Optimized for performance with:
 - Comprehensive error handling with Hungarian error messages
 """
 
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.exc import (

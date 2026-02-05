@@ -13,6 +13,8 @@ Cache Strategies:
 - LRU eviction: Redis handles memory limits
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json

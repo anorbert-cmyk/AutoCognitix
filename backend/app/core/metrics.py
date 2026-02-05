@@ -264,7 +264,7 @@ LLM_LATENCY = Histogram(
 LLM_TOKENS = Counter(
     "autocognitix_llm_tokens_total",
     "Total LLM tokens used",
-    ["provider", "model", "type"],  # type: input/output
+    ["provider", "model", "type"],  # token type: input/output
 )
 
 # =============================================================================

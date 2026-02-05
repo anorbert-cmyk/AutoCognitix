@@ -2,6 +2,8 @@
 SQLAlchemy models for PostgreSQL database.
 """
 
+from __future__ import annotations
+
 from datetime import date, datetime
 from uuid import uuid4
 
