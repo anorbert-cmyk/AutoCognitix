@@ -2,6 +2,7 @@
 Vehicle endpoints - vehicle information and VIN decoding.
 """
 
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 

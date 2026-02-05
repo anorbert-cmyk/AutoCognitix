@@ -5,6 +5,8 @@ Provides user registration, login, token refresh, logout, profile management,
 and password reset endpoints. All tokens are JWTs with configurable expiration times.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 from uuid import UUID

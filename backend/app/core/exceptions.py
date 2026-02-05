@@ -8,10 +8,21 @@ This module defines a hierarchy of exceptions with:
 - Error codes for client-side handling
 """
 
-from enum import StrEnum
+from __future__ import annotations
+
+import sys
+from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException, status
+
+# Python 3.11+ has StrEnum, provide compatibility for earlier versions
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    class StrEnum(str, Enum):
+        """String enum for Python < 3.11 compatibility."""
+        pass
 
 # =============================================================================
 # Error Codes Enum

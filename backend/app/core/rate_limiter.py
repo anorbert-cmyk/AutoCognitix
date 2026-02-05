@@ -5,6 +5,8 @@ Provides Redis-based distributed rate limiting with fallback to in-memory limiti
 Supports per-IP and per-user limits with configurable windows.
 """
 
+from __future__ import annotations
+
 import logging
 import time
 from collections import defaultdict

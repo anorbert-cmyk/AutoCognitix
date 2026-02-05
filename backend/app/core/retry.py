@@ -8,6 +8,8 @@ Provides:
 - Logging of retry attempts
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 from collections.abc import Callable

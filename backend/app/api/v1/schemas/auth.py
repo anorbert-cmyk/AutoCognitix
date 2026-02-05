@@ -4,8 +4,10 @@ Authentication schemas.
 Provides Pydantic models for authentication requests and responses.
 """
 
+from __future__ import annotations
+
 import re
-from typing import Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -64,7 +66,7 @@ class UserCreate(BaseModel):
 
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=100)
-    full_name: str | None = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=100)
     role: UserRole = Field(default="user", description="User role (default: user)")
 
     @field_validator("password")
@@ -86,10 +88,10 @@ class UserResponse(BaseModel):
 
     id: str
     email: EmailStr
-    full_name: str | None = None
+    full_name: Optional[str] = None
     is_active: bool = True
     role: UserRole = "user"
-    created_at: str | None = None
+    created_at: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -98,8 +100,8 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     """Schema for updating user profile."""
 
-    full_name: str | None = Field(None, max_length=100)
-    email: EmailStr | None = None
+    full_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[EmailStr] = None
 
 
 class UserPasswordUpdate(BaseModel):
@@ -139,8 +141,8 @@ class TokenPayload(BaseModel):
     sub: str
     exp: int
     type: str
-    jti: str | None = None
-    role: str | None = None
+    jti: Optional[str] = None
+    role: Optional[str] = None
 
 
 # =============================================================================
@@ -185,7 +187,7 @@ class ResetPasswordResponse(BaseModel):
 class LogoutRequest(BaseModel):
     """Schema for logout request (optional refresh token)."""
 
-    refresh_token: str | None = None
+    refresh_token: Optional[str] = None
 
 
 class LogoutResponse(BaseModel):
@@ -202,10 +204,10 @@ class AuthErrorResponse(BaseModel):
     """Schema for authentication error response."""
 
     detail: str
-    error_code: str | None = None
+    error_code: Optional[str] = None
 
 
 class ValidationErrorResponse(BaseModel):
     """Schema for validation error response."""
 
-    detail: list[dict]
+    detail: List[dict]

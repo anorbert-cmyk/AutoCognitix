@@ -2,14 +2,29 @@
 Pytest configuration and fixtures for AutoCognitix tests.
 """
 
-import pytest
-from unittest.mock import patch
+import os
 import sys
 from pathlib import Path
 
 # Add backend to path for imports
 backend_path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_path))
+
+# Set environment variables for testing BEFORE any imports
+# These need to be set before the modules are imported
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test_db")
+os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
+os.environ.setdefault("NEO4J_USER", "neo4j")
+os.environ.setdefault("NEO4J_PASSWORD", "test_password")
+os.environ.setdefault("QDRANT_HOST", "localhost")
+os.environ.setdefault("QDRANT_PORT", "6333")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("SECRET_KEY", "test_secret_key_for_testing_only")
+os.environ.setdefault("JWT_SECRET_KEY", "test_jwt_secret_for_testing_only")
+os.environ.setdefault("ENVIRONMENT", "testing")
+
+import pytest
+from unittest.mock import patch
 
 
 @pytest.fixture

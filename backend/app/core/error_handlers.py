@@ -8,6 +8,8 @@ This module provides:
 - Error logging with context
 """
 
+from __future__ import annotations
+
 import traceback
 import uuid
 from collections.abc import Callable

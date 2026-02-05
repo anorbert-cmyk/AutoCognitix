@@ -18,13 +18,22 @@ Author: AutoCognitix Team
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
+
+# Python 3.11+ has StrEnum, provide compatibility for earlier versions
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    class StrEnum(str, Enum):
+        """String enum for Python < 3.11 compatibility."""
+        pass
 
 logger = get_logger(__name__)
 

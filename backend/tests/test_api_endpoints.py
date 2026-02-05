@@ -7,17 +7,29 @@ Tests cover:
 - Health check endpoint
 - Input validation
 - Error handling
+
+NOTE: These tests require database access and should be run as integration tests.
+Run with: pytest tests/test_api_endpoints.py -m integration
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 import sys
 from pathlib import Path
 
 # Add backend to path
 backend_path = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_path))
+
+import pytest
+
+# Mark entire module as integration tests - these require database connections
+pytestmark = pytest.mark.integration
+
+# Skip entire module if database is not available
+try:
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+except ImportError as e:
+    pytest.skip(f"FastAPI not available: {e}", allow_module_level=True)
 
 
 @pytest.fixture

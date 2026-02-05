@@ -24,8 +24,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Install Python dependencies
 COPY requirements.txt .
 
-# Create production requirements (exclude dev dependencies)
-RUN grep -v -E "^(pytest|black|isort|flake8|mypy|pre-commit)" requirements.txt > requirements.prod.txt || true
+# Create production requirements (exclude dev and scraping dependencies)
+# playwright, beautifulsoup4, lxml are only used in scripts/ for data import
+RUN grep -v -E "^(pytest|black|isort|flake8|mypy|pre-commit|playwright|beautifulsoup4|lxml)" requirements.txt > requirements.prod.txt || true
 
 # Install production dependencies
 RUN pip install --no-cache-dir --upgrade pip && \

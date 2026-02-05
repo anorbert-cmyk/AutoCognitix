@@ -22,9 +22,12 @@ import traceback
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
+
+# Python 3.11+ has datetime.UTC, for older versions use timezone.utc
+UTC = timezone.utc
 
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -34,12 +37,12 @@ from starlette.responses import Response
 from app.core.config import settings
 
 # Context variables for request correlation and distributed tracing
-request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
-user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
-correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
-trace_id_var: ContextVar[str | None] = ContextVar("trace_id", default=None)
-span_id_var: ContextVar[str | None] = ContextVar("span_id", default=None)
-parent_span_id_var: ContextVar[str | None] = ContextVar("parent_span_id", default=None)
+request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+user_id_var: ContextVar[Optional[str]] = ContextVar("user_id", default=None)
+correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
+trace_id_var: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
+span_id_var: ContextVar[Optional[str]] = ContextVar("span_id", default=None)
+parent_span_id_var: ContextVar[Optional[str]] = ContextVar("parent_span_id", default=None)
 
 # Type variable for generic function decorator
 F = TypeVar("F", bound=Callable[..., Any])

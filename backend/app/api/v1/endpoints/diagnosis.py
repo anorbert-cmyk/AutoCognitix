@@ -8,6 +8,8 @@ Provides AI-powered vehicle diagnosis using:
 - Vector similarity search with Qdrant
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from uuid import UUID
 

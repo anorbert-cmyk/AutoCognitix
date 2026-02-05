@@ -4,27 +4,32 @@ Security utilities for authentication and authorization.
 Provides JWT token management, password hashing, and token blacklisting.
 """
 
+from __future__ import annotations
+
 import secrets
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional, Set, Union
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
+# Python 3.11+ has datetime.UTC, for older versions use timezone.utc
+UTC = timezone.utc
+
 # Password hashing context with bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # In-memory token blacklist (in production, use Redis)
 # This stores JTI (JWT ID) of invalidated tokens
-_token_blacklist: set[str] = set()
+_token_blacklist: Set[str] = set()
 
 
 def create_access_token(
-    subject: str | Any,
-    expires_delta: timedelta | None = None,
-    additional_claims: dict[str, Any] | None = None,
+    subject: Union[str, Any],
+    expires_delta: Optional[timedelta] = None,
+    additional_claims: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Create a JWT access token.

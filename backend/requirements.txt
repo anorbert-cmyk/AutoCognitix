@@ -16,7 +16,7 @@ alembic==1.13.1
 pgvector==0.2.4
 
 # Database - Neo4j
-neo4j>=5.17.0
+neo4j~=5.19.0  # neomodel 5.3.0 requires neo4j~=5.19.0
 neomodel==5.3.0
 
 # Database - Qdrant

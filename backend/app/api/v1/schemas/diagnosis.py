@@ -5,6 +5,7 @@ Diagnosis schemas - core diagnostic request/response models.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -16,12 +17,12 @@ class DiagnosisRequest(BaseModel):
     vehicle_make: str = Field(..., min_length=1, max_length=100, description="Vehicle manufacturer")
     vehicle_model: str = Field(..., min_length=1, max_length=100, description="Vehicle model")
     vehicle_year: int = Field(..., ge=1900, le=2030, description="Vehicle year")
-    vehicle_engine: str | None = Field(None, max_length=100, description="Engine type/code")
-    vin: str | None = Field(None, min_length=17, max_length=17, description="Vehicle Identification Number")
+    vehicle_engine: Optional[str] = Field(None, max_length=100, description="Engine type/code")
+    vin: Optional[str] = Field(None, min_length=17, max_length=17, description="Vehicle Identification Number")
 
-    dtc_codes: list[str] = Field(..., min_length=1, max_length=20, description="List of DTC codes")
+    dtc_codes: List[str] = Field(..., min_length=1, max_length=20, description="List of DTC codes")
     symptoms: str = Field(..., min_length=10, max_length=2000, description="Symptom description in Hungarian")
-    additional_context: str | None = Field(None, max_length=1000, description="Additional context")
+    additional_context: Optional[str] = Field(None, max_length=1000, description="Additional context")
 
     class Config:
         json_schema_extra = {
@@ -43,8 +44,8 @@ class ProbableCause(BaseModel):
     title: str = Field(..., description="Short title of the cause")
     description: str = Field(..., description="Detailed description in Hungarian")
     confidence: float = Field(..., ge=0, le=1, description="Confidence score (0-1)")
-    related_dtc_codes: list[str] = Field(default_factory=list, description="Related DTC codes")
-    components: list[str] = Field(default_factory=list, description="Affected components")
+    related_dtc_codes: List[str] = Field(default_factory=list, description="Related DTC codes")
+    components: List[str] = Field(default_factory=list, description="Affected components")
 
 
 class RepairRecommendation(BaseModel):
@@ -52,12 +53,12 @@ class RepairRecommendation(BaseModel):
 
     title: str = Field(..., description="Short title of the repair")
     description: str = Field(..., description="Detailed repair instructions in Hungarian")
-    estimated_cost_min: int | None = Field(None, ge=0, description="Minimum estimated cost")
-    estimated_cost_max: int | None = Field(None, ge=0, description="Maximum estimated cost")
+    estimated_cost_min: Optional[int] = Field(None, ge=0, description="Minimum estimated cost")
+    estimated_cost_max: Optional[int] = Field(None, ge=0, description="Maximum estimated cost")
     estimated_cost_currency: str = Field("HUF", description="Currency code")
     difficulty: str = Field("intermediate", description="Difficulty level: beginner, intermediate, advanced, professional")
-    parts_needed: list[str] = Field(default_factory=list, description="List of parts needed")
-    estimated_time_minutes: int | None = Field(None, ge=0, description="Estimated repair time in minutes")
+    parts_needed: List[str] = Field(default_factory=list, description="List of parts needed")
+    estimated_time_minutes: Optional[int] = Field(None, ge=0, description="Estimated repair time in minutes")
 
 
 class Source(BaseModel):
@@ -65,7 +66,7 @@ class Source(BaseModel):
 
     type: str = Field(..., description="Source type: tsb, forum, video, manual, database")
     title: str = Field(..., description="Source title")
-    url: str | None = Field(None, description="Source URL if available")
+    url: Optional[str] = Field(None, description="Source URL if available")
     relevance_score: float = Field(..., ge=0, le=1, description="Relevance score (0-1)")
 
 
@@ -76,13 +77,13 @@ class DiagnosisResponse(BaseModel):
     vehicle_make: str
     vehicle_model: str
     vehicle_year: int
-    dtc_codes: list[str]
+    dtc_codes: List[str]
     symptoms: str
 
-    probable_causes: list[ProbableCause] = Field(..., description="Ranked list of probable causes")
-    recommended_repairs: list[RepairRecommendation] = Field(..., description="Recommended repairs")
+    probable_causes: List[ProbableCause] = Field(..., description="Ranked list of probable causes")
+    recommended_repairs: List[RepairRecommendation] = Field(..., description="Recommended repairs")
     confidence_score: float = Field(..., ge=0, le=1, description="Overall diagnosis confidence")
-    sources: list[Source] = Field(default_factory=list, description="Information sources used")
+    sources: List[Source] = Field(default_factory=list, description="Information sources used")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -97,8 +98,8 @@ class DiagnosisHistoryItem(BaseModel):
     vehicle_make: str
     vehicle_model: str
     vehicle_year: int
-    vehicle_vin: str | None = None
-    dtc_codes: list[str]
+    vehicle_vin: Optional[str] = None
+    dtc_codes: List[str]
     symptoms_text: str
     confidence_score: float
     created_at: datetime
@@ -110,18 +111,18 @@ class DiagnosisHistoryItem(BaseModel):
 class DiagnosisHistoryFilter(BaseModel):
     """Filter parameters for diagnosis history queries."""
 
-    vehicle_make: str | None = Field(None, max_length=100, description="Filter by vehicle make")
-    vehicle_model: str | None = Field(None, max_length=100, description="Filter by vehicle model")
-    vehicle_year: int | None = Field(None, ge=1900, le=2030, description="Filter by vehicle year")
-    dtc_code: str | None = Field(None, max_length=10, description="Filter by DTC code")
-    date_from: datetime | None = Field(None, description="Filter by start date")
-    date_to: datetime | None = Field(None, description="Filter by end date")
+    vehicle_make: Optional[str] = Field(None, max_length=100, description="Filter by vehicle make")
+    vehicle_model: Optional[str] = Field(None, max_length=100, description="Filter by vehicle model")
+    vehicle_year: Optional[int] = Field(None, ge=1900, le=2030, description="Filter by vehicle year")
+    dtc_code: Optional[str] = Field(None, max_length=10, description="Filter by DTC code")
+    date_from: Optional[datetime] = Field(None, description="Filter by start date")
+    date_to: Optional[datetime] = Field(None, description="Filter by end date")
 
 
 class PaginatedDiagnosisHistory(BaseModel):
     """Paginated response for diagnosis history."""
 
-    items: list[DiagnosisHistoryItem]
+    items: List[DiagnosisHistoryItem]
     total: int = Field(..., ge=0, description="Total number of items")
     skip: int = Field(..., ge=0, description="Number of items skipped")
     limit: int = Field(..., ge=1, le=100, description="Maximum items per page")
@@ -177,13 +178,13 @@ class DiagnosisStats(BaseModel):
 
     total_diagnoses: int = Field(..., ge=0, description="Total number of diagnoses")
     avg_confidence: float = Field(..., ge=0, le=1, description="Average confidence score")
-    most_diagnosed_vehicles: list[VehicleDiagnosisCount] = Field(
+    most_diagnosed_vehicles: List[VehicleDiagnosisCount] = Field(
         default_factory=list, description="Most diagnosed vehicle makes/models"
     )
-    most_common_dtcs: list[DTCFrequency] = Field(
+    most_common_dtcs: List[DTCFrequency] = Field(
         default_factory=list, description="Most common DTC codes"
     )
-    diagnoses_by_month: list[MonthlyDiagnosisCount] = Field(
+    diagnoses_by_month: List[MonthlyDiagnosisCount] = Field(
         default_factory=list, description="Diagnosis counts by month"
     )
 
@@ -213,4 +214,4 @@ class DeleteResponse(BaseModel):
 
     success: bool
     message: str
-    deleted_id: UUID | None = None
+    deleted_id: Optional[UUID] = None
