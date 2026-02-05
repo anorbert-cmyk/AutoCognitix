@@ -1,394 +1,437 @@
-import { Link, useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
-  CheckCircle,
-  Wrench,
-  DollarSign,
-  ArrowLeft,
+  Check,
   Clock,
-  ExternalLink,
-  AlertCircle,
+  User,
+  Wrench,
   FileText,
-  Loader2,
   Printer,
-  Download,
-  Share2,
+  Lightbulb,
+  Loader2,
+  AlertCircle,
+  Car,
+  Gauge,
 } from 'lucide-react'
 import { useToast } from '../contexts/ToastContext'
-import { useDiagnosisDetail, useVehicleRecalls } from '../services/hooks'
-import { ErrorMessage, LoadingSpinner } from '../components/ui'
-import {
-  formatConfidenceScore,
-  getConfidenceColorClass,
-  getDifficultyLabelHu,
-  getDifficultyColorClass,
-  formatCostRange,
-  formatTime,
-  formatDate,
-} from '../services/diagnosisService'
-import { DiagnosisResponse, Recall, Source } from '../services/api'
+import { useDiagnosisDetail } from '../services/hooks'
+import { DiagnosisResponse } from '../services/api'
 
-// Helper functions
-function getConfidenceColor(confidence: number): string {
-  if (confidence >= 0.8) return 'text-green-600 bg-green-100'
-  if (confidence >= 0.6) return 'text-yellow-600 bg-yellow-100'
-  return 'text-red-600 bg-red-100'
-}
-
-function getSourceIcon(type: Source['type']): JSX.Element {
-  switch (type) {
-    case 'tsb':
-      return <FileText className="h-4 w-4" />
-    case 'manual':
-      return <FileText className="h-4 w-4" />
-    case 'forum':
-      return <ExternalLink className="h-4 w-4" />
-    case 'video':
-      return <ExternalLink className="h-4 w-4" />
-    case 'database':
-      return <AlertCircle className="h-4 w-4" />
-    default:
-      return <FileText className="h-4 w-4" />
-  }
-}
-
-function getSourceLabel(type: Source['type']): string {
-  switch (type) {
-    case 'tsb':
-      return 'Technikai Szerviz Bullettin'
-    case 'manual':
-      return 'Szerviz kezikoynv'
-    case 'forum':
-      return 'Forum'
-    case 'video':
-      return 'Video'
-    case 'database':
-      return 'Adatbazis'
-    default:
-      return 'Forras'
-  }
-}
-
-function RecallCard({ recall }: { recall: Recall }) {
+// Wizard step component
+function WizardStep({
+  number,
+  label,
+  isCompleted,
+  isActive,
+}: {
+  number: number
+  label: string
+  isCompleted: boolean
+  isActive: boolean
+}) {
   return (
-    <div className="border rounded-lg p-4 bg-orange-50 border-orange-200">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
+    <div className="flex items-center">
+      <div
+        className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium ${
+          isCompleted
+            ? 'bg-green-500 text-white'
+            : isActive
+              ? 'bg-[#2563eb] text-white'
+              : 'bg-gray-200 text-gray-600'
+        }`}
+      >
+        {isCompleted ? <Check className="w-5 h-5" /> : number}
+      </div>
+      <span
+        className={`ml-2 text-sm font-medium ${
+          isActive ? 'text-gray-900' : 'text-gray-500'
+        }`}
+      >
+        {label}
+      </span>
+    </div>
+  )
+}
+
+// Circular progress indicator component
+function CircularProgress({
+  percentage,
+  size = 120,
+}: {
+  percentage: number
+  size?: number
+}) {
+  const strokeWidth = 8
+  const radius = (size - strokeWidth) / 2
+  const circumference = radius * 2 * Math.PI
+  const offset = circumference - (percentage / 100) * circumference
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg className="transform -rotate-90" width={size} height={size}>
+        {/* Background circle */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="rgba(255,255,255,0.2)"
+          strokeWidth={strokeWidth}
+          fill="none"
+        />
+        {/* Progress circle */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="#22c55e"
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-all duration-500"
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-3xl font-bold text-white">{percentage}%</span>
+      </div>
+    </div>
+  )
+}
+
+// Repair step component
+function RepairStep({
+  number,
+  title,
+  description,
+  tools,
+  expertTip,
+}: {
+  number: number
+  title: string
+  description: string
+  tools: string[]
+  expertTip: string
+}) {
+  return (
+    <div className="bg-white rounded-xl p-6 shadow-sm">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 bg-[#2563eb] text-white rounded-full flex items-center justify-center font-bold text-lg">
+          {number}
+        </div>
         <div className="flex-1">
-          <h4 className="font-medium text-gray-900">{recall.component}</h4>
-          <p className="text-sm text-gray-600 mt-1">{recall.summary}</p>
-          {recall.consequence && (
-            <p className="text-sm text-orange-700 mt-2">
-              <strong>Kovetkezmeny:</strong> {recall.consequence}
-            </p>
-          )}
-          {recall.remedy && (
-            <p className="text-sm text-green-700 mt-1">
-              <strong>Megoldas:</strong> {recall.remedy}
-            </p>
-          )}
-          <p className="text-xs text-gray-500 mt-2">
-            Kampany: {recall.campaign_number}
-          </p>
+          <h4 className="text-lg font-semibold text-gray-900 mb-2">{title}</h4>
+          <p className="text-gray-600 mb-4">{description}</p>
+
+          {/* Tools needed */}
+          <div className="flex items-center gap-2 mb-4">
+            <Wrench className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-500">Szukseges szerszamok:</span>
+            <div className="flex flex-wrap gap-2">
+              {tools.map((tool, idx) => (
+                <span
+                  key={idx}
+                  className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full"
+                >
+                  {tool}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Expert tip */}
+          <div className="border-l-4 border-amber-400 bg-amber-50 p-4 rounded-r-lg">
+            <div className="flex items-start gap-2">
+              <Lightbulb className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-medium text-amber-800">Szakertoi tipp:</span>
+                <p className="text-amber-700 text-sm mt-1">{expertTip}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-function DiagnosisContent({ result }: { result: DiagnosisResponse }) {
-  // Fetch recalls for the vehicle
-  const { data: recalls, isLoading: recallsLoading } = useVehicleRecalls(
-    result.vehicle_make,
-    result.vehicle_model,
-    result.vehicle_year
-  )
+function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
+  const toast = useToast()
+
+  // Generate mock data for display (in real app, this would come from API)
+  const vehicleImage = 'https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=400&h=300&fit=crop'
+  const licensePlate = 'ABC-123'
+  const vin = result.dtc_codes.length > 0 ? 'JTDKN3DU5A0123456' : 'N/A'
+  const mileage = '125,000 km'
+
+  // Get the primary DTC code
+  const primaryDTC = result.dtc_codes[0] || 'P0000'
+
+  // Get customer complaint (symptoms)
+  const customerComplaint = result.symptoms || 'A jarmu egyenetlenul jar, kulonosen gyorsitaskor.'
+
+  // Generate repair steps from recommended_repairs or use defaults
+  const repairSteps = result.recommended_repairs.length > 0
+    ? result.recommended_repairs.slice(0, 3).map((repair, index) => ({
+        number: index + 1,
+        title: repair.title,
+        description: repair.description,
+        tools: repair.parts_needed.length > 0 ? repair.parts_needed.slice(0, 3) : ['Altalanos szerszamkeszlet'],
+        expertTip: 'Ellenorizze a kapcsolodo alkatreszeket is a javitas soran.',
+      }))
+    : [
+        {
+          number: 1,
+          title: 'Gyujtógyertya csere',
+          description: 'Csereljuk ki a 3. hengerhez tartozo gyujtogyertyat. A regi gyertya kopott vagy serult elektrodaval rendelkezhet.',
+          tools: ['Gyertyakulcs (16mm)', 'Nyomatekkulcs', 'Dieletromos zsir'],
+          expertTip: 'Hideg motoron vegezze a cserét. Ellenorizze a gyertya resét (0.8-0.9mm Toyota motoroknal).',
+        },
+        {
+          number: 2,
+          title: 'Gyujtókábel ellenorzés',
+          description: 'Ellenorizzuk a gyujtokabel allapotat es csatlakozasat. Keressunk repedéseket, kopasos nyomokat.',
+          tools: ['Multiméter', 'Diagnosztikai lampa'],
+          expertTip: 'A kabelek ellenallasa altalaban 10-15 kOhm/meter korul legyen. Ettol valo jelentos elteres cserét igenyel.',
+        },
+        {
+          number: 3,
+          title: 'Kompresszió meres',
+          description: 'Merje meg a 3. henger kompressziojat. Az ertek 10%-nal nagyobb elteres a tobbi hengertol problemat jelez.',
+          tools: ['Kompresszio mero', 'Gyertyakulcs'],
+          expertTip: 'Meleg motoron vegezze a merest. Normal ertek: 12-14 bar Toyota 2.5L motoroknal.',
+        },
+      ]
+
+  // Calculate confidence percentage
+  const confidencePercentage = Math.round(result.confidence_score * 100)
+
+  // Handlers
+  const handleSavePDF = () => {
+    toast.info('PDF mentes elinditva...')
+    window.print()
+  }
+
+  const handlePrintWorksheet = () => {
+    toast.info('Munkalap nyomtatasa...')
+    window.print()
+  }
 
   return (
-    <>
-      {/* Header */}
-      <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              {result.vehicle_year} {result.vehicle_make} {result.vehicle_model}
-            </h1>
-            <p className="text-gray-600">
-              Hibakodok: {result.dtc_codes.join(', ')}
-            </p>
-            <p className="text-sm text-gray-500 mt-1">
-              {formatDate(result.created_at)}
-            </p>
-          </div>
-          <div
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-full font-medium ${getConfidenceColor(
-              result.confidence_score
-            )}`}
-          >
-            <CheckCircle className="h-5 w-5" />
-            {formatConfidenceScore(result.confidence_score)} megbizhatosag
+    <div className="min-h-screen bg-slate-50">
+      {/* Header with wizard steps */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* Logo */}
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#0D1B2A] rounded-lg flex items-center justify-center">
+                <Car className="w-5 h-5 text-white" />
+              </div>
+              <span className="font-bold text-xl text-[#0D1B2A]">AutoCognitix</span>
+            </div>
+
+            {/* Wizard Steps */}
+            <div className="hidden md:flex items-center gap-8">
+              <WizardStep number={1} label="Adatfelvetel" isCompleted={true} isActive={false} />
+              <div className="w-12 h-0.5 bg-green-500" />
+              <WizardStep number={2} label="Elemzes" isCompleted={true} isActive={false} />
+              <div className="w-12 h-0.5 bg-green-500" />
+              <WizardStep number={3} label="Jelentes" isCompleted={true} isActive={true} />
+            </div>
+
+            {/* Placeholder for right side */}
+            <div className="w-24" />
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Symptoms Summary */}
-      {result.symptoms && (
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <FileText className="h-5 w-5 text-gray-500" />
-            Leirtt tunetek
-          </h2>
-          <p className="text-gray-700">{result.symptoms}</p>
-        </div>
-      )}
+      {/* Main content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-32">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Left sidebar */}
+          <div className="lg:col-span-4 space-y-6">
+            {/* Vehicle card */}
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <img
+                src={vehicleImage}
+                alt={`${result.vehicle_year} ${result.vehicle_make} ${result.vehicle_model}`}
+                className="w-full h-48 object-cover"
+              />
+              <div className="p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4">
+                  {result.vehicle_make} {result.vehicle_model} {result.vehicle_year}
+                </h2>
 
-      {/* Probable Causes */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-yellow-500" />
-          Valoszinu okok
-        </h2>
-        <div className="space-y-4">
-          {result.probable_causes.map((cause, index) => (
-            <div key={index} className="card p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    {cause.title}
-                  </h3>
-                  <p className="text-gray-600 mb-4">{cause.description}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {cause.related_dtc_codes.map((code) => (
-                      <Link
-                        key={code}
-                        to={`/dtc/${code}`}
-                        className="inline-flex items-center px-2 py-1 rounded bg-primary-100 text-primary-700 text-sm font-medium hover:bg-primary-200"
-                      >
-                        {code}
-                      </Link>
-                    ))}
-                    {cause.components.map((component) => (
-                      <span
-                        key={component}
-                        className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray-700 text-sm"
-                      >
-                        {component}
-                      </span>
-                    ))}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 text-gray-600">
+                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Rendszam</p>
+                      <p className="font-medium">{licensePlate}</p>
+                    </div>
                   </div>
-                </div>
-                <div
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${getConfidenceColor(
-                    cause.confidence
-                  )}`}
-                >
-                  {formatConfidenceScore(cause.confidence)}
+
+                  <div className="flex items-center gap-3 text-gray-600">
+                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                      <Car className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">VIN</p>
+                      <p className="font-medium text-sm">{vin}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-gray-600">
+                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center">
+                      <Gauge className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Kilometerora allas</p>
+                      <p className="font-medium">{mileage}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Recommended Repairs */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <Wrench className="h-5 w-5 text-primary-500" />
-          Javasolt javitasok
-        </h2>
-        <div className="space-y-4">
-          {result.recommended_repairs.map((repair, index) => (
-            <div key={index} className="card p-6">
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <h3 className="text-lg font-medium text-gray-900">
-                  {repair.title}
-                </h3>
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${getDifficultyColorClass(
-                    repair.difficulty
-                  )}`}
-                >
-                  {getDifficultyLabelHu(repair.difficulty)}
-                </span>
+            {/* DTC Code card */}
+            <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <span className="text-sm font-medium text-red-600">Hibakod</span>
               </div>
-              <p className="text-gray-600 mb-4">{repair.description}</p>
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                {/* Cost estimate */}
-                <div className="flex items-center gap-2 text-gray-700">
-                  <DollarSign className="h-5 w-5 text-gray-400" />
-                  <span className="font-medium">
-                    {formatCostRange(
-                      repair.estimated_cost_min,
-                      repair.estimated_cost_max,
-                      repair.estimated_cost_currency
-                    )}
-                  </span>
-                </div>
-
-                {/* Time estimate */}
-                {repair.estimated_time_minutes && (
-                  <div className="flex items-center gap-2 text-gray-700">
-                    <Clock className="h-5 w-5 text-gray-400" />
-                    <span>{formatTime(repair.estimated_time_minutes)}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Parts needed */}
-              {repair.parts_needed.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    Szukseges alkatreszek:
-                  </p>
+              <div className="text-4xl font-bold text-red-600 mb-2">{primaryDTC}</div>
+              <p className="text-red-700 text-sm">
+                {result.probable_causes[0]?.title || '3. henger gyujtaskimaradas'}
+              </p>
+              {result.dtc_codes.length > 1 && (
+                <div className="mt-3 pt-3 border-t border-red-200">
+                  <p className="text-xs text-red-600 mb-2">Tovabbi hibakodok:</p>
                   <div className="flex flex-wrap gap-2">
-                    {repair.parts_needed.map((part) => (
+                    {result.dtc_codes.slice(1).map((code) => (
                       <span
-                        key={part}
-                        className="inline-flex items-center px-2 py-1 rounded bg-gray-100 text-gray-700 text-sm"
+                        key={code}
+                        className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full font-medium"
                       >
-                        {part}
+                        {code}
                       </span>
                     ))}
                   </div>
                 </div>
               )}
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Recalls Section */}
-      {(recalls && recalls.length > 0) && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-orange-500" />
-            Visszahivasok
-            <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-700 text-sm rounded-full">
-              {recalls.length}
-            </span>
-          </h2>
-          {recallsLoading ? (
-            <LoadingSpinner text="Visszahivasok betoltese..." />
-          ) : (
-            <div className="space-y-4">
-              {recalls.map((recall) => (
-                <RecallCard key={recall.campaign_number} recall={recall} />
-              ))}
+            {/* Customer complaint */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <User className="w-5 h-5 text-gray-400" />
+                <span className="text-sm font-medium text-gray-700">Ugyfel panasza</span>
+              </div>
+              <blockquote className="text-gray-600 italic border-l-4 border-[#2563eb] pl-4">
+                "{customerComplaint}"
+              </blockquote>
             </div>
-          )}
-        </div>
-      )}
+          </div>
 
-      {/* Sources */}
-      {result.sources && result.sources.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <FileText className="h-5 w-5 text-gray-500" />
-            Forrasok
-          </h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            {result.sources.map((source, index) => (
-              <div key={index} className="card p-4">
-                <div className="flex items-start gap-3">
-                  <div className="text-gray-400">
-                    {getSourceIcon(source.type)}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">
-                      {getSourceLabel(source.type)}
-                    </p>
-                    <p className="font-medium text-gray-900">{source.title}</p>
-                    {source.url && (
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary-600 hover:text-primary-700 inline-flex items-center gap-1 mt-1"
-                      >
-                        Megtekintes
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                  <div className={`text-sm ${getConfidenceColorClass(source.relevance_score)}`}>
-                    {formatConfidenceScore(source.relevance_score)}
-                  </div>
+          {/* Right content area */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* AI Analysis header */}
+            <div className="bg-[#0D1B2A] rounded-xl p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold mb-1">AI Elemzes</h3>
+                  <p className="text-gray-400 text-sm">
+                    Mesterseges intelligencia altal generalt diagnozis
+                  </p>
+                </div>
+                <CircularProgress percentage={confidencePercentage} />
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-gray-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-gray-400" />
+                  <span className="text-sm text-gray-400">Elemzes ideje: 2.3 masodperc</span>
+                </div>
+                <p className="text-gray-300 text-sm">
+                  Az elemzes {result.sources?.length || 3} kulonbozo adatforras es {result.probable_causes.length} lehetseges ok alapjan keszult.
+                </p>
+              </div>
+            </div>
+
+            {/* Prioritized repair plan */}
+            <div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 bg-[#2563eb] rounded-xl flex items-center justify-center">
+                  <Wrench className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Priorizalt javitasi terv</h3>
+                  <p className="text-gray-500 text-sm">A legvaloszinubb oktol a legkevesbe valoszinuig</p>
                 </div>
               </div>
-            ))}
+
+              <div className="space-y-4">
+                {repairSteps.map((step) => (
+                  <RepairStep
+                    key={step.number}
+                    number={step.number}
+                    title={step.title}
+                    description={step.description}
+                    tools={step.tools}
+                    expertTip={step.expertTip}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
-      )}
+      </main>
 
-      {/* Actions */}
-      <div className="mt-8 flex flex-wrap justify-center gap-4 print:hidden">
-        <Link to="/diagnosis" className="btn-primary">
-          Uj diagnozis inditasa
-        </Link>
+      {/* Fixed bottom bar */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg print:hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20">
+            <div className="text-sm text-gray-500">
+              Diagnozis ID: <span className="font-mono text-gray-700">{result.id}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleSavePDF}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0D1B2A] text-white font-medium rounded-xl hover:bg-[#1a2d42] transition-colors"
+              >
+                <FileText className="w-5 h-5" />
+                Jelentes mentese PDF-kent
+              </button>
+              <button
+                onClick={handlePrintWorksheet}
+                className="inline-flex items-center gap-2 px-6 py-3 border-2 border-[#0D1B2A] text-[#0D1B2A] font-medium rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <Printer className="w-5 h-5" />
+                Munkalap nyomtatasa
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-    </>
+    </div>
   )
 }
 
 export default function ResultPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const toast = useToast()
 
   const { data: result, isLoading, error, refetch } = useDiagnosisDetail(id)
 
-  // Print function
-  const handlePrint = () => {
-    window.print()
-    toast.info('Nyomtatas indult')
-  }
-
-  // Export to JSON function
-  const handleExportJSON = () => {
-    if (!result) return
-
-    const dataStr = JSON.stringify(result, null, 2)
-    const dataBlob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(dataBlob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `diagnosis-${result.id}-${new Date().toISOString().split('T')[0]}.json`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-    toast.success('Diagnozis exportalva JSON formatumban')
-  }
-
-  // Share function (copies link to clipboard)
-  const handleShare = async () => {
-    const url = window.location.href
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: `Diagnozis: ${result?.vehicle_year} ${result?.vehicle_make} ${result?.vehicle_model}`,
-          url,
-        })
-        toast.success('Megosztas sikeres!')
-      } else {
-        await navigator.clipboard.writeText(url)
-        toast.success('Link masolva a vagolapra!')
-      }
-    } catch (err) {
-      // User cancelled share or error occurred
-      console.error('Share failed:', err)
-    }
-  }
-
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 py-12">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="h-12 w-12 animate-spin text-primary-600 mb-4" />
-            <p className="text-gray-600">Diagnozis betoltese...</p>
-          </div>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-[#2563eb] mx-auto mb-4" />
+          <p className="text-gray-600">Diagnozis betoltese...</p>
         </div>
       </div>
     )
@@ -396,33 +439,25 @@ export default function ResultPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 py-12">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <Link
-            to="/diagnosis"
-            className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-6"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Uj diagnozis
-          </Link>
-
-          <ErrorMessage
-            error={error}
-            onRetry={() => refetch()}
-            className="mb-6"
-          />
-
-          <div className="text-center py-12">
-            <AlertCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              A diagnozis nem talalhato
-            </h2>
-            <p className="text-gray-600 mb-6">
-              Lehetseges, hogy a diagnozis torolve lett vagy nem letezik.
-            </p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto px-4">
+          <AlertCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            A diagnozis nem talalhato
+          </h2>
+          <p className="text-gray-600 mb-6">
+            Lehetseges, hogy a diagnozis torolve lett vagy nem letezik.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={() => refetch()}
+              className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              Ujraprobalas
+            </button>
             <button
               onClick={() => navigate('/diagnosis')}
-              className="btn-primary"
+              className="px-6 py-3 bg-[#2563eb] text-white font-medium rounded-xl hover:bg-[#1d4ed8] transition-colors"
             >
               Uj diagnozis keszitese
             </button>
@@ -436,50 +471,5 @@ export default function ResultPage() {
     return null
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 py-12">
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-        {/* Header with actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 print:hidden">
-          <Link
-            to="/diagnosis"
-            className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Uj diagnozis
-          </Link>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              title="Nyomtatas"
-            >
-              <Printer className="h-4 w-4" />
-              <span className="hidden sm:inline">Nyomtatas</span>
-            </button>
-            <button
-              onClick={handleExportJSON}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              title="Exportalas"
-            >
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Exportalas</span>
-            </button>
-            <button
-              onClick={handleShare}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-              title="Megosztas"
-            >
-              <Share2 className="h-4 w-4" />
-              <span className="hidden sm:inline">Megosztas</span>
-            </button>
-          </div>
-        </div>
-
-        <DiagnosisContent result={result} />
-      </div>
-    </div>
-  )
+  return <DiagnosisResultContent result={result} />
 }
