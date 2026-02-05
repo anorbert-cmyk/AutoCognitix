@@ -668,3 +668,53 @@ jobs:
 ```
 
 **Key Insight:** Always gate deployments on all quality checks passing.
+
+---
+
+## 2026-02-05 - Docker Frontend Build Failures
+
+### package-lock.json Sync Issues
+
+**Problem:** `npm ci` fails with "Missing: package@version from lock file"
+
+**Root Cause:** `package.json` and `package-lock.json` are out of sync. New packages added to `package.json` but `npm install` wasn't run to update the lock file.
+
+**Solution:**
+```bash
+# Always run npm install after adding packages
+cd frontend && npm install
+
+# Verify lock file is committed
+git add package-lock.json
+```
+
+**Prevention Rules:**
+1. **Before committing package.json changes:** Always run `npm install`
+2. **Before Docker builds:** Verify `npm ci` works locally first
+3. **In CI:** Use `npm ci` (not `npm install`) for reproducible builds
+
+### npm ci Invalid Flags
+
+**Problem:** `npm ci --only=production=false` is deprecated in npm 10+
+
+**Error Message:**
+```
+npm warn invalid config only="production=false" set in command line options
+npm warn invalid config Must be one of: null, prod, production
+```
+
+**Solution:** Use simple `npm ci` (includes all deps) or use `--omit=dev` for production-only.
+
+**Correct Dockerfile:**
+```dockerfile
+# For build (need devDependencies)
+RUN npm ci
+
+# For runtime-only (production deps only)
+RUN npm ci --omit=dev
+```
+
+**Key Insight:** Always test Docker builds locally before pushing:
+```bash
+docker build -f frontend/Dockerfile.prod -t test frontend/
+```
