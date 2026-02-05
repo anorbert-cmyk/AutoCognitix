@@ -127,12 +127,14 @@ def upgrade() -> None:
         ON diagnosis_sessions USING GIN (dtc_codes)
     """)
 
-    # Partial index for recent sessions (last 30 days) - most commonly queried
-    op.execute("""
-        CREATE INDEX ix_diagnosis_sessions_recent
-        ON diagnosis_sessions (created_at DESC)
-        WHERE created_at > NOW() - INTERVAL '30 days'
-    """)
+    # Regular index on created_at for time-based queries
+    # Note: Partial index with NOW() is not possible (NOW() is not IMMUTABLE)
+    op.create_index(
+        'ix_diagnosis_sessions_created_at',
+        'diagnosis_sessions',
+        ['created_at'],
+        postgresql_using='btree'
+    )
 
     # =========================================================================
     # Vehicle Models Table Indexes
@@ -179,7 +181,7 @@ def downgrade() -> None:
     op.drop_index('ix_diagnosis_sessions_user_history', table_name='diagnosis_sessions')
     op.drop_index('ix_diagnosis_sessions_vehicle', table_name='diagnosis_sessions')
     op.execute('DROP INDEX IF EXISTS ix_diagnosis_sessions_dtc_codes_gin')
-    op.execute('DROP INDEX IF EXISTS ix_diagnosis_sessions_recent')
+    op.drop_index('ix_diagnosis_sessions_created_at', 'diagnosis_sessions')
 
     # Vehicle Models
     op.drop_index('ix_vehicle_models_make_year', table_name='vehicle_models')
