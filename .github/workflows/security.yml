@@ -202,8 +202,9 @@ jobs:
 
       - name: Run Gitleaks
         run: |
-          ./gitleaks detect --source . --report-format json --report-path gitleaks-report.json || true
-          ./gitleaks detect --source . --verbose
+          # Use .gitleaks.toml config to ignore example tokens in docs
+          ./gitleaks detect --source . --config .gitleaks.toml --report-format json --report-path gitleaks-report.json || true
+          ./gitleaks detect --source . --config .gitleaks.toml --verbose
 
       - name: Upload Gitleaks report
         uses: actions/upload-artifact@v4

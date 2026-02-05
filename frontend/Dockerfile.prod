@@ -71,12 +71,12 @@ RUN addgroup -g 1000 -S appgroup && \
              /var/cache/nginx/scgi_temp \
              /var/run \
              /var/log/nginx && \
-    # Set ownership (including nginx.conf for dynamic port substitution)
+    # Set ownership - chown entire /etc/nginx for sed -i temp file creation
     chown -R appuser:appgroup /var/cache/nginx \
                               /var/run \
                               /var/log/nginx \
                               /usr/share/nginx/html \
-                              /etc/nginx/nginx.conf && \
+                              /etc/nginx && \
     # Set permissions
     chmod -R 755 /usr/share/nginx/html && \
     # Ensure nginx can write pid file

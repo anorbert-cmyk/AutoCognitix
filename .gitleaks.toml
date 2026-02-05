@@ -1,0 +1,31 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+title = "AutoCognitix Gitleaks Config"
+
+# Allow list for files that contain example/test tokens (not real secrets)
+[allowlist]
+  description = "Allow example JWT tokens in documentation and test files"
+
+  # Paths to ignore - documentation with example responses
+  paths = [
+    '''docs/.*\.md$''',
+    '''.*test.*\.py$''',
+    '''.*_test\.py$''',
+    '''.*\.example$''',
+    '''.*\.sample$''',
+  ]
+
+  # Regex patterns to allow (example JWT tokens starting with eyJ)
+  regexes = [
+    # Example JWT tokens used in API documentation
+    '''eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ0ZXN0''',
+    # Generic example tokens
+    '''example.*token''',
+    '''test.*token''',
+  ]
+
+# Additional rules can be added here
+# [[rules]]
+#   id = "custom-rule"
+#   description = "Custom secret detection rule"
