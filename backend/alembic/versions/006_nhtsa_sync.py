@@ -60,23 +60,26 @@ def upgrade() -> None:
         sa.Column('sync_metadata', postgresql.JSONB(), nullable=True),  # Additional sync info
     )
 
-    # Create indexes
-    op.create_index('ix_nhtsa_vehicle_sync_tracking_type', 'nhtsa_vehicle_sync_tracking', ['sync_type'])
-    op.create_index('ix_nhtsa_vehicle_sync_tracking_make', 'nhtsa_vehicle_sync_tracking', ['make_name'])
-    op.create_index('ix_nhtsa_vehicle_sync_tracking_status', 'nhtsa_vehicle_sync_tracking', ['status'])
-    op.create_index('ix_nhtsa_vehicle_sync_tracking_created', 'nhtsa_vehicle_sync_tracking', ['created_at'])
+    # Create indexes (idempotent)
+    op.execute('CREATE INDEX IF NOT EXISTS ix_nhtsa_vehicle_sync_tracking_type ON nhtsa_vehicle_sync_tracking (sync_type)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_nhtsa_vehicle_sync_tracking_make ON nhtsa_vehicle_sync_tracking (make_name)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_nhtsa_vehicle_sync_tracking_status ON nhtsa_vehicle_sync_tracking (status)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_nhtsa_vehicle_sync_tracking_created ON nhtsa_vehicle_sync_tracking (created_at)')
 
     # Composite index for looking up specific syncs
-    op.create_index(
-        'ix_nhtsa_vehicle_sync_tracking_lookup',
-        'nhtsa_vehicle_sync_tracking',
-        ['sync_type', 'make_name', 'model_name', 'year_start', 'year_end']
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_nhtsa_vehicle_sync_tracking_lookup ON nhtsa_vehicle_sync_tracking (sync_type, make_name, model_name, year_start, year_end)')
 
     # Add NHTSA-specific fields to vehicle_makes if not exists
-    # These track NHTSA API IDs for reference
-    op.add_column('vehicle_makes', sa.Column('nhtsa_make_id', sa.Integer(), nullable=True))
-    op.create_index('ix_vehicle_makes_nhtsa_id', 'vehicle_makes', ['nhtsa_make_id'])
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                           WHERE table_name='vehicle_makes' AND column_name='nhtsa_make_id') THEN
+                ALTER TABLE vehicle_makes ADD COLUMN nhtsa_make_id INTEGER;
+            END IF;
+        END $$;
+    """)
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_makes_nhtsa_id ON vehicle_makes (nhtsa_make_id)')
 
 
 def downgrade() -> None:

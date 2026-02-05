@@ -58,10 +58,10 @@ def upgrade() -> None:
     )
 
     # Indexes for vehicle_engines
-    op.create_index('ix_vehicle_engines_fuel_type', 'vehicle_engines', ['fuel_type'])
-    op.create_index('ix_vehicle_engines_family', 'vehicle_engines', ['family'])
-    op.create_index('ix_vehicle_engines_displacement', 'vehicle_engines', ['displacement_cc'])
-    op.create_index('ix_vehicle_engines_applicable_makes', 'vehicle_engines', ['applicable_makes'], postgresql_using='gin')
+    # Note: fuel_type already has index=True in column definition, so we skip explicit create
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_engines_family ON vehicle_engines (family)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_engines_displacement ON vehicle_engines (displacement_cc)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_engines_applicable_makes ON vehicle_engines USING GIN (applicable_makes)')
 
     # 2. vehicle_platforms - Shared platforms across makes
     op.create_table(
@@ -88,8 +88,8 @@ def upgrade() -> None:
     )
 
     # Indexes for vehicle_platforms
-    op.create_index('ix_vehicle_platforms_makes', 'vehicle_platforms', ['makes'], postgresql_using='gin')
-    op.create_index('ix_vehicle_platforms_segment', 'vehicle_platforms', ['segment'])
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_platforms_makes ON vehicle_platforms USING GIN (makes)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_platforms_segment ON vehicle_platforms (segment)')
 
     # 3. vehicle_model_engines - Many-to-many: models to engines
     op.create_table(
@@ -107,8 +107,8 @@ def upgrade() -> None:
     )
 
     # Indexes for vehicle_model_engines
-    op.create_index('ix_vehicle_model_engines_model', 'vehicle_model_engines', ['model_id'])
-    op.create_index('ix_vehicle_model_engines_engine', 'vehicle_model_engines', ['engine_id'])
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_model_engines_model ON vehicle_model_engines (model_id)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_model_engines_engine ON vehicle_model_engines (engine_id)')
 
     # 4. vehicle_dtc_frequency - Which DTCs are common for which vehicles
     op.create_table(
@@ -142,14 +142,23 @@ def upgrade() -> None:
     )
 
     # Indexes for vehicle_dtc_frequency
-    op.create_index('ix_vehicle_dtc_frequency_dtc', 'vehicle_dtc_frequency', ['dtc_code'])
-    op.create_index('ix_vehicle_dtc_frequency_make_model', 'vehicle_dtc_frequency', ['make_id', 'model_id'])
-    op.create_index('ix_vehicle_dtc_frequency_engine', 'vehicle_dtc_frequency', ['engine_code'])
-    op.create_index('ix_vehicle_dtc_frequency_frequency', 'vehicle_dtc_frequency', ['frequency'])
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_dtc_frequency_dtc ON vehicle_dtc_frequency (dtc_code)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_dtc_frequency_make_model ON vehicle_dtc_frequency (make_id, model_id)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_dtc_frequency_engine ON vehicle_dtc_frequency (engine_code)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_dtc_frequency_frequency ON vehicle_dtc_frequency (frequency)')
 
-    # 5. Update vehicle_models to add foreign key to platform
-    op.add_column('vehicle_models', sa.Column('platform_id', sa.Integer(), sa.ForeignKey('vehicle_platforms.id', ondelete='SET NULL'), nullable=True))
-    op.create_index('ix_vehicle_models_platform', 'vehicle_models', ['platform_id'])
+    # 5. Update vehicle_models to add foreign key to platform (if not exists)
+    # Use raw SQL for idempotent column addition
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                           WHERE table_name='vehicle_models' AND column_name='platform_id') THEN
+                ALTER TABLE vehicle_models ADD COLUMN platform_id INTEGER REFERENCES vehicle_platforms(id) ON DELETE SET NULL;
+            END IF;
+        END $$;
+    """)
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_models_platform ON vehicle_models (platform_id)')
 
     # 6. vehicle_tsb - Technical Service Bulletins
     op.create_table(
@@ -176,8 +185,8 @@ def upgrade() -> None:
     )
 
     # Indexes for vehicle_tsb
-    op.create_index('ix_vehicle_tsb_make', 'vehicle_tsb', ['make_id'])
-    op.create_index('ix_vehicle_tsb_dtc_codes', 'vehicle_tsb', ['related_dtc_codes'], postgresql_using='gin')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_tsb_make ON vehicle_tsb (make_id)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_tsb_dtc_codes ON vehicle_tsb USING GIN (related_dtc_codes)')
 
 
 def downgrade() -> None:

@@ -45,9 +45,9 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
     )
 
-    # Composite indexes for common queries
-    op.create_index('ix_vehicle_recalls_make_model_year', 'vehicle_recalls', ['make', 'model', 'model_year'])
-    op.create_index('ix_vehicle_recalls_dtc_codes', 'vehicle_recalls', ['extracted_dtc_codes'], postgresql_using='gin')
+    # Composite indexes for common queries (idempotent)
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_recalls_make_model_year ON vehicle_recalls (make, model, model_year)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_recalls_dtc_codes ON vehicle_recalls USING GIN (extracted_dtc_codes)')
 
     # 2. vehicle_complaints - NHTSA complaint records
     op.create_table(
@@ -77,10 +77,10 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
     )
 
-    # Composite indexes for common queries
-    op.create_index('ix_vehicle_complaints_make_model_year', 'vehicle_complaints', ['make', 'model', 'model_year'])
-    op.create_index('ix_vehicle_complaints_dtc_codes', 'vehicle_complaints', ['extracted_dtc_codes'], postgresql_using='gin')
-    op.create_index('ix_vehicle_complaints_crash_fire', 'vehicle_complaints', ['crash', 'fire'])
+    # Composite indexes for common queries (idempotent)
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_complaints_make_model_year ON vehicle_complaints (make, model, model_year)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_complaints_dtc_codes ON vehicle_complaints USING GIN (extracted_dtc_codes)')
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_complaints_crash_fire ON vehicle_complaints (crash, fire)')
 
     # 3. dtc_recall_correlations - Links between DTC codes and recalls
     op.create_table(

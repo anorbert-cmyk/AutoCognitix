@@ -13,7 +13,6 @@ Performance optimizations:
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '004_perf_indexes'
@@ -30,41 +29,36 @@ def upgrade() -> None:
     # =========================================================================
 
     # Composite index for category + severity (common filter combination)
-    op.create_index(
-        'ix_dtc_codes_category_severity',
-        'dtc_codes',
-        ['category', 'severity'],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_dtc_codes_category_severity ON dtc_codes (category, severity)')
 
     # Partial index for generic codes only (most common query pattern)
     op.execute("""
-        CREATE INDEX ix_dtc_codes_generic_codes
+        CREATE INDEX IF NOT EXISTS ix_dtc_codes_generic_codes
         ON dtc_codes (code)
         WHERE is_generic = true
     """)
 
     # GIN index for related_codes ARRAY column (contains queries)
     op.execute("""
-        CREATE INDEX ix_dtc_codes_related_codes_gin
+        CREATE INDEX IF NOT EXISTS ix_dtc_codes_related_codes_gin
         ON dtc_codes USING GIN (related_codes)
     """)
 
     # GIN index for symptoms ARRAY (for symptom-based searches)
     op.execute("""
-        CREATE INDEX ix_dtc_codes_symptoms_gin
+        CREATE INDEX IF NOT EXISTS ix_dtc_codes_symptoms_gin
         ON dtc_codes USING GIN (symptoms)
     """)
 
     # GIN index for applicable_makes (manufacturer-specific queries)
     op.execute("""
-        CREATE INDEX ix_dtc_codes_applicable_makes_gin
+        CREATE INDEX IF NOT EXISTS ix_dtc_codes_applicable_makes_gin
         ON dtc_codes USING GIN (applicable_makes)
     """)
 
     # Full-text search index for description columns (Hungarian + English)
     op.execute("""
-        CREATE INDEX ix_dtc_codes_description_fts
+        CREATE INDEX IF NOT EXISTS ix_dtc_codes_description_fts
         ON dtc_codes USING GIN (
             to_tsvector('simple', COALESCE(description_en, '') || ' ' || COALESCE(description_hu, ''))
         )
@@ -76,27 +70,22 @@ def upgrade() -> None:
 
     # GIN index for related_dtc_codes ARRAY
     op.execute("""
-        CREATE INDEX ix_known_issues_related_dtc_codes_gin
+        CREATE INDEX IF NOT EXISTS ix_known_issues_related_dtc_codes_gin
         ON known_issues USING GIN (related_dtc_codes)
     """)
 
     # GIN index for applicable_makes ARRAY
     op.execute("""
-        CREATE INDEX ix_known_issues_applicable_makes_gin
+        CREATE INDEX IF NOT EXISTS ix_known_issues_applicable_makes_gin
         ON known_issues USING GIN (applicable_makes)
     """)
 
     # Composite index for vehicle filtering
-    op.create_index(
-        'ix_known_issues_year_range',
-        'known_issues',
-        ['year_start', 'year_end'],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_known_issues_year_range ON known_issues (year_start, year_end)')
 
     # Partial index for high-confidence issues
     op.execute("""
-        CREATE INDEX ix_known_issues_high_confidence
+        CREATE INDEX IF NOT EXISTS ix_known_issues_high_confidence
         ON known_issues (confidence DESC)
         WHERE confidence >= 0.7
     """)
@@ -106,47 +95,27 @@ def upgrade() -> None:
     # =========================================================================
 
     # Composite index for user history queries (user_id + created_at DESC)
-    op.create_index(
-        'ix_diagnosis_sessions_user_history',
-        'diagnosis_sessions',
-        ['user_id', sa.text('created_at DESC')],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_diagnosis_sessions_user_history ON diagnosis_sessions (user_id, created_at DESC)')
 
     # Index for vehicle-based queries
-    op.create_index(
-        'ix_diagnosis_sessions_vehicle',
-        'diagnosis_sessions',
-        ['vehicle_make', 'vehicle_model', 'vehicle_year'],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_diagnosis_sessions_vehicle ON diagnosis_sessions (vehicle_make, vehicle_model, vehicle_year)')
 
     # GIN index for DTC codes array in sessions
     op.execute("""
-        CREATE INDEX ix_diagnosis_sessions_dtc_codes_gin
+        CREATE INDEX IF NOT EXISTS ix_diagnosis_sessions_dtc_codes_gin
         ON diagnosis_sessions USING GIN (dtc_codes)
     """)
 
     # Regular index on created_at for time-based queries
     # Note: Partial index with NOW() is not possible (NOW() is not IMMUTABLE)
-    op.create_index(
-        'ix_diagnosis_sessions_created_at',
-        'diagnosis_sessions',
-        ['created_at'],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_diagnosis_sessions_created_at ON diagnosis_sessions (created_at)')
 
     # =========================================================================
     # Vehicle Models Table Indexes
     # =========================================================================
 
     # Composite index for make_id + year range queries
-    op.create_index(
-        'ix_vehicle_models_make_year',
-        'vehicle_models',
-        ['make_id', 'year_start', 'year_end'],
-        postgresql_using='btree'
-    )
+    op.execute('CREATE INDEX IF NOT EXISTS ix_vehicle_models_make_year ON vehicle_models (make_id, year_start, year_end)')
 
     # =========================================================================
     # Users Table Indexes
@@ -154,7 +123,7 @@ def upgrade() -> None:
 
     # Partial index for active users only
     op.execute("""
-        CREATE INDEX ix_users_active
+        CREATE INDEX IF NOT EXISTS ix_users_active
         ON users (email)
         WHERE is_active = true
     """)
