@@ -285,7 +285,47 @@ railway logs
 railway variables
 ```
 
+## CI/CD Pipeline - KÖTELEZŐ ELLENŐRZÉSEK
+
+### Commit Előtt MINDIG Futtasd:
+
+```bash
+# 1. Ruff linting
+cd backend && python3 -m ruff check app tests
+
+# 2. Ruff formatting
+cd backend && python3 -m ruff format --check app tests
+
+# 3. Ha hibák vannak, automatikus javítás:
+cd backend && python3 -m ruff check app tests --fix --unsafe-fixes
+```
+
+### Ruff Konfiguráció (backend/ruff.toml)
+
+A következő hibák IGNORÁLVA vannak:
+- `UP035/UP006/UP045`: Modern typing syntax (Python 3.9+ dict/list)
+- `PLC0415`: Lazy imports (FastAPI szükséges)
+- `PLW0603`: Global statement (singleton pattern)
+- `ERA001`: TODO comments
+- `I001`: Import sorting (handled by formatter)
+
+### GitHub Actions
+
+| Workflow | Trigger | Cél |
+|----------|---------|-----|
+| `ci.yml` | push/PR | Lint, Type Check, Tests, Build |
+| `cd.yml` | release/tag | Docker Build, Deploy to Railway |
+| `security.yml` | daily/push | CodeQL, Bandit, npm audit |
+
+### Ha CI Hibázik
+
+1. Nézd meg a logokat: `gh run view <run-id> --log-failed`
+2. Lint hibák: `ruff check app tests --fix`
+3. Type hibák: `mypy app --ignore-missing-imports`
+4. Test hibák: `pytest tests -v`
+
 ## Kapcsolódó Dokumentumok
 
 - `AutoCognitix_Teljeskoeru_Elemzes.docx` - Részletes elemzés
 - `MVP Definíció & Gyakorlati Megvalósítás.pdf` - MVP specifikáció
+- `tasks/lessons.md` - Tanulságok és hibajavítások részletesen

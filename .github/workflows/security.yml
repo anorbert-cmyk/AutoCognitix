@@ -152,7 +152,7 @@ jobs:
         continue-on-error: true
 
       - name: Run Snyk test (if token available)
-        if: ${{ secrets.SNYK_TOKEN != '' }}
+        if: env.SNYK_TOKEN != ''
         run: |
           npm install -g snyk
           cd frontend
