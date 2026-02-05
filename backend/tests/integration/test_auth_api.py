@@ -5,8 +5,6 @@ Tests user registration, login, token refresh, and protected endpoints.
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import patch, MagicMock
 import sys
 from pathlib import Path
 
@@ -51,7 +49,7 @@ class TestUserRegistration:
 
         assert "id" in data
         assert data["email"] == user_registration_data["email"]
-        assert data["is_active"] == True
+        assert data["is_active"]
         assert data["role"] == "user"
 
     @pytest.mark.asyncio

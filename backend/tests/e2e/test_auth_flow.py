@@ -12,9 +12,6 @@ Tests the complete authentication workflow including:
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 import sys
 from pathlib import Path
 
@@ -857,7 +854,7 @@ class TestAuthErrorResponses:
 
         assert response.status_code == 401
         # Check for WWW-Authenticate header
-        assert "www-authenticate" in [h.lower() for h in response.headers.keys()]
+        assert "www-authenticate" in [h.lower() for h in response.headers]
 
     @pytest.mark.asyncio
     async def test_error_response_includes_detail(self, async_client, seeded_db):

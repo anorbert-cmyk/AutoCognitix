@@ -5,8 +5,8 @@ Provides JWT token management, password hashing, and token blacklisting.
 """
 
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Union
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -22,9 +22,9 @@ _token_blacklist: set[str] = set()
 
 
 def create_access_token(
-    subject: Union[str, Any],
-    expires_delta: Optional[timedelta] = None,
-    additional_claims: Optional[Dict[str, Any]] = None,
+    subject: str | Any,
+    expires_delta: timedelta | None = None,
+    additional_claims: dict[str, Any] | None = None,
 ) -> str:
     """
     Create a JWT access token.
@@ -38,15 +38,15 @@ def create_access_token(
         Encoded JWT token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(UTC) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "sub": str(subject),
         "type": "access",
         "jti": secrets.token_urlsafe(16),  # JWT ID for blacklisting
@@ -65,8 +65,8 @@ def create_access_token(
 
 
 def create_refresh_token(
-    subject: Union[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    subject: str | Any,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """
     Create a JWT refresh token.
@@ -79,15 +79,15 @@ def create_refresh_token(
         Encoded JWT refresh token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(UTC) + timedelta(
             days=settings.REFRESH_TOKEN_EXPIRE_DAYS
         )
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "sub": str(subject),
         "type": "refresh",
         "jti": secrets.token_urlsafe(16),  # JWT ID for blacklisting
@@ -103,8 +103,8 @@ def create_refresh_token(
 
 
 def create_password_reset_token(
-    subject: Union[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    subject: str | Any,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """
     Create a JWT password reset token.
@@ -117,13 +117,13 @@ def create_password_reset_token(
         Encoded JWT password reset token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(hours=1)
+        expire = datetime.now(UTC) + timedelta(hours=1)
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "sub": str(subject),
         "type": "password_reset",
         "jti": secrets.token_urlsafe(16),
@@ -148,7 +148,7 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def decode_token(token: str) -> Optional[Dict[str, Any]]:
+def decode_token(token: str) -> dict[str, Any] | None:
     """
     Decode and verify a JWT token.
 

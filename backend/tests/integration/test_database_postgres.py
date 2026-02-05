@@ -5,9 +5,6 @@ Tests repository CRUD operations with actual database connections.
 """
 
 import pytest
-import pytest_asyncio
-from uuid import uuid4
-from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -15,7 +12,6 @@ from pathlib import Path
 backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
-from app.db.postgres.models import DTCCode, User, DiagnosisSession, VehicleMake, VehicleModel
 from app.db.postgres.repositories import (
     DTCCodeRepository,
     UserRepository,

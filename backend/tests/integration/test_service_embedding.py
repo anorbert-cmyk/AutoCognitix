@@ -4,8 +4,6 @@ Integration tests for the Hungarian embedding service.
 Tests embedding generation, text preprocessing, and similarity matching.
 """
 
-import pytest
-import pytest_asyncio
 from unittest.mock import MagicMock, patch
 import sys
 from pathlib import Path
@@ -180,7 +178,7 @@ class TestSimilarTextMatching:
             top_k=5,
         )
 
-        for text, score in result:
+        for _text, score in result:
             assert isinstance(score, float)
             assert 0 <= score <= 1
 
@@ -369,7 +367,6 @@ class TestEmbeddingServiceSingleton:
             mock_instance._initialized = True
             MockClass.return_value = mock_instance
 
-            from app.services.embedding_service import get_embedding_service
 
             # This will use the mocked class
             # In real usage, would return singleton instance
@@ -388,7 +385,7 @@ class TestEmbeddingServiceConvenienceFunctions:
 
             from app.services.embedding_service import embed_text
 
-            result = embed_text("Test")
+            embed_text("Test")
 
             mock_service.embed_text.assert_called_once_with("Test", False)
 
@@ -401,7 +398,7 @@ class TestEmbeddingServiceConvenienceFunctions:
 
             from app.services.embedding_service import embed_batch
 
-            result = embed_batch(["Test"])
+            embed_batch(["Test"])
 
             mock_service.embed_batch.assert_called_once()
 
@@ -414,6 +411,6 @@ class TestEmbeddingServiceConvenienceFunctions:
 
             from app.services.embedding_service import preprocess_hungarian
 
-            result = preprocess_hungarian("Test text")
+            preprocess_hungarian("Test text")
 
             mock_service.preprocess_hungarian.assert_called_once_with("Test text")

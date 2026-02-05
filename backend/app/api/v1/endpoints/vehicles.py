@@ -2,7 +2,6 @@
 Vehicle endpoints - vehicle information and VIN decoding.
 """
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
@@ -328,7 +327,7 @@ async def decode_vin(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to decode VIN: {str(e)}",
+            detail=f"Failed to decode VIN: {e!s}",
         )
 
 
@@ -339,7 +338,7 @@ async def decode_vin(
 
 @router.get(
     "/makes",
-    response_model=List[VehicleMake],
+    response_model=list[VehicleMake],
     responses=MAKES_RESPONSES,
     summary="Get vehicle makes",
     description="""
@@ -353,7 +352,7 @@ Optionally filter by search term to find specific makes.
     """,
 )
 async def get_vehicle_makes(
-    search: Optional[str] = Query(None, min_length=1, description="Search term for filtering makes"),
+    search: str | None = Query(None, min_length=1, description="Search term for filtering makes"),
 ):
     """
     Get list of vehicle makes (manufacturers).
@@ -402,7 +401,7 @@ async def get_vehicle_makes(
 
 @router.get(
     "/models/{make_id}",
-    response_model=List[VehicleModel],
+    response_model=list[VehicleModel],
     responses=MODELS_RESPONSES,
     summary="Get vehicle models",
     description="""
@@ -417,7 +416,7 @@ Optionally filter by year to get models available for that year.
 )
 async def get_vehicle_models(
     make_id: str,
-    year: Optional[int] = Query(None, ge=1900, le=2030, description="Filter by year"),
+    year: int | None = Query(None, ge=1900, le=2030, description="Filter by year"),
 ):
     """
     Get list of models for a specific make.
@@ -492,7 +491,7 @@ async def get_available_years():
 
 @router.get(
     "/{make}/{model}/{year}/recalls",
-    response_model=List[Recall],
+    response_model=list[Recall],
     responses=RECALLS_RESPONSES,
     summary="Get vehicle recalls",
     description="""
@@ -538,7 +537,7 @@ async def get_vehicle_recalls(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch recalls: {str(e)}",
+            detail=f"Failed to fetch recalls: {e!s}",
         )
 
 
@@ -549,7 +548,7 @@ async def get_vehicle_recalls(
 
 @router.get(
     "/{make}/{model}/{year}/complaints",
-    response_model=List[Complaint],
+    response_model=list[Complaint],
     responses=COMPLAINTS_RESPONSES,
     summary="Get vehicle complaints",
     description="""
@@ -596,5 +595,5 @@ async def get_vehicle_complaints(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch complaints: {str(e)}",
+            detail=f"Failed to fetch complaints: {e!s}",
         )

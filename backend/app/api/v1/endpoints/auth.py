@@ -6,7 +6,7 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -112,11 +112,11 @@ async def get_current_user_from_token(
 
 
 async def get_optional_current_user(
-    token: Optional[str] = Depends(
+    token: str | None = Depends(
         OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
     ),
     db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
+) -> User | None:
     """
     Optional dependency to get current user (returns None if not authenticated).
 
@@ -159,7 +159,7 @@ def require_role(*roles: str):
 # OpenAPI Response Examples
 # =============================================================================
 
-REGISTER_RESPONSES: Dict[int, Dict[str, Any]] = {
+REGISTER_RESPONSES: dict[int, dict[str, Any]] = {
     201: {
         "description": "Felhasználó sikeresen regisztrálva",
         "content": {
@@ -198,7 +198,7 @@ REGISTER_RESPONSES: Dict[int, Dict[str, Any]] = {
     },
 }
 
-LOGIN_RESPONSES: Dict[int, Dict[str, Any]] = {
+LOGIN_RESPONSES: dict[int, dict[str, Any]] = {
     200: {
         "description": "Sikeres bejelentkezés",
         "content": {
@@ -229,7 +229,7 @@ LOGIN_RESPONSES: Dict[int, Dict[str, Any]] = {
     },
 }
 
-REFRESH_RESPONSES: Dict[int, Dict[str, Any]] = {
+REFRESH_RESPONSES: dict[int, dict[str, Any]] = {
     200: {
         "description": "Tokenek sikeresen frissítve",
         "content": {
@@ -250,7 +250,7 @@ REFRESH_RESPONSES: Dict[int, Dict[str, Any]] = {
     },
 }
 
-ME_RESPONSES: Dict[int, Dict[str, Any]] = {
+ME_RESPONSES: dict[int, dict[str, Any]] = {
     200: {
         "description": "Aktuális felhasználó adatai",
         "content": {
@@ -571,7 +571,7 @@ Felhasználó kijelentkeztetése és tokenek érvénytelenítése.
     """,
 )
 async def logout(
-    logout_data: Optional[LogoutRequest] = None,
+    logout_data: LogoutRequest | None = None,
     token: str = Depends(oauth2_scheme),
 ) -> LogoutResponse:
     """
@@ -673,7 +673,7 @@ async def update_me(
             )
 
     # Build update dict
-    update_dict: Dict[str, Any] = {}
+    update_dict: dict[str, Any] = {}
     if update_data.full_name is not None:
         update_dict["full_name"] = update_data.full_name
     if update_data.email is not None:

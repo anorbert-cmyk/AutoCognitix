@@ -9,15 +9,14 @@ Provides AI-powered vehicle diagnosis using:
 """
 
 from datetime import datetime
-from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
 from app.api.v1.schemas.diagnosis import (
     DeleteResponse,
-    DiagnosisHistoryFilter,
     DiagnosisHistoryItem,
     DiagnosisRequest,
     DiagnosisResponse,
@@ -25,11 +24,17 @@ from app.api.v1.schemas.diagnosis import (
     DTCFrequency,
     MonthlyDiagnosisCount,
     PaginatedDiagnosisHistory,
-    ProbableCause,
-    RepairRecommendation,
-    Source,
     VehicleDiagnosisCount,
 )
+from app.core.exceptions import (
+    AutoCognitixException,
+    DiagnosisException,
+    DTCValidationException,
+    NotFoundException,
+    VINValidationException,
+)
+from app.core.logging import get_logger
+from app.db.postgres.models import User
 from app.db.postgres.repositories import DiagnosisSessionRepository
 from app.db.postgres.session import get_db
 from app.services.diagnosis_service import (
@@ -37,16 +42,6 @@ from app.services.diagnosis_service import (
     DiagnosisServiceError,
     DTCValidationError,
     VINDecodeError,
-)
-from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
-from app.db.postgres.models import User
-from app.core.logging import get_logger
-from app.core.exceptions import (
-    AutoCognitixException,
-    DTCValidationException,
-    VINValidationException,
-    DiagnosisException,
-    NotFoundException,
 )
 
 router = APIRouter()
@@ -199,7 +194,7 @@ This endpoint performs comprehensive AI-powered diagnosis:
 async def analyze_vehicle(
     request: DiagnosisRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
     """
     Analyze vehicle based on DTC codes and symptoms.
@@ -345,12 +340,12 @@ Supports filtering by:
 async def get_diagnosis_history(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Maximum records to return"),
-    vehicle_make: Optional[str] = Query(None, max_length=100, description="Filter by vehicle make"),
-    vehicle_model: Optional[str] = Query(None, max_length=100, description="Filter by vehicle model"),
-    vehicle_year: Optional[int] = Query(None, ge=1900, le=2030, description="Filter by vehicle year"),
-    dtc_code: Optional[str] = Query(None, max_length=10, description="Filter by DTC code"),
-    date_from: Optional[datetime] = Query(None, description="Filter by start date"),
-    date_to: Optional[datetime] = Query(None, description="Filter by end date"),
+    vehicle_make: str | None = Query(None, max_length=100, description="Filter by vehicle make"),
+    vehicle_model: str | None = Query(None, max_length=100, description="Filter by vehicle model"),
+    vehicle_year: int | None = Query(None, ge=1900, le=2030, description="Filter by vehicle year"),
+    dtc_code: str | None = Query(None, max_length=10, description="Filter by DTC code"),
+    date_from: datetime | None = Query(None, description="Filter by start date"),
+    date_to: datetime | None = Query(None, description="Filter by end date"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_token),
 ):
@@ -582,7 +577,7 @@ use the `/analyze` endpoint with full vehicle information.
     """,
 )
 async def quick_analyze(
-    dtc_codes: List[str] = Query(..., min_length=1, max_length=10),
+    dtc_codes: list[str] = Query(..., min_length=1, max_length=10),
     db: AsyncSession = Depends(get_db),
 ):
     """

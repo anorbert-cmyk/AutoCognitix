@@ -5,8 +5,6 @@ Tests semantic search, DTC embedding retrieval, and symptom matching.
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from pathlib import Path
 

@@ -9,7 +9,6 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
 
 from fastapi import HTTPException, Request, status
 
@@ -52,9 +51,9 @@ class InMemoryRateLimiter:
 
     def __init__(self):
         # Structure: {client_key: [(timestamp, count), ...]}
-        self._minute_windows: Dict[str, list] = defaultdict(list)
-        self._hour_windows: Dict[str, list] = defaultdict(list)
-        self._lockouts: Dict[str, float] = {}  # {client_key: lockout_expires_at}
+        self._minute_windows: dict[str, list] = defaultdict(list)
+        self._hour_windows: dict[str, list] = defaultdict(list)
+        self._lockouts: dict[str, float] = {}  # {client_key: lockout_expires_at}
 
     def _clean_old_entries(self, entries: list, window_seconds: int, now: float) -> list:
         """Remove entries outside the time window."""
@@ -78,7 +77,7 @@ class InMemoryRateLimiter:
         self,
         client_key: str,
         config: RateLimitConfig = DEFAULT_CONFIG,
-    ) -> Tuple[bool, Optional[int]]:
+    ) -> tuple[bool, int | None]:
         """
         Check if request is within rate limits.
 
@@ -239,7 +238,7 @@ class RateLimitMiddleware:
         self,
         app,
         config: RateLimitConfig = DEFAULT_CONFIG,
-        paths: Optional[list[str]] = None,
+        paths: list[str] | None = None,
     ):
         self.app = app
         self.config = config

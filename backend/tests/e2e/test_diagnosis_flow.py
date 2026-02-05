@@ -11,10 +11,8 @@ Tests the full diagnosis flow including:
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
-from datetime import datetime
 import sys
 from pathlib import Path
 

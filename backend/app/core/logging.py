@@ -18,10 +18,11 @@ import sys
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -31,12 +32,12 @@ from starlette.responses import Response
 from app.core.config import settings
 
 # Context variables for request correlation and distributed tracing
-request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
-user_id_var: ContextVar[Optional[str]] = ContextVar("user_id", default=None)
-correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
-trace_id_var: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
-span_id_var: ContextVar[Optional[str]] = ContextVar("span_id", default=None)
-parent_span_id_var: ContextVar[Optional[str]] = ContextVar("parent_span_id", default=None)
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
+correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
+trace_id_var: ContextVar[str | None] = ContextVar("trace_id", default=None)
+span_id_var: ContextVar[str | None] = ContextVar("span_id", default=None)
+parent_span_id_var: ContextVar[str | None] = ContextVar("parent_span_id", default=None)
 
 # Type variable for generic function decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -46,7 +47,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 class ErrorContext:
     """Thread-safe storage for error context enrichment."""
 
-    _context: Dict[str, Any] = {}
+    _context: dict[str, Any] = {}
 
     @classmethod
     def set(cls, key: str, value: Any) -> None:
@@ -64,12 +65,12 @@ class ErrorContext:
         cls._context.clear()
 
     @classmethod
-    def get_all(cls) -> Dict[str, Any]:
+    def get_all(cls) -> dict[str, Any]:
         """Get all context values."""
         return cls._context.copy()
 
     @classmethod
-    def update(cls, data: Dict[str, Any]) -> None:
+    def update(cls, data: dict[str, Any]) -> None:
         """Update context with multiple values."""
         cls._context.update(data)
 
@@ -98,14 +99,14 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
 
     def add_fields(
         self,
-        log_record: Dict[str, Any],
+        log_record: dict[str, Any],
         record: logging.LogRecord,
-        message_dict: Dict[str, Any],
+        message_dict: dict[str, Any],
     ) -> None:
         super().add_fields(log_record, record, message_dict)
 
         # Timestamp in RFC 3339 format with timezone
-        log_record["timestamp"] = datetime.now(timezone.utc).isoformat()
+        log_record["timestamp"] = datetime.now(UTC).isoformat()
         log_record["@timestamp"] = log_record["timestamp"]  # ELK compatibility
 
         # Log level with severity
@@ -199,7 +200,7 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
         # Remove None values for cleaner output
         self._remove_none_values(log_record)
 
-    def _extract_stack_frames(self, tb, limit: int = 10) -> List[Dict[str, Any]]:
+    def _extract_stack_frames(self, tb, limit: int = 10) -> list[dict[str, Any]]:
         """Extract structured stack frame information."""
         frames = []
         if tb is None:
@@ -214,7 +215,7 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
             })
         return frames
 
-    def _remove_none_values(self, d: Dict[str, Any]) -> None:
+    def _remove_none_values(self, d: dict[str, Any]) -> None:
         """Recursively remove None values from dictionary."""
         keys_to_remove = []
         for key, value in d.items():
@@ -318,9 +319,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             # Determine log level based on status code and duration
             if response.status_code >= 500:
                 log_level = logging.ERROR
-            elif response.status_code >= 400:
-                log_level = logging.WARNING
-            elif duration_ms > 5000:  # Slow request warning
+            elif response.status_code >= 400 or duration_ms > 5000:
                 log_level = logging.WARNING
             else:
                 log_level = logging.INFO
@@ -473,7 +472,7 @@ class PerformanceLogger:
         self.warn_threshold_ms = warn_threshold_ms
         self.error_threshold_ms = error_threshold_ms
         self.extra_fields = extra_fields
-        self.start_time: Optional[float] = None
+        self.start_time: float | None = None
 
     def __enter__(self) -> "PerformanceLogger":
         self.start_time = time.time()
@@ -538,7 +537,7 @@ class LogLevel:
 
 
 # Logger configuration by module
-LOGGER_CONFIG: Dict[str, int] = {
+LOGGER_CONFIG: dict[str, int] = {
     "uvicorn": logging.INFO,
     "uvicorn.access": logging.WARNING,
     "uvicorn.error": logging.ERROR,
@@ -598,8 +597,8 @@ def setup_logging() -> None:
         try:
             import sentry_sdk
             from sentry_sdk.integrations.fastapi import FastApiIntegration
-            from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
             from sentry_sdk.integrations.logging import LoggingIntegration
+            from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
             # Configure Sentry logging integration
             sentry_logging = LoggingIntegration(
@@ -610,7 +609,7 @@ def setup_logging() -> None:
             sentry_sdk.init(
                 dsn=settings.SENTRY_DSN,
                 environment=settings.ENVIRONMENT,
-                release=f"autocognitix@0.1.0",
+                release="autocognitix@0.1.0",
                 integrations=[
                     FastApiIntegration(),
                     SqlalchemyIntegration(),
@@ -672,7 +671,7 @@ def log_database_operation(
     duration_ms: float,
     rows_affected: int = 0,
     success: bool = True,
-    error: Optional[str] = None,
+    error: str | None = None,
 ) -> None:
     """
     Log a database operation with standard fields.
@@ -712,7 +711,7 @@ def log_external_api_call(
     status_code: int,
     duration_ms: float,
     success: bool = True,
-    error: Optional[str] = None,
+    error: str | None = None,
 ) -> None:
     """
     Log an external API call with standard fields.
@@ -777,7 +776,7 @@ def log_with_context(
     logger: logging.Logger,
     level: int,
     message: str,
-    context: Dict[str, Any],
+    context: dict[str, Any],
     exc_info: bool = False,
 ) -> None:
     """
@@ -819,10 +818,10 @@ class SpanContext:
     def __init__(self, operation_name: str, **attributes: Any):
         self.operation_name = operation_name
         self.attributes = attributes
-        self.start_time: Optional[float] = None
-        self.old_span_id: Optional[str] = None
-        self.old_parent_span_id: Optional[str] = None
-        self.span_id: Optional[str] = None
+        self.start_time: float | None = None
+        self.old_span_id: str | None = None
+        self.old_parent_span_id: str | None = None
+        self.span_id: str | None = None
         self.logger = get_logger("tracing")
 
     def __enter__(self) -> "SpanContext":
@@ -888,7 +887,7 @@ def enrich_error_context(**kwargs: Any) -> None:
     ErrorContext.update(kwargs)
 
 
-def get_current_trace_context() -> Dict[str, Optional[str]]:
+def get_current_trace_context() -> dict[str, str | None]:
     """
     Get the current distributed tracing context.
 
@@ -904,7 +903,7 @@ def get_current_trace_context() -> Dict[str, Optional[str]]:
     }
 
 
-def inject_trace_headers(headers: Dict[str, str]) -> Dict[str, str]:
+def inject_trace_headers(headers: dict[str, str]) -> dict[str, str]:
     """
     Inject trace context into outgoing request headers.
 

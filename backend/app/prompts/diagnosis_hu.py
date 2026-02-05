@@ -10,7 +10,7 @@ Author: AutoCognitix Team
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # =============================================================================
 # System Prompts
@@ -182,7 +182,7 @@ Ez a szoveg egy szabaly-alapu diagnosztikai sablon, amely az LLM eleresenek hian
 # Context Formatting Functions
 # =============================================================================
 
-def format_dtc_context(dtc_data: List[Dict[str, Any]]) -> str:
+def format_dtc_context(dtc_data: list[dict[str, Any]]) -> str:
     """
     Format DTC code information for prompt.
 
@@ -226,7 +226,7 @@ def format_dtc_context(dtc_data: List[Dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "Nincs talalat az adatbazisban."
 
 
-def format_symptom_context(symptom_data: List[Dict[str, Any]], max_items: int = 5) -> str:
+def format_symptom_context(symptom_data: list[dict[str, Any]], max_items: int = 5) -> str:
     """
     Format similar symptom matches for prompt.
 
@@ -260,7 +260,7 @@ def format_symptom_context(symptom_data: List[Dict[str, Any]], max_items: int = 
     return "\n".join(lines) if lines else "Nincs hasonlo eset az adatbazisban."
 
 
-def format_repair_context(repair_data: Dict[str, Any]) -> str:
+def format_repair_context(repair_data: dict[str, Any]) -> str:
     """
     Format repair and component information for prompt.
 
@@ -333,7 +333,7 @@ def format_repair_context(repair_data: Dict[str, Any]) -> str:
     return "\n\n".join(sections) if sections else "Nincs kapcsolodo komponens vagy javitas az adatbazisban."
 
 
-def format_recall_context(recalls: List[Dict[str, Any]], complaints: List[Dict[str, Any]] = None) -> str:
+def format_recall_context(recalls: list[dict[str, Any]], complaints: list[dict[str, Any]] | None = None) -> str:
     """
     Format NHTSA recalls and complaints for prompt.
 
@@ -399,12 +399,12 @@ class DiagnosisPromptContext:
     make: str
     model: str
     year: int
-    engine_code: Optional[str] = None
-    mileage_km: Optional[int] = None
-    vin: Optional[str] = None
-    dtc_codes: List[str] = None
+    engine_code: str | None = None
+    mileage_km: int | None = None
+    vin: str | None = None
+    dtc_codes: list[str] = None
     symptoms: str = ""
-    additional_context: Optional[str] = None
+    additional_context: str | None = None
     dtc_context: str = ""
     symptom_context: str = ""
     repair_context: str = ""
@@ -448,14 +448,14 @@ def build_diagnosis_prompt(context: DiagnosisPromptContext) -> str:
 class ParsedDiagnosisResponse:
     """Parsed diagnosis response from LLM."""
     summary: str = ""
-    probable_causes: List[Dict[str, Any]] = None
-    diagnostic_steps: List[str] = None
-    recommended_repairs: List[Dict[str, Any]] = None
-    safety_warnings: List[str] = None
+    probable_causes: list[dict[str, Any]] = None
+    diagnostic_steps: list[str] = None
+    recommended_repairs: list[dict[str, Any]] = None
+    safety_warnings: list[str] = None
     additional_notes: str = ""
     confidence_score: float = 0.5
     raw_response: str = ""
-    parse_error: Optional[str] = None
+    parse_error: str | None = None
 
     def __post_init__(self):
         if self.probable_causes is None:
@@ -552,7 +552,7 @@ def parse_diagnosis_response(response_text: str) -> ParsedDiagnosisResponse:
         return result
 
     except json.JSONDecodeError as e:
-        result.parse_error = f"JSON parse error: {str(e)}"
+        result.parse_error = f"JSON parse error: {e!s}"
         return _fallback_parse(response_text, result)
 
 
@@ -624,10 +624,10 @@ SEVERITY_DESCRIPTIONS = {
 
 
 def generate_rule_based_diagnosis(
-    dtc_codes: List[Dict[str, Any]],
-    vehicle_info: Dict[str, Any],
-    recalls: List[Dict[str, Any]] = None,
-    complaints: List[Dict[str, Any]] = None,
+    dtc_codes: list[dict[str, Any]],
+    vehicle_info: dict[str, Any],
+    recalls: list[dict[str, Any]] | None = None,
+    complaints: list[dict[str, Any]] | None = None,
 ) -> ParsedDiagnosisResponse:
     """
     Generate diagnosis using rule-based logic when LLM is unavailable.
@@ -648,7 +648,7 @@ def generate_rule_based_diagnosis(
 
     # Build summary from DTC codes
     if dtc_codes:
-        categories = set(d.get("category", "unknown") for d in dtc_codes)
+        categories = {d.get("category", "unknown") for d in dtc_codes}
         cat_names = [DTC_CATEGORY_DESCRIPTIONS.get(c, c) for c in categories]
         result.summary = (
             f"A jarmuban {len(dtc_codes)} hibakod talalhato, "
@@ -678,7 +678,7 @@ def generate_rule_based_diagnosis(
 
         # Add specific causes if available
         if possible_causes:
-            cause["description"] += f"\n\nLehetseges okok:\n" + "\n".join(f"- {c}" for c in possible_causes[:3])
+            cause["description"] += "\n\nLehetseges okok:\n" + "\n".join(f"- {c}" for c in possible_causes[:3])
 
         result.probable_causes.append(cause)
 

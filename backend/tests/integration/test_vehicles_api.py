@@ -5,7 +5,6 @@ Tests VIN decoding, vehicle makes/models, and NHTSA data retrieval.
 """
 
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 import sys
 from pathlib import Path

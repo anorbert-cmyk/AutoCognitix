@@ -11,7 +11,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 from typing import List
 import sys
 from pathlib import Path

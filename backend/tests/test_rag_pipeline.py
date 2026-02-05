@@ -12,15 +12,11 @@ Tests the complete RAG pipeline including:
 Run with: pytest tests/test_rag_pipeline.py -v
 """
 
-import asyncio
 import pytest
-from dataclasses import asdict
-from typing import Dict, Any, List
 
 # Test imports
 from app.prompts.diagnosis_hu import (
     SYSTEM_PROMPT_HU,
-    DIAGNOSIS_USER_PROMPT_HU,
     DiagnosisPromptContext,
     build_diagnosis_prompt,
     parse_diagnosis_response,
@@ -33,17 +29,13 @@ from app.prompts.diagnosis_hu import (
 )
 from app.services.llm_provider import (
     LLMProviderType,
-    LLMConfig,
     LLMMessage,
-    LLMResponse,
     RuleBasedProvider,
     LLMProviderFactory,
-    is_llm_available,
 )
 from app.services.rag_service import (
     RAGService,
     RAGContext,
-    VehicleInfo,
     RetrievedItem,
     RetrievalSource,
     HybridRanker,
@@ -292,7 +284,7 @@ class TestLLMProvider:
     def test_rule_based_provider_available(self):
         """Test that rule-based provider is always available."""
         provider = RuleBasedProvider()
-        assert provider.is_available() == True
+        assert provider.is_available()
         assert provider.provider_type == LLMProviderType.RULE_BASED
         assert provider.model_name == "rule-based-v1"
 

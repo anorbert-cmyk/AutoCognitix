@@ -10,18 +10,17 @@ Provides:
 
 import asyncio
 import random
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, TypeVar
 
-from app.core.logging import get_logger
 from app.core.exceptions import (
-    ExternalAPIException,
     LLMException,
     LLMRateLimitException,
-    LLMUnavailableException,
     NHTSAException,
     NHTSARateLimitException,
 )
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -40,8 +39,8 @@ class RetryConfig:
         exponential_base: float = 2.0,
         jitter: bool = True,
         jitter_factor: float = 0.1,
-        retryable_exceptions: Optional[Tuple[Type[Exception], ...]] = None,
-        retryable_status_codes: Optional[Tuple[int, ...]] = None,
+        retryable_exceptions: tuple[type[Exception], ...] | None = None,
+        retryable_status_codes: tuple[int, ...] | None = None,
     ):
         """
         Initialize retry configuration.
@@ -107,7 +106,7 @@ LLM_CONFIG = RetryConfig(
 def calculate_delay(
     attempt: int,
     config: RetryConfig,
-    retry_after: Optional[int] = None,
+    retry_after: int | None = None,
 ) -> float:
     """
     Calculate delay for next retry attempt.
@@ -144,7 +143,7 @@ def is_retryable_exception(
     return isinstance(exception, config.retryable_exceptions)
 
 
-def is_rate_limit_exception(exception: Exception) -> Tuple[bool, Optional[int]]:
+def is_rate_limit_exception(exception: Exception) -> tuple[bool, int | None]:
     """
     Check if exception is a rate limit error and extract retry-after.
 
@@ -170,8 +169,8 @@ def is_rate_limit_exception(exception: Exception) -> Tuple[bool, Optional[int]]:
 
 
 def retry_async(
-    config: Optional[RetryConfig] = None,
-    on_retry: Optional[Callable[[Exception, int], None]] = None,
+    config: RetryConfig | None = None,
+    on_retry: Callable[[Exception, int], None] | None = None,
 ):
     """
     Decorator for async functions with retry logic.
@@ -194,7 +193,7 @@ def retry_async(
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
-            last_exception: Optional[Exception] = None
+            last_exception: Exception | None = None
 
             for attempt in range(retry_config.max_attempts):
                 try:
@@ -266,8 +265,8 @@ def retry_async(
 
 
 def retry_sync(
-    config: Optional[RetryConfig] = None,
-    on_retry: Optional[Callable[[Exception, int], None]] = None,
+    config: RetryConfig | None = None,
+    on_retry: Callable[[Exception, int], None] | None = None,
 ):
     """
     Decorator for sync functions with retry logic.
@@ -288,7 +287,7 @@ def retry_sync(
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
-            last_exception: Optional[Exception] = None
+            last_exception: Exception | None = None
 
             for attempt in range(retry_config.max_attempts):
                 try:
@@ -373,10 +372,10 @@ class RetryContext:
                     await ctx.handle_exception(e)
     """
 
-    def __init__(self, config: Optional[RetryConfig] = None):
+    def __init__(self, config: RetryConfig | None = None):
         self.config = config or DEFAULT_CONFIG
         self.attempt = 0
-        self.last_exception: Optional[Exception] = None
+        self.last_exception: Exception | None = None
 
     @property
     def should_retry(self) -> bool:

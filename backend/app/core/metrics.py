@@ -24,11 +24,12 @@ Usage:
 """
 
 import time
-import psutil
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, suppress
 from datetime import datetime
-from typing import Any, Callable, Dict, Generator, Optional
+from typing import Any
 
+import psutil
 from fastapi import Request, Response
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -452,7 +453,7 @@ def track_embedding_generation(
 @contextmanager
 def track_vector_search(
     collection: str,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """
     Context manager for tracking vector search metrics.
 
@@ -465,7 +466,7 @@ def track_vector_search(
             ctx["results_count"] = len(results)
     """
     start_time = time.time()
-    context: Dict[str, Any] = {"results_count": 0}
+    context: dict[str, Any] = {"results_count": 0}
     success = True
 
     try:
@@ -522,7 +523,7 @@ def track_diagnosis_request(
 def track_external_api_call(
     service: str,
     endpoint: str = "",
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """
     Context manager for tracking external API call metrics.
 
@@ -536,7 +537,7 @@ def track_external_api_call(
             ctx["status_code"] = response.status_code
     """
     start_time = time.time()
-    context: Dict[str, Any] = {"status_code": 0}
+    context: dict[str, Any] = {"status_code": 0}
 
     try:
         yield context
@@ -562,7 +563,7 @@ def track_external_api_call(
 def track_llm_request(
     provider: str,
     model: str,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """
     Context manager for tracking LLM request metrics.
 
@@ -577,7 +578,7 @@ def track_llm_request(
             ctx["output_tokens"] = response.usage.output_tokens
     """
     start_time = time.time()
-    context: Dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
+    context: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
     success = True
 
     try:
@@ -727,10 +728,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         request_size = 0
         content_length = request.headers.get("Content-Length")
         if content_length:
-            try:
+            with suppress(ValueError):
                 request_size = int(content_length)
-            except ValueError:
-                pass
 
         start_time = time.time()
 
@@ -744,10 +743,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             response_size = 0
             content_length = response.headers.get("Content-Length")
             if content_length:
-                try:
+                with suppress(ValueError):
                     response_size = int(content_length)
-                except ValueError:
-                    pass
 
             # Track completion
             track_request_complete(
@@ -790,10 +787,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 continue
 
             # Replace UUIDs with placeholder
-            if self._is_uuid(part):
-                normalized_parts.append("{id}")
-            # Replace numeric IDs with placeholder
-            elif part.isdigit():
+            if self._is_uuid(part) or part.isdigit():
                 normalized_parts.append("{id}")
             # Replace VIN patterns with placeholder
             elif len(part) == 17 and part.isalnum():
@@ -846,7 +840,7 @@ async def generate_metrics_response() -> Response:
     )
 
 
-def get_metrics_summary() -> Dict[str, Any]:
+def get_metrics_summary() -> dict[str, Any]:
     """
     Get human-readable metrics summary.
 

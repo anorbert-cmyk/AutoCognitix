@@ -10,7 +10,8 @@ This module provides:
 
 import traceback
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +22,8 @@ from sqlalchemy.exc import (
     IntegrityError,
     OperationalError,
     SQLAlchemyError,
+)
+from sqlalchemy.exc import (
     TimeoutError as SQLAlchemyTimeoutError,
 )
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,10 +31,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import settings
 from app.core.exceptions import (
     AutoCognitixException,
-    DatabaseException,
     ErrorCode,
-    PostgresConnectionException,
-    PostgresException,
     get_error_message,
 )
 from app.core.logging import get_logger
@@ -92,8 +92,8 @@ def build_error_response(
     request_id: str,
     code: ErrorCode,
     message: str,
-    message_hu: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
+    message_hu: str | None = None,
+    details: dict[str, Any] | None = None,
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
 ) -> JSONResponse:
     """
@@ -374,9 +374,15 @@ def setup_neo4j_exception_handler(app: FastAPI) -> None:
     try:
         from neo4j.exceptions import (
             AuthError as Neo4jAuthError,
-            ServiceUnavailable as Neo4jServiceUnavailable,
-            SessionExpired as Neo4jSessionExpired,
+        )
+        from neo4j.exceptions import (
             Neo4jError,
+        )
+        from neo4j.exceptions import (
+            ServiceUnavailable as Neo4jServiceUnavailable,
+        )
+        from neo4j.exceptions import (
+            SessionExpired as Neo4jSessionExpired,
         )
 
         async def neo4j_exception_handler(
@@ -437,8 +443,10 @@ def setup_qdrant_exception_handler(app: FastAPI) -> None:
     """Setup Qdrant-specific exception handlers if qdrant is available."""
     try:
         from qdrant_client.http.exceptions import (
-            UnexpectedResponse as QdrantUnexpectedResponse,
             ResponseHandlingException as QdrantResponseError,
+        )
+        from qdrant_client.http.exceptions import (
+            UnexpectedResponse as QdrantUnexpectedResponse,
         )
 
         async def qdrant_exception_handler(

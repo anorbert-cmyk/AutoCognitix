@@ -5,9 +5,8 @@ Supports Railway deployment with automatic environment variable detection.
 """
 
 from functools import lru_cache
-from typing import List, Optional, Union
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +27,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
 
     # Railway-specific
-    RAILWAY_ENVIRONMENT: Optional[str] = None
+    RAILWAY_ENVIRONMENT: str | None = None
     PORT: int = 8000
 
     # Security - IMPORTANT: These MUST be set via environment variables in production
@@ -40,7 +39,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS - Use Union type to handle both string (from env) and list formats
-    BACKEND_CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
+    BACKEND_CORS_ORIGINS: list[str] | str = ["http://localhost:3000", "http://localhost:8000"]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
@@ -86,24 +85,24 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_GRPC_PORT: int = 6334
-    QDRANT_URL: Optional[str] = None  # For Qdrant Cloud: https://xxx.cloud.qdrant.io:6333
-    QDRANT_API_KEY: Optional[str] = None  # For Qdrant Cloud authentication
+    QDRANT_URL: str | None = None  # For Qdrant Cloud: https://xxx.cloud.qdrant.io:6333
+    QDRANT_API_KEY: str | None = None  # For Qdrant Cloud authentication
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # External APIs
     NHTSA_API_BASE_URL: str = "https://vpic.nhtsa.dot.gov/api"
-    YOUTUBE_API_KEY: Optional[str] = None
-    CARMD_API_KEY: Optional[str] = None
-    CARMD_PARTNER_TOKEN: Optional[str] = None
-    CARAPI_API_KEY: Optional[str] = None
+    YOUTUBE_API_KEY: str | None = None
+    CARMD_API_KEY: str | None = None
+    CARMD_PARTNER_TOKEN: str | None = None
+    CARAPI_API_KEY: str | None = None
 
     # LLM Configuration
     LLM_PROVIDER: str = "anthropic"  # openai, anthropic, or ollama
-    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
-    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama2"
@@ -116,7 +115,7 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
-    SENTRY_DSN: Optional[str] = None
+    SENTRY_DSN: str | None = None
 
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60

@@ -17,41 +17,38 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from enum import StrEnum
+from typing import Any, Optional
 
-from sqlalchemy import select, or_, func
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.neo4j_models import get_diagnostic_path, DTCNode, VehicleNode
-from app.db.qdrant_client import qdrant_client, QdrantService
+from app.db.neo4j_models import get_diagnostic_path
 from app.db.postgres.models import DTCCode, KnownIssue
+from app.db.qdrant_client import QdrantService, qdrant_client
+from app.prompts.diagnosis_hu import (
+    SYSTEM_PROMPT_HU,
+    DiagnosisPromptContext,
+    ParsedDiagnosisResponse,
+    build_diagnosis_prompt,
+    format_dtc_context,
+    format_recall_context,
+    format_repair_context,
+    format_symptom_context,
+    generate_rule_based_diagnosis,
+    parse_diagnosis_response,
+)
 from app.services.embedding_service import (
     embed_text,
-    embed_batch,
     get_embedding_service,
     preprocess_hungarian,
 )
 from app.services.llm_provider import (
-    LLMProviderType,
     LLMConfig,
-    LLMResponse,
+    LLMProviderType,
     get_llm_provider,
     is_llm_available,
-)
-from app.prompts.diagnosis_hu import (
-    SYSTEM_PROMPT_HU,
-    DiagnosisPromptContext,
-    build_diagnosis_prompt,
-    parse_diagnosis_response,
-    ParsedDiagnosisResponse,
-    format_dtc_context,
-    format_symptom_context,
-    format_repair_context,
-    format_recall_context,
-    generate_rule_based_diagnosis,
 )
 
 logger = get_logger(__name__)
@@ -62,7 +59,7 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-class ConfidenceLevel(str, Enum):
+class ConfidenceLevel(StrEnum):
     """Confidence levels for diagnosis."""
     HIGH = "high"
     MEDIUM = "medium"
@@ -70,7 +67,7 @@ class ConfidenceLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-class RetrievalSource(str, Enum):
+class RetrievalSource(StrEnum):
     """Sources for context retrieval."""
     QDRANT_DTC = "qdrant_dtc"
     QDRANT_SYMPTOM = "qdrant_symptom"
@@ -85,11 +82,11 @@ class VehicleInfo:
     make: str
     model: str
     year: int
-    vin: Optional[str] = None
-    engine_code: Optional[str] = None
-    mileage_km: Optional[int] = None
+    vin: str | None = None
+    engine_code: str | None = None
+    mileage_km: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "make": self.make,
             "model": self.model,
@@ -103,20 +100,20 @@ class VehicleInfo:
 @dataclass
 class RetrievedItem:
     """Item retrieved from any source."""
-    content: Dict[str, Any]
+    content: dict[str, Any]
     source: RetrievalSource
     score: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RAGContext:
     """Context assembled for RAG generation."""
-    dtc_items: List[RetrievedItem] = field(default_factory=list)
-    symptom_items: List[RetrievedItem] = field(default_factory=list)
-    graph_items: List[RetrievedItem] = field(default_factory=list)
-    text_items: List[RetrievedItem] = field(default_factory=list)
-    recall_items: List[RetrievedItem] = field(default_factory=list)
+    dtc_items: list[RetrievedItem] = field(default_factory=list)
+    symptom_items: list[RetrievedItem] = field(default_factory=list)
+    graph_items: list[RetrievedItem] = field(default_factory=list)
+    text_items: list[RetrievedItem] = field(default_factory=list)
+    recall_items: list[RetrievedItem] = field(default_factory=list)
 
     # Formatted context strings
     dtc_context: str = ""
@@ -125,9 +122,9 @@ class RAGContext:
     recall_context: str = ""
 
     # Graph data for structured access
-    graph_data: Dict[str, Any] = field(default_factory=dict)
+    graph_data: dict[str, Any] = field(default_factory=dict)
 
-    def get_all_items(self) -> List[RetrievedItem]:
+    def get_all_items(self) -> list[RetrievedItem]:
         """Get all retrieved items from all sources."""
         return (
             self.dtc_items +
@@ -162,17 +159,17 @@ class RepairRecommendation:
     name: str
     description: str
     difficulty: str
-    estimated_time_minutes: Optional[int] = None
-    estimated_cost_min: Optional[int] = None
-    estimated_cost_max: Optional[int] = None
-    parts: List[Dict[str, Any]] = field(default_factory=list)
-    diagnostic_steps: List[str] = field(default_factory=list)
+    estimated_time_minutes: int | None = None
+    estimated_cost_min: int | None = None
+    estimated_cost_max: int | None = None
+    parts: list[dict[str, Any]] = field(default_factory=list)
+    diagnostic_steps: list[str] = field(default_factory=list)
 
 
 @dataclass
 class DiagnosisResult:
     """Complete diagnosis result with confidence and recommendations."""
-    dtc_codes: List[str]
+    dtc_codes: list[str]
     symptoms: str
     vehicle_info: VehicleInfo
 
@@ -183,15 +180,15 @@ class DiagnosisResult:
     confidence_score: float  # 0.0 - 1.0
 
     # Structured results
-    probable_causes: List[Dict[str, Any]] = field(default_factory=list)
-    repair_recommendations: List[RepairRecommendation] = field(default_factory=list)
-    safety_warnings: List[str] = field(default_factory=list)
-    diagnostic_steps: List[str] = field(default_factory=list)
+    probable_causes: list[dict[str, Any]] = field(default_factory=list)
+    repair_recommendations: list[RepairRecommendation] = field(default_factory=list)
+    safety_warnings: list[str] = field(default_factory=list)
+    diagnostic_steps: list[str] = field(default_factory=list)
 
     # Context used
-    similar_cases: List[Dict[str, Any]] = field(default_factory=list)
-    related_dtc_info: List[Dict[str, Any]] = field(default_factory=list)
-    sources: List[Dict[str, Any]] = field(default_factory=list)
+    similar_cases: list[dict[str, Any]] = field(default_factory=list)
+    related_dtc_info: list[dict[str, Any]] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
     # Metadata
     generated_at: datetime = field(default_factory=datetime.utcnow)
@@ -225,9 +222,9 @@ class HybridRanker:
 
     def reciprocal_rank_fusion(
         self,
-        ranked_lists: List[List[RetrievedItem]],
-        weights: Optional[List[float]] = None,
-    ) -> List[RetrievedItem]:
+        ranked_lists: list[list[RetrievedItem]],
+        weights: list[float] | None = None,
+    ) -> list[RetrievedItem]:
         """
         Combine multiple ranked lists using RRF.
 
@@ -245,10 +242,10 @@ class HybridRanker:
             weights = [1.0] * len(ranked_lists)
 
         # Calculate RRF scores
-        item_scores: Dict[str, float] = {}
-        item_objects: Dict[str, RetrievedItem] = {}
+        item_scores: dict[str, float] = {}
+        item_objects: dict[str, RetrievedItem] = {}
 
-        for weight, ranked_list in zip(weights, ranked_lists):
+        for weight, ranked_list in zip(weights, ranked_lists, strict=False):
             for rank, item in enumerate(ranked_list, 1):
                 # Create unique key for item
                 item_key = self._get_item_key(item)
@@ -279,7 +276,7 @@ class HybridRanker:
         content_str = str(item.content)
         return hashlib.md5(content_str.encode()).hexdigest()
 
-    def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
+    def normalize_scores(self, items: list[RetrievedItem]) -> list[RetrievedItem]:
         """Normalize scores to 0-1 range."""
         if not items:
             return items
@@ -306,7 +303,7 @@ class ContextCache:
     """Simple in-memory cache for retrieval results."""
 
     def __init__(self, max_size: int = 100, ttl_seconds: int = 300):
-        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
 
@@ -314,7 +311,7 @@ class ContextCache:
         """Create cache key from arguments."""
         return hashlib.md5(str(args).encode()).hexdigest()
 
-    def get(self, *args) -> Optional[Any]:
+    def get(self, *args) -> Any | None:
         """Get item from cache if not expired."""
         key = self._make_key(*args)
         if key in self._cache:
@@ -378,7 +375,7 @@ class RAGService:
         self._embedding_service = None
         self._ranker = HybridRanker()
         self._cache = ContextCache()
-        self._db_session: Optional[AsyncSession] = None
+        self._db_session: AsyncSession | None = None
 
         logger.info("RAGService initialized")
 
@@ -401,9 +398,9 @@ class RAGService:
         query: str,
         collection: str,
         top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         score_threshold: float = 0.5,
-    ) -> List[RetrievedItem]:
+    ) -> list[RetrievedItem]:
         """
         Retrieve items from Qdrant vector store.
 
@@ -457,8 +454,8 @@ class RAGService:
 
     async def retrieve_from_neo4j(
         self,
-        dtc_codes: List[str],
-    ) -> Tuple[List[RetrievedItem], Dict[str, Any]]:
+        dtc_codes: list[str],
+    ) -> tuple[list[RetrievedItem], dict[str, Any]]:
         """
         Retrieve graph context from Neo4j.
 
@@ -507,10 +504,10 @@ class RAGService:
     async def retrieve_from_postgres(
         self,
         query: str,
-        dtc_codes: List[str],
-        vehicle_make: Optional[str] = None,
+        dtc_codes: list[str],
+        vehicle_make: str | None = None,
         top_k: int = 10,
-    ) -> List[RetrievedItem]:
+    ) -> list[RetrievedItem]:
         """
         Retrieve items from PostgreSQL using text search.
 
@@ -642,10 +639,10 @@ class RAGService:
     async def assemble_context(
         self,
         vehicle_info: VehicleInfo,
-        dtc_codes: List[str],
+        dtc_codes: list[str],
         symptoms: str,
-        recalls: List[Dict[str, Any]] = None,
-        complaints: List[Dict[str, Any]] = None,
+        recalls: list[dict[str, Any]] | None = None,
+        complaints: list[dict[str, Any]] | None = None,
     ) -> RAGContext:
         """
         Assemble complete context from all sources.
@@ -769,8 +766,8 @@ class RAGService:
     def calculate_confidence(
         self,
         context: RAGContext,
-        dtc_codes: List[str],
-    ) -> Tuple[ConfidenceLevel, float]:
+        dtc_codes: list[str],
+    ) -> tuple[ConfidenceLevel, float]:
         """
         Calculate confidence score for diagnosis.
 
@@ -825,10 +822,7 @@ class RAGService:
             factors += 0.1
 
         # Normalize score
-        if factors > 0:
-            normalized_score = min(1.0, score / factors)
-        else:
-            normalized_score = 0.1
+        normalized_score = min(1.0, score / factors) if factors > 0 else 0.1
 
         # Determine confidence level
         if normalized_score >= 0.75:
@@ -849,10 +843,10 @@ class RAGService:
     async def generate_diagnosis(
         self,
         vehicle_info: VehicleInfo,
-        dtc_codes: List[str],
+        dtc_codes: list[str],
         symptoms: str,
         context: RAGContext,
-        additional_context: Optional[str] = None,
+        additional_context: str | None = None,
     ) -> ParsedDiagnosisResponse:
         """
         Generate diagnosis using LLM with assembled context.
@@ -940,7 +934,7 @@ class RAGService:
                 vehicle_info=vehicle_info.to_dict(),
                 recalls=recall_data,
             )
-            result.parse_error = f"LLM error: {str(e)}"
+            result.parse_error = f"LLM error: {e!s}"
             return result
 
     # =========================================================================
@@ -949,12 +943,12 @@ class RAGService:
 
     async def diagnose(
         self,
-        vehicle_info: Dict[str, Any],
-        dtc_codes: List[str],
+        vehicle_info: dict[str, Any],
+        dtc_codes: list[str],
         symptoms: str,
-        recalls: List[Dict[str, Any]] = None,
-        complaints: List[Dict[str, Any]] = None,
-        additional_context: Optional[str] = None,
+        recalls: list[dict[str, Any]] | None = None,
+        complaints: list[dict[str, Any]] | None = None,
+        additional_context: str | None = None,
     ) -> DiagnosisResult:
         """
         Perform complete vehicle diagnosis using RAG.
@@ -1114,7 +1108,7 @@ class RAGService:
 # =============================================================================
 
 
-_rag_service: Optional[RAGService] = None
+_rag_service: RAGService | None = None
 
 
 def get_rag_service() -> RAGService:
@@ -1131,12 +1125,12 @@ def get_rag_service() -> RAGService:
 
 
 async def diagnose(
-    vehicle_info: Dict[str, Any],
-    dtc_codes: List[str],
+    vehicle_info: dict[str, Any],
+    dtc_codes: list[str],
     symptoms: str,
-    recalls: List[Dict[str, Any]] = None,
-    complaints: List[Dict[str, Any]] = None,
-    db_session: Optional[AsyncSession] = None,
+    recalls: list[dict[str, Any]] | None = None,
+    complaints: list[dict[str, Any]] | None = None,
+    db_session: AsyncSession | None = None,
 ) -> DiagnosisResult:
     """
     Convenience function to perform vehicle diagnosis.
@@ -1169,7 +1163,7 @@ async def diagnose(
 async def get_context(
     query: str,
     top_k: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Convenience function to retrieve context from vector store.
 

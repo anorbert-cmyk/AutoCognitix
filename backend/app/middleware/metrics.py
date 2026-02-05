@@ -25,9 +25,10 @@ Usage:
 
 import re
 import time
-from contextlib import contextmanager
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, suppress
 from datetime import datetime
-from typing import Any, Callable, Dict, Generator, Optional, Set
+from typing import Any
 
 from fastapi import Request, Response
 from prometheus_client import (
@@ -43,7 +44,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from app.core.config import settings
-from app.core.logging import get_logger, request_id_var
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -148,7 +149,7 @@ class EndpointNormalizer:
     DTC_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$", re.IGNORECASE)
 
     # Known static paths that should not be normalized
-    STATIC_PATHS: Set[str] = {
+    STATIC_PATHS: set[str] = {
         "/health",
         "/health/live",
         "/health/ready",
@@ -209,7 +210,7 @@ class EndpointNormalizer:
 def track_request(
     method: str,
     endpoint: str,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """
     Context manager for tracking request metrics.
 
@@ -225,7 +226,7 @@ def track_request(
             response = await process_request()
             ctx["status_code"] = response.status_code
     """
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
         "status_code": 0,
         "request_size": 0,
         "response_size": 0,
@@ -314,14 +315,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     """
 
     # Endpoints to exclude from metrics (health checks, etc.)
-    EXCLUDED_ENDPOINTS: Set[str] = {
+    EXCLUDED_ENDPOINTS: set[str] = {
         "/health",
         "/health/live",
         "/health/ready",
         "/metrics",
     }
 
-    def __init__(self, app: ASGIApp, exclude_paths: Optional[Set[str]] = None):
+    def __init__(self, app: ASGIApp, exclude_paths: set[str] | None = None):
         """
         Initialize metrics middleware.
 
@@ -349,10 +350,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             # Get request size
             content_length = request.headers.get("Content-Length")
             if content_length:
-                try:
+                with suppress(ValueError):
                     ctx["request_size"] = int(content_length)
-                except ValueError:
-                    pass
 
             try:
                 response = await call_next(request)
@@ -361,10 +360,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 # Get response size
                 response_length = response.headers.get("Content-Length")
                 if response_length:
-                    try:
+                    with suppress(ValueError):
                         ctx["response_size"] = int(response_length)
-                    except ValueError:
-                        pass
 
                 # Track errors (4xx and 5xx)
                 if response.status_code >= 400:
@@ -438,7 +435,7 @@ def get_metrics_text() -> bytes:
     return generate_latest()
 
 
-def get_metrics_summary() -> Dict[str, Any]:
+def get_metrics_summary() -> dict[str, Any]:
     """
     Get a human-readable metrics summary.
 

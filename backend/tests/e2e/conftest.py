@@ -10,14 +10,14 @@ Provides comprehensive fixtures for:
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import AsyncGenerator, Generator, Dict, Any, Optional
+from typing import AsyncGenerator, Generator, Dict, Any
 from uuid import uuid4
 import sys
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -26,7 +26,7 @@ from sqlalchemy.pool import StaticPool
 backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
-from app.db.postgres.models import Base, DTCCode, User, DiagnosisSession, VehicleMake, VehicleModel
+from app.db.postgres.models import Base, DTCCode, User, VehicleMake
 
 
 # =============================================================================
@@ -910,8 +910,6 @@ def sample_hungarian_symptoms():
 @pytest.fixture
 def sample_diagnosis_sessions():
     """Sample diagnosis sessions for history testing."""
-    from app.db.postgres.models import DiagnosisSession
-    from datetime import datetime, timedelta
 
     base_time = datetime.utcnow()
 

@@ -13,13 +13,10 @@ Endpoints:
 - /metrics/summary - Human-readable JSON metrics summary
 """
 
-from datetime import datetime
-from typing import Any, Dict
 
 from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
 from app.core.logging import get_logger

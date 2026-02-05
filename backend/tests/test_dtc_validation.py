@@ -10,7 +10,7 @@ Tests cover:
 
 import pytest
 import re
-from typing import List, Tuple
+from typing import Tuple
 
 
 # DTC code validation patterns
@@ -180,14 +180,14 @@ class TestDTCCodeParsing:
 
     def test_parse_chassis_code(self):
         """Test parsing chassis code."""
-        prefix, category, numeric, is_generic = parse_dtc_code("C0035")
+        prefix, category, _numeric, is_generic = parse_dtc_code("C0035")
         assert prefix == "C"
         assert category == "chassis"
         assert is_generic is True
 
     def test_parse_network_code(self):
         """Test parsing network code."""
-        prefix, category, numeric, is_generic = parse_dtc_code("U0100")
+        prefix, category, _numeric, is_generic = parse_dtc_code("U0100")
         assert prefix == "U"
         assert category == "network"
         assert is_generic is True
@@ -291,7 +291,7 @@ class TestDTCBulkValidation:
     def test_deduplicate_codes(self):
         """Test deduplication of DTC codes."""
         codes_with_duplicates = ["P0101", "p0101", "P0101", "B1234", "b1234"]
-        unique_codes = list(set(c.upper() for c in codes_with_duplicates if validate_dtc_code(c)))
+        unique_codes = list({c.upper() for c in codes_with_duplicates if validate_dtc_code(c)})
 
         assert len(unique_codes) == 2
         assert "P0101" in unique_codes

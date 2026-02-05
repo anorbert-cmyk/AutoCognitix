@@ -353,7 +353,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     return result
 
 
-async def get_vehicle_common_issues(make: str, model: str, year: int = None) -> dict:
+async def get_vehicle_common_issues(make: str, model: str, year: int | None = None) -> dict:
     """
     Get common DTC codes and issues for a specific vehicle.
 
@@ -405,7 +405,7 @@ async def get_vehicle_common_issues(make: str, model: str, year: int = None) -> 
         dtc_data["recommended_repairs"] = []
         for component in dtc.indicates_failure_of.all():
             for repair in component.repaired_by.all():
-                repair_rel = component.repaired_by.relationship(repair)
+                component.repaired_by.relationship(repair)
                 dtc_data["recommended_repairs"].append({
                     "name": repair.description_hu or repair.name,
                     "difficulty": repair.difficulty,

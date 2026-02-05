@@ -8,7 +8,6 @@ Tests cover:
 - ReDoS prevention in regex patterns
 """
 
-import pytest
 import re
 import json
 from typing import Dict, List, Tuple
@@ -333,7 +332,7 @@ class TestHungarianTextNormalization:
         result = normalize_hungarian_text(text)
 
         # Hungarian characters should be preserved
-        assert "levegotomeg-mero aramkor hiba" == result
+        assert result == "levegotomeg-mero aramkor hiba"
 
 
 class TestTranslationFixes:

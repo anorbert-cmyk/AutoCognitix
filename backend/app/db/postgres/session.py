@@ -9,24 +9,26 @@ Optimized for performance with:
 - Comprehensive error handling with Hungarian error messages
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.exc import (
     DBAPIError,
     IntegrityError,
     OperationalError,
     SQLAlchemyError,
+)
+from sqlalchemy.exc import (
     TimeoutError as SQLAlchemyTimeoutError,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import QueuePool
 
 from app.core.config import settings
-from app.core.logging import get_logger
 from app.core.exceptions import (
     PostgresConnectionException,
     PostgresException,
 )
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -40,8 +42,8 @@ logger = get_logger(__name__)
 # - pool_timeout: Wait time before raising TimeoutError
 # - pool_pre_ping: Test connections before use (detect stale connections)
 
-POOL_SIZE = int(settings.DEBUG and 5 or 10)  # Larger pool in production
-MAX_OVERFLOW = int(settings.DEBUG and 10 or 20)  # Allow more overflow in production
+POOL_SIZE = int((settings.DEBUG and 5) or 10)  # Larger pool in production
+MAX_OVERFLOW = int((settings.DEBUG and 10) or 20)  # Allow more overflow in production
 POOL_RECYCLE = 1800  # Recycle connections every 30 minutes
 POOL_TIMEOUT = 30  # 30 second timeout for acquiring connection
 

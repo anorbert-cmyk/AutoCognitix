@@ -14,7 +14,6 @@ Author: AutoCognitix Team
 
 import asyncio
 from datetime import datetime
-from typing import List, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,8 +27,8 @@ from app.api.v1.schemas.diagnosis import (
     Source,
 )
 from app.core.logging import get_logger
-from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
 from app.db.postgres.models import DTCCode
+from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
 from app.services.embedding_service import preprocess_hungarian
 from app.services.nhtsa_service import (
     Complaint,
@@ -46,7 +45,7 @@ logger = get_logger(__name__)
 class DiagnosisServiceError(Exception):
     """Custom exception for diagnosis service errors."""
 
-    def __init__(self, message: str, details: Optional[dict] = None):
+    def __init__(self, message: str, details: dict | None = None):
         self.message = message
         self.details = details or {}
         super().__init__(self.message)
@@ -89,9 +88,9 @@ class DiagnosisService:
             db: SQLAlchemy async session for database operations.
         """
         self.db = db
-        self._nhtsa_service: Optional[NHTSAService] = None
-        self._dtc_repository: Optional[DTCCodeRepository] = None
-        self._diagnosis_repository: Optional[DiagnosisSessionRepository] = None
+        self._nhtsa_service: NHTSAService | None = None
+        self._dtc_repository: DTCCodeRepository | None = None
+        self._diagnosis_repository: DiagnosisSessionRepository | None = None
 
     async def _get_nhtsa_service(self) -> NHTSAService:
         """Get or create NHTSA service instance."""
@@ -129,7 +128,7 @@ class DiagnosisService:
     async def analyze_vehicle(
         self,
         request: DiagnosisRequest,
-        user_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
     ) -> DiagnosisResponse:
         """
         Perform comprehensive vehicle diagnosis.
@@ -163,7 +162,7 @@ class DiagnosisService:
 
         try:
             # Step 1: VIN decoding (if provided)
-            vin_data: Optional[VINDecodeResult] = None
+            vin_data: VINDecodeResult | None = None
             if request.vin:
                 vin_data = await self._decode_vin(request.vin)
                 logger.info(f"VIN decoded: {vin_data.make} {vin_data.model}")
@@ -225,7 +224,7 @@ class DiagnosisService:
         except Exception as e:
             logger.error(f"Diagnosis {diagnosis_id} failed: {e}", exc_info=True)
             raise DiagnosisServiceError(
-                message=f"Diagnosis failed: {str(e)}",
+                message=f"Diagnosis failed: {e!s}",
                 details={"diagnosis_id": str(diagnosis_id)},
             )
 
@@ -275,8 +274,8 @@ class DiagnosisService:
     # =========================================================================
 
     async def _validate_and_enrich_dtc_codes(
-        self, dtc_codes: List[str]
-    ) -> List[DTCCode]:
+        self, dtc_codes: list[str]
+    ) -> list[DTCCode]:
         """
         Validate DTC codes and fetch their details from database.
 
@@ -290,8 +289,8 @@ class DiagnosisService:
             Unknown DTC codes are logged but not rejected,
             allowing diagnosis to proceed with partial information.
         """
-        validated_codes: List[DTCCode] = []
-        unknown_codes: List[str] = []
+        validated_codes: list[DTCCode] = []
+        unknown_codes: list[str] = []
 
         for code in dtc_codes:
             code_upper = code.upper().strip()
@@ -341,10 +340,7 @@ class DiagnosisService:
         if code[0] not in "PBCU":
             return False
 
-        if not code[1:].isdigit():
-            return False
-
-        return True
+        return code[1:].isdigit()
 
     # =========================================================================
     # Symptom Preprocessing
@@ -380,7 +376,7 @@ class DiagnosisService:
         make: str,
         model: str,
         year: int,
-    ) -> tuple[List[Recall], List[Complaint]]:
+    ) -> tuple[list[Recall], list[Complaint]]:
         """
         Fetch recalls and complaints from NHTSA API in parallel.
 
@@ -427,11 +423,11 @@ class DiagnosisService:
     async def _run_rag_pipeline(
         self,
         request: DiagnosisRequest,
-        dtc_details: List[DTCCode],
+        dtc_details: list[DTCCode],
         preprocessed_symptoms: str,
-        recalls: List[Recall],
-        complaints: List[Complaint],
-        vin_data: Optional[VINDecodeResult],
+        recalls: list[Recall],
+        complaints: list[Complaint],
+        vin_data: VINDecodeResult | None,
     ) -> dict:
         """
         Execute the RAG (Retrieval-Augmented Generation) pipeline.
@@ -497,11 +493,11 @@ class DiagnosisService:
     def _build_rag_context(
         self,
         request: DiagnosisRequest,
-        dtc_details: List[DTCCode],
+        dtc_details: list[DTCCode],
         preprocessed_symptoms: str,
-        recalls: List[Recall],
-        complaints: List[Complaint],
-        vin_data: Optional[VINDecodeResult],
+        recalls: list[Recall],
+        complaints: list[Complaint],
+        vin_data: VINDecodeResult | None,
     ) -> dict:
         """
         Build context dictionary for RAG pipeline.
@@ -569,9 +565,9 @@ class DiagnosisService:
 
     def _fallback_diagnosis(
         self,
-        dtc_details: List[DTCCode],
-        recalls: List[Recall],
-        complaints: List[Complaint],
+        dtc_details: list[DTCCode],
+        recalls: list[Recall],
+        complaints: list[Complaint],
     ) -> dict:
         """
         Generate fallback diagnosis when RAG service is unavailable.
@@ -666,10 +662,10 @@ class DiagnosisService:
         self,
         diagnosis_id: UUID,
         request: DiagnosisRequest,
-        dtc_details: List[DTCCode],
+        dtc_details: list[DTCCode],
         rag_result: dict,
-        recalls: List[Recall],
-        complaints: List[Complaint],
+        recalls: list[Recall],
+        complaints: list[Complaint],
     ) -> DiagnosisResponse:
         """
         Build the final DiagnosisResponse object.
@@ -746,7 +742,7 @@ class DiagnosisService:
         diagnosis_id: UUID,
         request: DiagnosisRequest,
         response: DiagnosisResponse,
-        user_id: Optional[UUID],
+        user_id: UUID | None,
     ) -> None:
         """
         Save diagnosis session to database.
@@ -779,7 +775,7 @@ class DiagnosisService:
             logger.error(f"Failed to save diagnosis session: {e}", exc_info=True)
             # Don't raise - diagnosis should still be returned even if save fails
 
-    async def get_diagnosis_by_id(self, diagnosis_id: UUID) -> Optional[DiagnosisResponse]:
+    async def get_diagnosis_by_id(self, diagnosis_id: UUID) -> DiagnosisResponse | None:
         """
         Retrieve a diagnosis by its ID.
 
@@ -825,7 +821,7 @@ class DiagnosisService:
         except Exception as e:
             logger.error(f"Error retrieving diagnosis {diagnosis_id}: {e}")
             raise DiagnosisServiceError(
-                message=f"Failed to retrieve diagnosis: {str(e)}",
+                message=f"Failed to retrieve diagnosis: {e!s}",
                 details={"diagnosis_id": str(diagnosis_id)},
             )
 
@@ -834,7 +830,7 @@ class DiagnosisService:
         user_id: UUID,
         skip: int = 0,
         limit: int = 10,
-    ) -> List[DiagnosisHistoryItem]:
+    ) -> list[DiagnosisHistoryItem]:
         """
         Get diagnosis history for a user.
 
@@ -869,7 +865,7 @@ class DiagnosisService:
         except Exception as e:
             logger.error(f"Error retrieving user history for {user_id}: {e}")
             raise DiagnosisServiceError(
-                message=f"Failed to retrieve diagnosis history: {str(e)}",
+                message=f"Failed to retrieve diagnosis history: {e!s}",
                 details={"user_id": str(user_id)},
             )
 
@@ -910,7 +906,7 @@ async def get_diagnosis_service(db: AsyncSession) -> DiagnosisService:
 async def analyze_vehicle(
     db: AsyncSession,
     request: DiagnosisRequest,
-    user_id: Optional[UUID] = None,
+    user_id: UUID | None = None,
 ) -> DiagnosisResponse:
     """
     Convenience function for vehicle analysis.
@@ -930,7 +926,7 @@ async def analyze_vehicle(
 async def get_diagnosis_by_id(
     db: AsyncSession,
     diagnosis_id: UUID,
-) -> Optional[DiagnosisResponse]:
+) -> DiagnosisResponse | None:
     """
     Convenience function to get diagnosis by ID.
 
@@ -950,7 +946,7 @@ async def get_user_history(
     user_id: UUID,
     skip: int = 0,
     limit: int = 10,
-) -> List[DiagnosisHistoryItem]:
+) -> list[DiagnosisHistoryItem]:
     """
     Convenience function to get user diagnosis history.
 

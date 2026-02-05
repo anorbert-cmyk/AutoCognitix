@@ -13,14 +13,13 @@ Performance Optimizations:
 """
 
 from datetime import datetime
-from typing import Any, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.db.postgres.models import Base, DTCCode, DiagnosisSession, User, VehicleMake, VehicleModel
+from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
 
 # Generic type for models
 ModelType = TypeVar("ModelType", bound=Base)
@@ -37,7 +36,7 @@ class BaseRepository(Generic[ModelType]):
         db: The async database session.
     """
 
-    def __init__(self, model: Type[ModelType], db: AsyncSession) -> None:
+    def __init__(self, model: type[ModelType], db: AsyncSession) -> None:
         """
         Initialize the repository.
 
@@ -48,12 +47,12 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
         self.db = db
 
-    async def get(self, id: Union[str, int, UUID]) -> Optional[ModelType]:
+    async def get(self, id: str | int | UUID) -> ModelType | None:
         """Get a single record by ID."""
         result = await self.db.execute(select(self.model).where(self.model.id == id))
         return result.scalar_one_or_none()
 
-    async def get_all(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
+    async def get_all(self, skip: int = 0, limit: int = 100) -> list[ModelType]:
         """Get all records with pagination."""
         result = await self.db.execute(select(self.model).offset(skip).limit(limit))
         return list(result.scalars().all())
@@ -66,7 +65,7 @@ class BaseRepository(Generic[ModelType]):
         await self.db.refresh(db_obj)
         return db_obj
 
-    async def update(self, id: Union[str, int, UUID], obj_in: dict) -> Optional[ModelType]:
+    async def update(self, id: str | int | UUID, obj_in: dict) -> ModelType | None:
         """Update an existing record."""
         db_obj = await self.get(id)
         if db_obj:
@@ -76,7 +75,7 @@ class BaseRepository(Generic[ModelType]):
             await self.db.refresh(db_obj)
         return db_obj
 
-    async def delete(self, id: Union[str, int, UUID]) -> bool:
+    async def delete(self, id: str | int | UUID) -> bool:
         """Delete a record."""
         db_obj = await self.get(id)
         if db_obj:
@@ -93,7 +92,7 @@ class UserRepository(BaseRepository[User]):
         """Initialize the User repository."""
         super().__init__(User, db)
 
-    async def get_by_email(self, email: str) -> Optional[User]:
+    async def get_by_email(self, email: str) -> User | None:
         """
         Get user by email address.
 
@@ -114,7 +113,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         """Initialize the DTC code repository."""
         super().__init__(DTCCode, db)
 
-    async def get_by_code(self, code: str) -> Optional[DTCCode]:
+    async def get_by_code(self, code: str) -> DTCCode | None:
         """
         Get DTC by code string.
 
@@ -130,9 +129,9 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
     async def search(
         self,
         query: str,
-        category: Optional[str] = None,
+        category: str | None = None,
         limit: int = 20,
-    ) -> List[DTCCode]:
+    ) -> list[DTCCode]:
         """
         Search DTC codes by query string.
 
@@ -159,7 +158,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_related_codes(self, code: str) -> List[DTCCode]:
+    async def get_related_codes(self, code: str) -> list[DTCCode]:
         """
         Get DTC codes related to the specified code.
 
@@ -185,7 +184,7 @@ class VehicleMakeRepository(BaseRepository[VehicleMake]):
     def __init__(self, db: AsyncSession):
         super().__init__(VehicleMake, db)
 
-    async def search(self, query: str) -> List[VehicleMake]:
+    async def search(self, query: str) -> list[VehicleMake]:
         """Search makes by name."""
         result = await self.db.execute(
             select(VehicleMake).where(VehicleMake.name.ilike(f"%{query}%"))
@@ -202,8 +201,8 @@ class VehicleModelRepository(BaseRepository[VehicleModel]):
     async def get_by_make(
         self,
         make_id: str,
-        year: Optional[int] = None,
-    ) -> List[VehicleModel]:
+        year: int | None = None,
+    ) -> list[VehicleModel]:
         """Get models by make ID, optionally filtered by year."""
         stmt = select(VehicleModel).where(VehicleModel.make_id == make_id)
 
@@ -228,14 +227,14 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         user_id: UUID,
         skip: int = 0,
         limit: int = 10,
-    ) -> List[DiagnosisSession]:
+    ) -> list[DiagnosisSession]:
         """Get diagnosis history for a user."""
         result = await self.db.execute(
             select(DiagnosisSession)
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    DiagnosisSession.is_deleted == False,
+                    not DiagnosisSession.is_deleted,
                 )
             )
             .order_by(DiagnosisSession.created_at.desc())
@@ -247,15 +246,15 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
     async def get_filtered_history(
         self,
         user_id: UUID,
-        vehicle_make: Optional[str] = None,
-        vehicle_model: Optional[str] = None,
-        vehicle_year: Optional[int] = None,
-        dtc_code: Optional[str] = None,
-        date_from: Optional[datetime] = None,
-        date_to: Optional[datetime] = None,
+        vehicle_make: str | None = None,
+        vehicle_model: str | None = None,
+        vehicle_year: int | None = None,
+        dtc_code: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
         skip: int = 0,
         limit: int = 10,
-    ) -> Tuple[List[DiagnosisSession], int]:
+    ) -> tuple[list[DiagnosisSession], int]:
         """
         Get filtered diagnosis history with total count.
 
@@ -278,7 +277,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         # Build base query
         conditions = [
             DiagnosisSession.user_id == user_id,
-            DiagnosisSession.is_deleted == False,
+            not DiagnosisSession.is_deleted,
         ]
 
         if vehicle_make:
@@ -325,7 +324,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
     async def soft_delete(
         self,
         diagnosis_id: UUID,
-        user_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
     ) -> bool:
         """
         Soft delete a diagnosis session.
@@ -354,7 +353,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         await self.db.flush()
         return True
 
-    async def get_user_stats(self, user_id: UUID) -> Dict[str, Any]:
+    async def get_user_stats(self, user_id: UUID) -> dict[str, Any]:
         """
         Get diagnosis statistics for a user.
 
@@ -373,7 +372,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         ).where(
             and_(
                 DiagnosisSession.user_id == user_id,
-                DiagnosisSession.is_deleted == False,
+                not DiagnosisSession.is_deleted,
             )
         )
         stats_result = await self.db.execute(stats_query)
@@ -389,7 +388,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    DiagnosisSession.is_deleted == False,
+                    not DiagnosisSession.is_deleted,
                 )
             )
             .group_by(DiagnosisSession.vehicle_make, DiagnosisSession.vehicle_model)
@@ -411,7 +410,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    DiagnosisSession.is_deleted == False,
+                    not DiagnosisSession.is_deleted,
                     DiagnosisSession.created_at >= func.now() - text("interval '12 months'"),
                 )
             )
@@ -430,9 +429,9 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
 
     async def get_dtc_frequency(
         self,
-        user_id: Optional[UUID] = None,
+        user_id: UUID | None = None,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get most common DTC codes from diagnosis history.
 
@@ -446,7 +445,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             List of {code, count} dictionaries
         """
         # Use unnest to expand the dtc_codes array and count occurrences
-        conditions = [DiagnosisSession.is_deleted == False]
+        conditions = [not DiagnosisSession.is_deleted]
         if user_id:
             conditions.append(DiagnosisSession.user_id == user_id)
 
@@ -489,7 +488,7 @@ class DTCCodeBatchRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_batch(self, codes: List[str]) -> Dict[str, DTCCode]:
+    async def get_batch(self, codes: list[str]) -> dict[str, DTCCode]:
         """
         Get multiple DTC codes in a single query.
 
@@ -513,7 +512,7 @@ class DTCCodeBatchRepository:
         self,
         query: str,
         limit: int = 20,
-    ) -> List[DTCCode]:
+    ) -> list[DTCCode]:
         """
         Full-text search using PostgreSQL FTS index.
 
@@ -542,9 +541,9 @@ class DTCCodeBatchRepository:
 
     async def get_by_symptoms(
         self,
-        symptoms: List[str],
+        symptoms: list[str],
         limit: int = 20,
-    ) -> List[DTCCode]:
+    ) -> list[DTCCode]:
         """
         Find DTC codes that match given symptoms.
 

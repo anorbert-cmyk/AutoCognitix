@@ -17,7 +17,7 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -43,24 +43,24 @@ class VINDecodeResult(BaseModel):
     """Result model for VIN decoding."""
 
     vin: str = Field(..., description="The decoded VIN")
-    make: Optional[str] = Field(None, description="Vehicle manufacturer")
-    model: Optional[str] = Field(None, description="Vehicle model")
-    model_year: Optional[int] = Field(None, description="Model year")
-    body_class: Optional[str] = Field(None, description="Body class/type")
-    vehicle_type: Optional[str] = Field(None, description="Vehicle type")
-    plant_city: Optional[str] = Field(None, description="Manufacturing plant city")
-    plant_country: Optional[str] = Field(None, description="Manufacturing plant country")
-    manufacturer: Optional[str] = Field(None, description="Full manufacturer name")
-    engine_cylinders: Optional[int] = Field(None, description="Number of engine cylinders")
-    engine_displacement_l: Optional[float] = Field(None, description="Engine displacement in liters")
-    fuel_type_primary: Optional[str] = Field(None, description="Primary fuel type")
-    transmission_style: Optional[str] = Field(None, description="Transmission style")
-    drive_type: Optional[str] = Field(None, description="Drive type (FWD, RWD, AWD, etc.)")
-    doors: Optional[int] = Field(None, description="Number of doors")
-    gvwr: Optional[str] = Field(None, description="Gross Vehicle Weight Rating")
-    error_code: Optional[str] = Field(None, description="Error code if decoding failed")
-    error_text: Optional[str] = Field(None, description="Error description if decoding failed")
-    raw_data: Dict[str, Any] = Field(default_factory=dict, description="Complete raw API response")
+    make: str | None = Field(None, description="Vehicle manufacturer")
+    model: str | None = Field(None, description="Vehicle model")
+    model_year: int | None = Field(None, description="Model year")
+    body_class: str | None = Field(None, description="Body class/type")
+    vehicle_type: str | None = Field(None, description="Vehicle type")
+    plant_city: str | None = Field(None, description="Manufacturing plant city")
+    plant_country: str | None = Field(None, description="Manufacturing plant country")
+    manufacturer: str | None = Field(None, description="Full manufacturer name")
+    engine_cylinders: int | None = Field(None, description="Number of engine cylinders")
+    engine_displacement_l: float | None = Field(None, description="Engine displacement in liters")
+    fuel_type_primary: str | None = Field(None, description="Primary fuel type")
+    transmission_style: str | None = Field(None, description="Transmission style")
+    drive_type: str | None = Field(None, description="Drive type (FWD, RWD, AWD, etc.)")
+    doors: int | None = Field(None, description="Number of doors")
+    gvwr: str | None = Field(None, description="Gross Vehicle Weight Rating")
+    error_code: str | None = Field(None, description="Error code if decoding failed")
+    error_text: str | None = Field(None, description="Error description if decoding failed")
+    raw_data: dict[str, Any] = Field(default_factory=dict, description="Complete raw API response")
 
     @property
     def is_valid(self) -> bool:
@@ -76,19 +76,19 @@ class Recall(BaseModel):
     make: str = Field(..., description="Vehicle make")
     model: str = Field(..., description="Vehicle model")
     model_year: int = Field(..., description="Model year")
-    recall_date: Optional[str] = Field(None, description="Date recall was announced")
+    recall_date: str | None = Field(None, description="Date recall was announced")
     component: str = Field(..., description="Affected component")
     summary: str = Field(..., description="Brief summary of the recall")
-    consequence: Optional[str] = Field(None, description="Potential consequence of the defect")
-    remedy: Optional[str] = Field(None, description="Manufacturer's remedy")
-    notes: Optional[str] = Field(None, description="Additional notes")
-    nhtsa_id: Optional[str] = Field(None, description="NHTSA ID")
+    consequence: str | None = Field(None, description="Potential consequence of the defect")
+    remedy: str | None = Field(None, description="Manufacturer's remedy")
+    notes: str | None = Field(None, description="Additional notes")
+    nhtsa_id: str | None = Field(None, description="NHTSA ID")
 
 
 class Complaint(BaseModel):
     """Model for vehicle complaint information."""
 
-    odinumber: Optional[str] = Field(None, description="ODI number")
+    odinumber: str | None = Field(None, description="ODI number")
     manufacturer: str = Field(..., description="Vehicle manufacturer")
     make: str = Field(..., description="Vehicle make")
     model: str = Field(..., description="Vehicle model")
@@ -97,16 +97,16 @@ class Complaint(BaseModel):
     fire: bool = Field(False, description="Whether a fire occurred")
     injuries: int = Field(0, description="Number of injuries reported")
     deaths: int = Field(0, description="Number of deaths reported")
-    complaint_date: Optional[str] = Field(None, description="Date complaint was filed")
-    date_of_incident: Optional[str] = Field(None, description="Date of the incident")
-    components: Optional[str] = Field(None, description="Affected components")
-    summary: Optional[str] = Field(None, description="Complaint description/summary")
+    complaint_date: str | None = Field(None, description="Date complaint was filed")
+    date_of_incident: str | None = Field(None, description="Date of the incident")
+    components: str | None = Field(None, description="Affected components")
+    summary: str | None = Field(None, description="Complaint description/summary")
 
 
 class NHTSAError(Exception):
     """Custom exception for NHTSA API errors."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None):
+    def __init__(self, message: str, status_code: int | None = None):
         self.message = message
         self.status_code = status_code
         super().__init__(self.message)
@@ -126,7 +126,7 @@ class RateLimitError(NHTSAError):
 class CacheBackend:
     """Abstract base for cache backends."""
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         raise NotImplementedError
 
     async def set(self, key: str, value: str, ttl: int = 3600) -> None:
@@ -140,10 +140,10 @@ class InMemoryCache(CacheBackend):
     """Simple in-memory cache implementation."""
 
     def __init__(self):
-        self._cache: Dict[str, tuple[str, float]] = {}
+        self._cache: dict[str, tuple[str, float]] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         async with self._lock:
             if key in self._cache:
                 value, expiry = self._cache[key]
@@ -196,7 +196,7 @@ class RedisCache(CacheBackend):
                 raise
         return self._redis
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         try:
             redis = await self._get_redis()
             return await redis.get(key)
@@ -263,7 +263,7 @@ class NHTSAService:
     def __init__(
         self,
         use_redis: bool = False,
-        redis_url: Optional[str] = None,
+        redis_url: str | None = None,
         timeout: float = 30.0,
     ):
         """
@@ -274,12 +274,12 @@ class NHTSAService:
             redis_url: Redis connection URL (uses settings.REDIS_URL if not provided)
             timeout: HTTP request timeout in seconds
         """
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
         self._timeout = timeout
         self._use_redis = use_redis
         self._redis_url = redis_url or settings.REDIS_URL
-        self._cache: Optional[CacheBackend] = None
-        self._request_timestamps: List[float] = []
+        self._cache: CacheBackend | None = None
+        self._request_timestamps: list[float] = []
         self._rate_limit_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -345,8 +345,8 @@ class NHTSAService:
         self,
         method: str,
         url: str,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Make HTTP request with retry logic.
 
@@ -479,7 +479,7 @@ class NHTSAService:
         model: str,
         year: int,
         use_cache: bool = True,
-    ) -> List[Recall]:
+    ) -> list[Recall]:
         """
         Get recall information for a vehicle.
 
@@ -562,7 +562,7 @@ class NHTSAService:
         model: str,
         year: int,
         use_cache: bool = True,
-    ) -> List[Complaint]:
+    ) -> list[Complaint]:
         """
         Get complaint information for a vehicle.
 
@@ -642,7 +642,7 @@ class NHTSAService:
     # =========================================================================
 
     @staticmethod
-    def _safe_int(value: Any) -> Optional[int]:
+    def _safe_int(value: Any) -> int | None:
         """Safely convert value to int."""
         if value is None or value == "":
             return None
@@ -652,7 +652,7 @@ class NHTSAService:
             return None
 
     @staticmethod
-    def _safe_float(value: Any) -> Optional[float]:
+    def _safe_float(value: Any) -> float | None:
         """Safely convert value to float."""
         if value is None or value == "":
             return None
@@ -688,7 +688,7 @@ class NHTSAService:
 # =============================================================================
 
 
-_service_instance: Optional[NHTSAService] = None
+_service_instance: NHTSAService | None = None
 
 
 async def get_nhtsa_service(use_redis: bool = False) -> NHTSAService:

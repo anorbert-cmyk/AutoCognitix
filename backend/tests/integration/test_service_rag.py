@@ -5,8 +5,7 @@ Tests context retrieval, response generation, and confidence scoring.
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 import sys
 from pathlib import Path
 
@@ -75,7 +74,7 @@ class TestRAGContextRetrieval:
             service = get_rag_service()
             service._qdrant = mock_qdrant_client
 
-            results = await service.get_context("Query", top_k=5)
+            await service.get_context("Query", top_k=5)
 
             # Should have searched multiple collections
             assert call_count[0] >= 1
@@ -194,7 +193,7 @@ class TestRAGSymptomContext:
             service = RAGService()
             service._qdrant = mock_qdrant_client
 
-            context = await service._get_symptom_context(
+            await service._get_symptom_context(
                 "Motor problem",
                 vehicle_make="Volkswagen",
             )
@@ -227,7 +226,7 @@ class TestRAGConfidenceScoring:
             },
         )
 
-        level, score = service._calculate_confidence(context, ["P0101", "P0171"])
+        _level, score = service._calculate_confidence(context, ["P0101", "P0171"])
 
         # Should have reasonable confidence with good context
         assert score > 0.3
@@ -244,7 +243,7 @@ class TestRAGConfidenceScoring:
             graph_context={},
         )
 
-        level, score = service._calculate_confidence(context, ["P0101"])
+        _level, score = service._calculate_confidence(context, ["P0101"])
 
         # Should have low confidence with no context
         assert score < 0.5
@@ -287,7 +286,7 @@ class TestRAGResponseGeneration:
         """Test that generate_response returns a string."""
         from app.services.rag_service import RAGContext
 
-        context = RAGContext(
+        RAGContext(
             dtc_context=[{"code": "P0101"}],
             symptom_context=[],
             graph_context={},

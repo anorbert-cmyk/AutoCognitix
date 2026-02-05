@@ -3,8 +3,7 @@ Pytest configuration and fixtures for AutoCognitix tests.
 """
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from typing import Generator, AsyncGenerator
+from unittest.mock import patch
 import sys
 from pathlib import Path
 

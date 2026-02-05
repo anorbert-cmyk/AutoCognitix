@@ -18,7 +18,7 @@ Endpoints:
 import asyncio
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -47,8 +47,8 @@ class ServiceHealth(BaseModel):
     name: str
     status: str  # "healthy", "degraded", "unhealthy", "unknown"
     latency_ms: float = 0.0
-    details: Dict[str, Any] = {}
-    error: Optional[str] = None
+    details: dict[str, Any] = {}
+    error: str | None = None
 
 
 class DetailedHealthResponse(BaseModel):
@@ -57,14 +57,14 @@ class DetailedHealthResponse(BaseModel):
     version: str
     environment: str
     uptime_seconds: float
-    services: Dict[str, ServiceHealth]
+    services: dict[str, ServiceHealth]
     checked_at: str
 
 
 class ReadinessResponse(BaseModel):
     """Readiness probe response."""
     status: str
-    checks: Dict[str, bool]
+    checks: dict[str, bool]
     checked_at: str
 
 
@@ -76,14 +76,14 @@ class LivenessResponse(BaseModel):
 
 class DatabaseStats(BaseModel):
     """Database statistics."""
-    postgres: Dict[str, Any]
-    neo4j: Dict[str, Any]
-    qdrant: Dict[str, Any]
-    redis: Dict[str, Any]
+    postgres: dict[str, Any]
+    neo4j: dict[str, Any]
+    qdrant: dict[str, Any]
+    redis: dict[str, Any]
 
 
 # Track startup time for uptime calculation
-_startup_time: Optional[float] = None
+_startup_time: float | None = None
 
 
 def get_startup_time() -> float:
@@ -158,7 +158,7 @@ async def check_postgres_health() -> ServiceHealth:
 async def check_neo4j_health() -> ServiceHealth:
     """Check Neo4j database health."""
     from neo4j import GraphDatabase
-    from neo4j.exceptions import ServiceUnavailable, AuthError
+    from neo4j.exceptions import AuthError, ServiceUnavailable
 
     start_time = time.time()
     try:
@@ -209,7 +209,7 @@ async def check_neo4j_health() -> ServiceHealth:
             name="Neo4j",
             status="unhealthy",
             latency_ms=round(latency, 2),
-            error=f"Authentication failed",
+            error="Authentication failed",
         )
     except ServiceUnavailable as e:
         latency = (time.time() - start_time) * 1000
@@ -218,7 +218,7 @@ async def check_neo4j_health() -> ServiceHealth:
             name="Neo4j",
             status="unhealthy",
             latency_ms=round(latency, 2),
-            error=f"Service unavailable",
+            error="Service unavailable",
         )
     except Exception as e:
         latency = (time.time() - start_time) * 1000

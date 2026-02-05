@@ -10,7 +10,6 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 import sys
@@ -24,7 +23,6 @@ sys.path.insert(0, str(backend_path))
 @pytest.fixture
 def app():
     """Create FastAPI app for testing."""
-    from fastapi import FastAPI
     from fastapi.responses import ORJSONResponse
 
     # Create minimal test app

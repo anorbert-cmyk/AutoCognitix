@@ -12,9 +12,7 @@ Tests the complete DTC API including:
 """
 
 import pytest
-import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import patch
 import sys
 from pathlib import Path
 

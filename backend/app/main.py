@@ -3,8 +3,8 @@ AutoCognitix - AI-powered Vehicle Diagnostic Platform
 Main FastAPI Application Entry Point
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,11 +13,11 @@ from fastapi.responses import ORJSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.logging import setup_logging, get_logger, RequestLoggingMiddleware
-from app.core.metrics import MetricsMiddleware
 from app.core.error_handlers import setup_all_exception_handlers
+from app.core.etag import CacheControlMiddleware, ETagMiddleware
+from app.core.logging import RequestLoggingMiddleware, get_logger, setup_logging
+from app.core.metrics import MetricsMiddleware
 from app.core.rate_limiter import RateLimitMiddleware
-from app.core.etag import ETagMiddleware, CacheControlMiddleware
 from app.db.postgres.session import engine
 from app.db.qdrant_client import qdrant_client
 
