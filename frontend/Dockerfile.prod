@@ -13,8 +13,8 @@ WORKDIR /app
 # Install dependencies first for better layer caching
 COPY package.json package-lock.json* ./
 
-# Clean install for reproducible builds
-RUN npm ci --only=production=false
+# Clean install for reproducible builds (include devDependencies for build)
+RUN npm ci
 
 # ============================================
 # Stage 2: Builder - Build production assets
