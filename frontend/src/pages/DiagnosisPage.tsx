@@ -1,6 +1,6 @@
 /**
- * DiagnosisPage - Exact match to provided screenshot design
- * Shows full wizard flow: Input Data → Analysis → Report
+ * DiagnosisPage - Magyar nyelvű diagnosztikai oldal
+ * Teljes wizard flow: Adatbevitel → Elemzés → Jelentés
  */
 
 import { useState, useCallback } from 'react';
@@ -25,7 +25,7 @@ import { AnalysisProgress } from '../components/features/diagnosis/AnalysisProgr
 
 const currentYear = new Date().getFullYear();
 
-// Manufacturer options for dropdown
+// Gyártó opciók a legördülő listához
 const manufacturers = [
   'Toyota',
   'Honda',
@@ -74,11 +74,11 @@ export default function DiagnosisPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  // Wizard state
+  // Wizard állapot
   const [currentStep, setCurrentStep] = useState<WizardStep>('input');
   const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
 
-  // Form state
+  // Űrlap állapot
   const [dtcCode, setDtcCode] = useState('');
   const [vehicleMake, setVehicleMake] = useState('');
   const [vehicleModel, setVehicleModel] = useState('');
@@ -86,11 +86,11 @@ export default function DiagnosisPage() {
   const [ownerComplaints, setOwnerComplaints] = useState('');
   const [mechanicNotes, setMechanicNotes] = useState('');
 
-  // API hooks
+  // API hookok
   const analyzeDiagnosis = useAnalyzeDiagnosis();
   const { data: historyData } = useDiagnosisHistory({ limit: 2 });
 
-  // Dictation handler
+  // Diktálás kezelő
   const handleDictation = useCallback(() => {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       toast.error('A böngésző nem támogatja a beszédfelismerést');
@@ -117,7 +117,7 @@ export default function DiagnosisPage() {
     toast.info('Beszéljen most...');
   }, [toast]);
 
-  // Form submission - start analysis
+  // Űrlap beküldés - elemzés indítása
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dtcCode.trim()) {
@@ -125,7 +125,7 @@ export default function DiagnosisPage() {
       return;
     }
 
-    // Move to analysis step
+    // Elemzés lépésre váltás
     setCurrentStep('analysis');
 
     try {
@@ -139,7 +139,7 @@ export default function DiagnosisPage() {
       });
 
       setDiagnosisId(result.id);
-      // The AnalysisProgress component will handle navigation to result
+      // Az AnalysisProgress komponens kezeli a navigációt az eredményhez
     } catch (err) {
       setCurrentStep('input');
       if (err instanceof ApiError) {
@@ -163,7 +163,7 @@ export default function DiagnosisPage() {
 
   const recentItems = historyData?.items || [];
 
-  // Render Analysis Progress step
+  // Elemzés folyamatban lépés megjelenítése
   if (currentStep === 'analysis') {
     return (
       <AnalysisProgress
@@ -184,55 +184,55 @@ export default function DiagnosisPage() {
     );
   }
 
-  // Render Input form step
+  // Adatbeviteli űrlap lépés megjelenítése
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col">
-      {/* Main Content */}
+      {/* Fő tartalom */}
       <main className="flex-1 w-full max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
-        {/* Header Section */}
+        {/* Fejléc szekció */}
         <div className="mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-[#2563eb] text-xs font-bold uppercase tracking-wider mb-4">
             <AlertTriangle className="h-3.5 w-3.5" />
-            AI Diagnostic Tool
+            AI Diagnosztikai Eszköz
           </div>
           <h2 className="text-4xl font-black tracking-tight text-slate-900 mb-3">
-            New Diagnostic Session
+            Új diagnosztikai folyamat
           </h2>
           <p className="text-lg text-slate-600 max-w-3xl">
-            Enter the vehicle's details and OBD codes below. Our AI model will analyze the data to suggest probable causes and repair procedures.
+            Adja meg a jármű adatait és az OBD hibakódokat. Az AI modellünk elemzi az adatokat és javaslatokat tesz a lehetséges okokra és javítási eljárásokra.
           </p>
         </div>
 
-        {/* Main Card */}
+        {/* Fő kártya */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          {/* Wizard Steps */}
+          {/* Wizard lépések */}
           <div className="flex border-b border-slate-200 bg-slate-50 px-6 py-4 gap-8 overflow-x-auto">
             <div className="flex items-center gap-2 text-[#2563eb] font-bold text-sm whitespace-nowrap">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#2563eb] text-white text-xs font-bold">
                 1
               </span>
-              Input Data
+              Adatbevitel
             </div>
             <div className="flex items-center gap-2 text-slate-400 font-medium text-sm whitespace-nowrap">
               <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-slate-300 text-xs">
                 2
               </span>
-              Analysis
+              Elemzés
             </div>
             <div className="flex items-center gap-2 text-slate-400 font-medium text-sm whitespace-nowrap">
               <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-slate-300 text-xs">
                 3
               </span>
-              Report
+              Jelentés
             </div>
           </div>
 
-          {/* Form */}
+          {/* Űrlap */}
           <form onSubmit={handleSubmit} className="p-6 md:p-8 lg:p-10 space-y-10">
-            {/* DTC Section */}
+            {/* DTC szekció */}
             <section>
               <label className="block text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
-                Primary Diagnostic Trouble Code (DTC)
+                Elsődleges hibakód (DTC)
               </label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
@@ -242,43 +242,43 @@ export default function DiagnosisPage() {
                   type="text"
                   value={dtcCode}
                   onChange={(e) => setDtcCode(e.target.value.toUpperCase())}
-                  placeholder="E.G. P0300"
+                  placeholder="pl. P0300"
                   className="block w-full pl-16 pr-14 py-5 bg-slate-50 border-2 border-slate-200 rounded-xl text-3xl font-bold text-slate-900 placeholder:text-slate-300 focus:ring-0 focus:border-[#2563eb] focus:bg-white transition-all uppercase tracking-wide"
                 />
                 <div className="absolute inset-y-0 right-0 pr-4 flex items-center">
                   <button
                     type="button"
                     className="p-2 text-slate-400 hover:text-[#2563eb] transition-colors"
-                    title="Scan with camera"
+                    title="Szkennelés kamerával"
                   >
                     <QrCode className="h-6 w-6" />
                   </button>
                 </div>
               </div>
               <p className="mt-2 text-sm text-slate-500">
-                Enter the main code from your OBD-II scanner.
+                Adja meg az OBD-II olvasóból származó fő hibakódot.
               </p>
             </section>
 
             <hr className="border-slate-200" />
 
-            {/* Vehicle Section */}
+            {/* Jármű szekció */}
             <section>
               <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
                 <Car className="h-5 w-5 text-[#2563eb]" />
-                Vehicle Identification
+                Jármű azonosítás
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Manufacturer - Dropdown */}
+                {/* Gyártó - Legördülő */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Manufacturer</label>
+                  <label className="block text-sm font-bold text-slate-600">Gyártó</label>
                   <div className="relative">
                     <select
                       value={vehicleMake}
                       onChange={(e) => setVehicleMake(e.target.value)}
                       className="block w-full rounded-xl border-2 border-slate-200 bg-slate-50 text-slate-900 focus:border-[#2563eb] focus:ring-0 focus:bg-white h-14 px-4 font-medium appearance-none cursor-pointer"
                     >
-                      <option value="">Select manufacturer</option>
+                      <option value="">Válasszon gyártót</option>
                       {manufacturers.map((make) => (
                         <option key={make} value={make}>
                           {make}
@@ -291,9 +291,9 @@ export default function DiagnosisPage() {
                   </div>
                 </div>
 
-                {/* Model */}
+                {/* Modell */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Model</label>
+                  <label className="block text-sm font-bold text-slate-600">Modell</label>
                   <input
                     type="text"
                     value={vehicleModel}
@@ -303,9 +303,9 @@ export default function DiagnosisPage() {
                   />
                 </div>
 
-                {/* Year */}
+                {/* Évjárat */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Year</label>
+                  <label className="block text-sm font-bold text-slate-600">Évjárat</label>
                   <input
                     type="number"
                     value={vehicleYear}
@@ -319,14 +319,14 @@ export default function DiagnosisPage() {
               </div>
             </section>
 
-            {/* Textareas Section */}
+            {/* Szöveges mezők szekció */}
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Owner Complaints */}
+              {/* Tulajdonos panaszai */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <User className="h-4 w-4 text-slate-400" />
-                    Owner's Reported Symptoms
+                    Tulajdonos panaszai
                   </label>
                   <button
                     type="button"
@@ -334,51 +334,51 @@ export default function DiagnosisPage() {
                     className="text-xs text-[#2563eb] font-bold hover:underline flex items-center gap-1"
                   >
                     <Mic className="h-3.5 w-3.5" />
-                    Dictate
+                    Diktálás
                   </button>
                 </div>
                 <textarea
                   value={ownerComplaints}
                   onChange={(e) => setOwnerComplaints(e.target.value)}
-                  placeholder="e.g. Customer reports rough idling in the morning, check engine light flashes specifically when accelerating on the highway..."
+                  placeholder="pl. Az ügyfél reggel egyenetlen alapjáratról számol be, a motorhiba lámpa villog, különösen autópályán gyorsításkor..."
                   rows={5}
                   className="block w-full rounded-xl border-2 border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-[#2563eb] focus:ring-0 resize-none p-4 font-medium"
                 />
               </div>
 
-              {/* Mechanic Notes */}
+              {/* Szerelői jegyzetek */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
                     <Wrench className="h-4 w-4 text-slate-400" />
-                    Field Notes / Test Drive
+                    Szerelői jegyzetek / Tesztút
                   </label>
                   <span className="text-xs text-slate-400 font-medium">
-                    Private notes
+                    Privát jegyzetek
                   </span>
                 </div>
                 <textarea
                   value={mechanicNotes}
                   onChange={(e) => setMechanicNotes(e.target.value)}
-                  placeholder="e.g. Confirmed misfire on cylinder 3 during load test. Spark plugs look worn but coils seem responsive..."
+                  placeholder="pl. Megerősített gyújtáskimaradás a 3. hengerben terheléses teszt során. A gyújtógyertyák kopottak, de a tekercsek jól reagálnak..."
                   rows={5}
                   className="block w-full rounded-xl border-2 border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-[#2563eb] focus:ring-0 resize-none p-4 font-medium"
                 />
               </div>
             </section>
 
-            {/* Action Bar */}
+            {/* Művelet sáv */}
             <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-6 border-t border-slate-200">
               <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
                 <Clock className="h-4 w-4" />
-                <span>Auto-saved 2 minutes ago</span>
+                <span>Automatikusan mentve 2 perce</span>
               </div>
               <div className="flex w-full md:w-auto gap-4">
                 <button
                   type="button"
                   className="flex-1 md:flex-none h-14 px-8 rounded-xl border-2 border-slate-300 text-slate-700 font-bold hover:bg-slate-50 transition-colors"
                 >
-                  Save Draft
+                  Piszkozat mentése
                 </button>
                 <button
                   type="submit"
@@ -389,16 +389,16 @@ export default function DiagnosisPage() {
                   )}
                 >
                   <Sparkles className="h-4 w-4" />
-                  Generate AI Solution
+                  AI Megoldás Generálása
                 </button>
               </div>
             </div>
           </form>
         </div>
 
-        {/* Bottom Cards */}
+        {/* Alsó kártyák */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Recent 1 */}
+          {/* Legutóbbi 1 */}
           <div
             className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
             onClick={() => recentItems[0] && navigate(`/diagnosis/${recentItems[0].id}`)}
@@ -408,21 +408,21 @@ export default function DiagnosisPage() {
             </div>
             <div>
               <h4 className="font-bold text-slate-900">
-                Recent: {recentItems[0]?.vehicle_make || 'Toyota'} {recentItems[0]?.vehicle_model || 'Camry'}
+                Legutóbbi: {recentItems[0]?.vehicle_make || 'Toyota'} {recentItems[0]?.vehicle_model || 'Camry'}
               </h4>
               <p className="text-sm text-slate-500 mt-1">
                 <span className="font-mono text-[#2563eb] font-semibold">
                   {recentItems[0]?.dtc_codes?.[0] || 'P0420'}
                 </span>{' '}
-                - Catalyst system efficiency below threshold
+                - Katalizátor rendszer hatásfoka küszöb alatt
               </p>
               <button className="text-xs text-[#2563eb] font-bold mt-2 hover:underline">
-                View Report
+                Jelentés megtekintése
               </button>
             </div>
           </div>
 
-          {/* Recent 2 */}
+          {/* Legutóbbi 2 */}
           <div
             className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
             onClick={() => recentItems[1] && navigate(`/diagnosis/${recentItems[1].id}`)}
@@ -432,38 +432,38 @@ export default function DiagnosisPage() {
             </div>
             <div>
               <h4 className="font-bold text-slate-900">
-                Recent: {recentItems[1]?.vehicle_make || 'Ford'} {recentItems[1]?.vehicle_model || 'F-150'}
+                Legutóbbi: {recentItems[1]?.vehicle_make || 'Ford'} {recentItems[1]?.vehicle_model || 'F-150'}
               </h4>
               <p className="text-sm text-slate-500 mt-1">
                 <span className="font-mono text-[#2563eb] font-semibold">
                   {recentItems[1]?.dtc_codes?.[0] || 'P0303'}
                 </span>{' '}
-                - Cylinder 3 misfire detected
+                - 3. henger gyújtáskimaradás észlelve
               </p>
               <button className="text-xs text-[#2563eb] font-bold mt-2 hover:underline">
-                View Report
+                Jelentés megtekintése
               </button>
             </div>
           </div>
 
-          {/* Help Card */}
+          {/* Segítség kártya */}
           <div className="p-5 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
             <div className="text-center">
               <HelpCircle className="h-8 w-8 text-[#2563eb] mx-auto mb-2" />
               <p className="text-sm font-bold text-slate-700">
-                Need help with a code?
+                Segítségre van szüksége egy kóddal?
               </p>
               <button className="text-xs text-[#2563eb] font-bold mt-1 hover:underline">
-                Browse DTC Database
+                DTC adatbázis böngészése
               </button>
             </div>
           </div>
         </div>
       </main>
 
-      {/* Footer */}
+      {/* Lábléc */}
       <footer className="mt-auto py-8 text-center text-slate-500 text-sm font-medium border-t border-slate-200 bg-white">
-        <p>© {currentYear} MechanicAI. Powered by advanced diagnostic algorithms.</p>
+        <p>© {currentYear} MechanicAI. Fejlett diagnosztikai algoritmusokkal működik.</p>
       </footer>
     </div>
   );

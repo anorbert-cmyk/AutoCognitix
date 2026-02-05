@@ -56,7 +56,7 @@ const defaultSteps: AnalysisStep[] = [
   { id: 'plan', title: 'Javasolt javítási terv összeállítása', status: 'pending' },
 ];
 
-// Recent analysis cards for the bottom section
+// Legutóbbi elemzések kártyák az alsó szekcióhoz
 const recentAnalyses = [
   {
     id: '1',
