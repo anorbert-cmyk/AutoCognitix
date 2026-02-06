@@ -36,6 +36,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 # Configuration - can be overridden by environment variables
+# Qdrant Cloud support: if QDRANT_URL is set, use cloud; otherwise use local
+QDRANT_URL = os.getenv("QDRANT_URL", "")  # e.g., https://xxx.cloud.qdrant.io
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 HUBERT_MODEL = os.getenv("HUBERT_MODEL", "SZTAKI-HLT/hubert-base-cc")
@@ -185,12 +188,23 @@ class QdrantIndexer:
 
     def __init__(self):
         """Initialize the Qdrant client."""
-        self.client = QdrantClient(
-            host=QDRANT_HOST,
-            port=QDRANT_PORT,
-        )
+        # Check if using Qdrant Cloud or local
+        if QDRANT_URL:
+            # Qdrant Cloud connection
+            logger.info(f"Connecting to Qdrant Cloud: {QDRANT_URL}")
+            self.client = QdrantClient(
+                url=QDRANT_URL,
+                api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
+            )
+            logger.info("Connected to Qdrant Cloud successfully")
+        else:
+            # Local Qdrant connection
+            self.client = QdrantClient(
+                host=QDRANT_HOST,
+                port=QDRANT_PORT,
+            )
+            logger.info(f"Connected to local Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
         self.vector_size = EMBEDDING_DIMENSION
-        logger.info(f"Connected to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
 
     def create_collection(self, collection_name: str, recreate: bool = False) -> None:
         """

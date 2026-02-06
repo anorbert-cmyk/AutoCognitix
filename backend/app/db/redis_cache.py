@@ -102,10 +102,10 @@ class RedisCacheService:
     - Monitoring and statistics
     """
 
-    _instance: Optional["RedisCacheService"] = None
+    _instance: Optional[RedisCacheService] = None
     _pool: ConnectionPool | None = None
 
-    def __new__(cls) -> "RedisCacheService":
+    def __new__(cls) -> RedisCacheService:
         """Singleton pattern for shared connection pool."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)

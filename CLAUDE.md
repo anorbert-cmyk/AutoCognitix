@@ -67,11 +67,12 @@ AutoCognitix/
 - Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
 
-### 2. Subagent Strategy
+### 2. Subagent Strategy (Default Mode)
 - Use subagents liberally to keep main context window clean
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
+- **Subagent = alapértelmezett.** Agent Teams-re CSAK az alábbi triggerek esetén válts (ld. pont 7.)
 
 ### 3. Self-Improvement Loop
 - After ANY correction from the user: update `tasks/lessons.md` with the pattern
@@ -97,6 +98,77 @@ AutoCognitix/
 - Zero context switching required from the user
 - Go fix failing CI tests without being told how
 
+### 7. Agent Teams - Intelligens Eszkaláció (Experimental)
+**Engedélyezés:** `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` a settings.json-ban.
+
+**Alapelv:** Subagent az alapértelmezett. Agent Teams CSAK akkor, ha az alábbi triggerek közül LEGALÁBB KETTŐ teljesül.
+
+#### Automatikus Trigger Felismerés - MIKOR válts Agent Teams-re:
+
+| Trigger | Leírás | Példa |
+|---------|--------|-------|
+| **MULTI_DB_SYNC** | 2+ adatbázis egyidejű módosítása szükséges | PostgreSQL + Neo4j + Qdrant szinkron, fordítás → reindex |
+| **CROSS_LAYER** | Backend + Frontend együtt változik, API contract érintett | Új endpoint + UI oldal + schema módosítás |
+| **COMPETING_HYPOTHESES** | Bug okát nem ismerjük, 3+ lehetséges root cause | Lassú query: index? connection pool? N+1? lock? |
+| **PARALLEL_REVIEW** | Kód review több független szempontból | Security + Performance + Compatibility egyidejű review |
+| **MULTI_MODULE_FEATURE** | Új feature 4+ független fájlcsoportot érint | Auth rendszer: models + API + frontend + tests |
+| **DATA_PIPELINE** | Adatfeldolgozás több lépéssel, lépések közti kommunikáció kell | Scrape → Parse → Translate → Validate → Import → Index |
+
+#### Döntési Fa:
+```
+Feladat érkezik
+  └─ Hány trigger teljesül?
+       ├─ 0-1 trigger → SUBAGENT (default)
+       ├─ 2+ trigger  → AGENT TEAMS
+       └─ Bizonytalan? → Subagent-tel kezdj, eszkalálj ha szükséges
+```
+
+#### Agent Teams Szereposztás Sablonok:
+
+**Multi-DB Szinkron Team:**
+```
+Lead: Koordinátor - nem ír kódot, delegate mode
+Teammate 1: PostgreSQL specialist (migrációk, modellek)
+Teammate 2: Neo4j specialist (Cypher, gráf struktúra)
+Teammate 3: Qdrant specialist (embeddings, indexelés)
+→ Require plan approval for all teammates
+```
+
+**Cross-Layer Feature Team:**
+```
+Lead: Architektus - API contract definiálás, delegate mode
+Teammate 1: Backend (FastAPI endpoints, services, models)
+Teammate 2: Frontend (React pages, components, hooks)
+Teammate 3: Tests & Integration (pytest, Playwright)
+→ Backend teammate-nek kell elsőként befejezni (task dependency)
+```
+
+**Debug Team (Competing Hypotheses):**
+```
+Lead: Szintetizáló - összegyűjti az eredményeket
+Teammate 1-N: Hipotézis vizsgálók (egymást cáfolják!)
+→ Broadcast: "Challenge each other's findings"
+→ A lead CSAK akkor zárja le, ha konszenzus van
+```
+
+**Parallel Review Team:**
+```
+Lead: Review coordinator
+Teammate 1: Security (OWASP, injection, auth bypass)
+Teammate 2: Performance (N+1 queries, memory leaks, bundle size)
+Teammate 3: Compatibility (Python 3.9, browser support, Railway)
+→ Minden teammate független report-ot készít
+```
+
+#### Agent Teams Szabályok:
+- **Delegate mode:** Lead NE implementáljon, csak koordináljon
+- **File ownership:** Egy fájlt CSAK egy teammate szerkeszthet - no overlap!
+- **Plan approval:** Komplex feladatoknál teammate-ek plan mode-ban indulnak
+- **Task granularity:** 5-6 task per teammate az optimális
+- **Monitoring:** Rendszeresen ellenőrizd a teammate-ek haladását
+- **Cleanup:** Mindig a lead végezze a team cleanup-ot a végén
+- **Shutdown order:** Előbb teammate-ek leállítása, utána cleanup
+
 ## Task Management
 
 1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
@@ -115,6 +187,8 @@ AutoCognitix/
 ## Munkafolyamat Preferenciák
 
 - **Párhuzamos ágensek:** Több Task agent egyidejű futtatása
+- **Agent Teams:** Engedélyezve - automatikus eszkaláció triggerek alapján (ld. Workflow Orchestration #7)
+- **Token költség:** NEM akadály - ha Agent Teams jobb eredményt ad, használd
 - **Engedélyek:** Minden keresés/futtatás automatikusan engedélyezett
 - **Todo lista:** Aktívan használva a haladás követésére
 

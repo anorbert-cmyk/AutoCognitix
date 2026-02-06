@@ -367,9 +367,9 @@ class RAGService:
     - Async processing with caching
     """
 
-    _instance: Optional["RAGService"] = None
+    _instance: Optional[RAGService] = None
 
-    def __new__(cls) -> "RAGService":
+    def __new__(cls) -> RAGService:
         """Singleton pattern to reuse connections."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)

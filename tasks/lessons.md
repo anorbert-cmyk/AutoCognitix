@@ -1202,3 +1202,221 @@ git commit -m "feat/fix/chore: clear description"
 - **FONTOS:** Ha a backend-et módosítod, ellenőrizd hogy a frontend-et is kell-e!
 - Railway külön service-ként futtatja őket
 - Mindkettőnek saját Dockerfile és railway.toml kell
+
+---
+
+## 2026-02-05 - Railway Alembic Migration Failures
+
+### Problem 1: Alembic version_num Column Too Short
+
+**Problem:** Migration revision IDs exceeded column size limit.
+
+**Root Cause:** The `alembic_version.version_num` column is `VARCHAR(32)` but migration revision IDs were longer (e.g., "003_add_vehicle_recalls_complaints" = 35 chars).
+
+**Error:**
+```
+StringDataRightTruncationError: value too long for type character varying(32)
+```
+
+**Solution:** Keep all migration revision IDs to 32 characters or less.
+
+**Naming Convention:**
+```python
+# HELYTELEN - túl hosszú (35 karakter)
+revision = "003_add_vehicle_recalls_complaints"
+
+# HELYES - 32 karakter vagy kevesebb
+revision = "003_vehicle_recalls_complaints"
+revision = "003_add_recalls"
+```
+
+---
+
+### Problem 2: PostgreSQL Partial Index with NOW() Function
+
+**Problem:** Used non-IMMUTABLE function in partial index predicate.
+
+**Root Cause:** Used `WHERE created_at > NOW() - INTERVAL '30 days'` in a partial index.
+
+**Error:**
+```
+InvalidObjectDefinitionError: functions in index predicate must be marked IMMUTABLE
+```
+
+**Explanation:**
+- `NOW()` is `STABLE`, not `IMMUTABLE`
+- PostgreSQL requires `IMMUTABLE` functions in index predicates
+- `STABLE` functions can return different values in the same transaction
+- `IMMUTABLE` functions always return the same result for the same inputs
+
+**Solution Options:**
+
+1. **Use regular index instead of partial:**
+   ```python
+   # HELYTELEN - NOW() nem IMMUTABLE
+   op.create_index(
+       "ix_recent_syncs",
+       "table_name",
+       ["created_at"],
+       postgresql_where=text("created_at > NOW() - INTERVAL '30 days'")
+   )
+
+   # HELYES - sima index
+   op.create_index("ix_created_at", "table_name", ["created_at"])
+   ```
+
+2. **Use computed column:**
+   ```python
+   # Computed column IMMUTABLE kifejezéssel
+   is_recent = Column(Boolean, Computed("created_at > CURRENT_DATE - 30"))
+   ```
+
+3. **Use application-level filtering:**
+   ```python
+   # Python kódban szűrj
+   recent_syncs = session.query(Sync).filter(
+       Sync.created_at > datetime.now(timezone.utc) - timedelta(days=30)
+   )
+   ```
+
+---
+
+### Problem 3: Duplicate Index Creation in SQLAlchemy
+
+**Problem:** Index already existed when migration tried to create it.
+
+**Root Cause:** Defined `index=True` in Column() AND separately called `op.create_index()` for the same column.
+
+**Error:**
+```
+DuplicateTableError: relation "ix_vehicle_engines_fuel_type" already exists
+```
+
+**Helytelen kód:**
+```python
+# models.py - index=True automatikusan létrehozza
+fuel_type: Mapped[str] = mapped_column(String(50), index=True)
+
+# migration.py - DUPLIKÁLT index létrehozás!
+op.create_index("ix_vehicle_engines_fuel_type", "vehicle_engines", ["fuel_type"])
+```
+
+**Megoldás:**
+```python
+# OPCIÓ 1: Csak index=True a modelben (ajánlott egyszerű esetekre)
+fuel_type: Mapped[str] = mapped_column(String(50), index=True)
+# Ne hívd meg op.create_index()-et!
+
+# OPCIÓ 2: Csak migrációban (ha custom index név/beállítás kell)
+fuel_type: Mapped[str] = mapped_column(String(50))  # index=True NÉLKÜL
+# Migrációban:
+op.create_index("ix_custom_name", "vehicle_engines", ["fuel_type"])
+```
+
+---
+
+### Problem 4: Partial Migration State on Production Database
+
+**Problem:** Previous migration attempts left database in inconsistent state.
+
+**Root Cause:** Migration failed mid-way, creating some tables/indexes before failing.
+
+**Symptoms:**
+- Some tables exist, others don't
+- Some indexes exist, migration tries to recreate them
+- `alembic_version` table has wrong revision
+
+**Solution:** Make all migrations idempotent:
+
+```python
+from alembic import op
+from sqlalchemy import text
+
+def upgrade():
+    connection = op.get_bind()
+
+    # IDEMPOTENT index creation
+    connection.execute(text("""
+        CREATE INDEX IF NOT EXISTS ix_my_index ON my_table (column_name)
+    """))
+
+    # IDEMPOTENT column addition
+    connection.execute(text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'my_table' AND column_name = 'new_column'
+            ) THEN
+                ALTER TABLE my_table ADD COLUMN new_column VARCHAR(100);
+            END IF;
+        END $$;
+    """))
+
+def downgrade():
+    connection = op.get_bind()
+
+    # IDEMPOTENT index drop
+    connection.execute(text("""
+        DROP INDEX IF EXISTS ix_my_index
+    """))
+
+    # IDEMPOTENT column drop
+    connection.execute(text("""
+        ALTER TABLE my_table DROP COLUMN IF EXISTS new_column
+    """))
+```
+
+---
+
+### Best Practices for Railway + Alembic
+
+| Szabály | Leírás |
+|---------|--------|
+| Revision ID hossz | ≤ 32 karakter |
+| Partial index | CSAK IMMUTABLE függvények (NOW() NEM!) |
+| Index duplikáció | `index=True` VAGY `create_index()`, nem mindkettő |
+| Idempotens migrációk | `IF NOT EXISTS` / `IF EXISTS` minden művelethez |
+| Lokális teszt | Migrációk tesztelése Railway deploy előtt |
+
+**Migráció Tesztelés Lokálisan:**
+```bash
+# 1. Tiszta adatbázis
+docker-compose down -v
+docker-compose up -d postgres
+
+# 2. Összes migráció futtatása
+cd backend && alembic upgrade head
+
+# 3. Downgrade teszt
+alembic downgrade -1
+alembic upgrade head
+
+# 4. Ha minden OK, push
+```
+
+**Railway Migráció Hibakezelés:**
+```bash
+# Ha a production DB inkonzisztens állapotban van:
+
+# 1. Ellenőrizd az aktuális verziót
+railway run alembic current
+
+# 2. Ha nincs verzió, de vannak táblák - stamp a megfelelő verzióra
+railway run alembic stamp <last_successful_revision>
+
+# 3. Futtasd a migrációt újra
+railway run alembic upgrade head
+```
+
+**Revision ID Konvenció:**
+```python
+# Formátum: NNN_short_description (max 32 char)
+revision = "001_initial_tables"      # 20 char - OK
+revision = "002_add_dtc_codes"       # 18 char - OK
+revision = "003_vehicle_recalls"     # 20 char - OK
+revision = "004_idx_optimization"    # 21 char - OK
+
+# KERÜLENDŐ
+revision = "003_add_vehicle_recalls_complaints"  # 35 char - FAIL!
+```

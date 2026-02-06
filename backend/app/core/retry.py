@@ -424,7 +424,7 @@ class RetryContext:
 
         await asyncio.sleep(delay)
 
-    async def __aenter__(self) -> "RetryContext":
+    async def __aenter__(self) -> RetryContext:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
