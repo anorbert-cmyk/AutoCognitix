@@ -22,15 +22,12 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-COPY requirements.txt .
+# Use pre-built requirements.prod.txt (without torch/ML libraries)
+# Embeddings are pre-computed and stored in Qdrant Cloud
+COPY requirements.prod.txt .
 
-# Create production requirements (exclude dev and scraping dependencies)
-# playwright, beautifulsoup4, lxml are only used in scripts/ for data import
-RUN grep -v -E "^(pytest|black|isort|flake8|mypy|pre-commit|playwright|beautifulsoup4|lxml)" requirements.txt > requirements.prod.txt || true
-
-# Install production dependencies
+# Install production dependencies (lightweight, no ML)
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir gunicorn uvicorn[standard] && \
     pip install --no-cache-dir -r requirements.prod.txt
 
 # ============================================

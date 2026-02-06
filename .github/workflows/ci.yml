@@ -340,6 +340,7 @@ jobs:
 
       - name: Build backend Docker image
         uses: docker/build-push-action@v5
+        timeout-minutes: 15
         with:
           context: ./backend
           file: ./backend/Dockerfile.prod
@@ -350,6 +351,7 @@ jobs:
 
       - name: Build frontend Docker image
         uses: docker/build-push-action@v5
+        timeout-minutes: 10
         with:
           context: ./frontend
           file: ./frontend/Dockerfile.prod
