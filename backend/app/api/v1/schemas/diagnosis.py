@@ -5,12 +5,10 @@ Diagnosis schemas - core diagnostic request/response models.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
-
-if TYPE_CHECKING:
-    from uuid import UUID
 
 
 class DiagnosisRequest(BaseModel):
