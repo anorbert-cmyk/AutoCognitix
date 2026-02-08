@@ -12,11 +12,11 @@ Provides AI-powered vehicle diagnosis using:
 import asyncio
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
 from app.api.v1.schemas.diagnosis import (
@@ -40,6 +40,7 @@ from app.core.exceptions import (
     VINValidationException,
 )
 from app.core.logging import get_logger
+from app.db.postgres.models import User
 from app.db.postgres.repositories import DiagnosisSessionRepository
 from app.db.postgres.session import get_db
 from app.services.diagnosis_service import (
@@ -48,10 +49,6 @@ from app.services.diagnosis_service import (
     DTCValidationError,
     VINDecodeError,
 )
-
-if TYPE_CHECKING:
-    from app.db.postgres.models import User
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 logger = get_logger(__name__)
