@@ -1,0 +1,18 @@
+{
+  "source": "python-OBD + mytrile",
+  "started_at": "2026-02-08T22:07:50.870572+00:00",
+  "codes_total": 3070,
+  "codes_by_category": {
+    "body": 1147,
+    "chassis": 487,
+    "powertrain": 1137,
+    "network": 299
+  },
+  "codes_by_severity": {
+    "critical": 780,
+    "medium": 1833,
+    "high": 457
+  },
+  "errors": [],
+  "completed_at": "2026-02-08T22:07:51.885368+00:00"
+}
