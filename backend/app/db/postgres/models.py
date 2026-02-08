@@ -4,7 +4,8 @@ SQLAlchemy models for PostgreSQL database.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -22,9 +23,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
-if TYPE_CHECKING:
-    from datetime import date, datetime
 
 
 class Base(DeclarativeBase):
