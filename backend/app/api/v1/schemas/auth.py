@@ -4,8 +4,6 @@ Authentication schemas.
 Provides Pydantic models for authentication requests and responses.
 """
 
-from __future__ import annotations
-
 import re
 from typing import List, Literal, Optional
 
