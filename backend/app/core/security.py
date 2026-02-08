@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, UTC
 from typing import Any, Dict, Optional, Union
 
 from jose import JWTError, jwt

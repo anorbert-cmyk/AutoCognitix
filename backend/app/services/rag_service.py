@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-# Python 3.11+ has StrEnum, provide compatibility for earlier versions
-from enum import StrEnum
+# Python 3.9 compatible string enum
+from enum import Enum
 
 from sqlalchemy import func, or_, select
 
@@ -65,23 +65,29 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-class ConfidenceLevel(StrEnum):
-    """Confidence levels for diagnosis."""
+class ConfidenceLevel(str, Enum):
+    """Confidence levels for diagnosis (Python 3.9 compatible)."""
 
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
     UNKNOWN = "unknown"
 
+    def __str__(self) -> str:
+        return str(self.value)
 
-class RetrievalSource(StrEnum):
-    """Sources for context retrieval."""
+
+class RetrievalSource(str, Enum):
+    """Sources for context retrieval (Python 3.9 compatible)."""
 
     QDRANT_DTC = "qdrant_dtc"
     QDRANT_SYMPTOM = "qdrant_symptom"
     NEO4J_GRAPH = "neo4j_graph"
     POSTGRES_TEXT = "postgres_text"
     NHTSA = "nhtsa"
+
+    def __str__(self) -> str:
+        return str(self.value)
 
 
 @dataclass

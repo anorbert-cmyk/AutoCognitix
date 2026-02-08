@@ -14,16 +14,19 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-# Python 3.11+ has StrEnum, provide compatibility for earlier versions
-from enum import StrEnum
+# Python 3.9 compatible string enum
+from enum import Enum
 
 # =============================================================================
 # Error Codes Enum
 # =============================================================================
 
 
-class ErrorCode(StrEnum):
-    """Standardized error codes for client-side handling."""
+class ErrorCode(str, Enum):
+    """Standardized error codes for client-side handling (Python 3.9 compatible)."""
+
+    def __str__(self) -> str:
+        return str(self.value)
 
     # General errors (1xxx)
     INTERNAL_ERROR = "ERR_1000"

@@ -25,8 +25,8 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 
-# Python 3.11+ has StrEnum, provide compatibility for earlier versions
-from enum import StrEnum
+# Python 3.9 compatible string enum
+from enum import Enum
 
 
 logger = get_logger(__name__)
@@ -37,13 +37,16 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-class LLMProviderType(StrEnum):
-    """Supported LLM provider types."""
+class LLMProviderType(str, Enum):
+    """Supported LLM provider types (Python 3.9 compatible)."""
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     OLLAMA = "ollama"
     RULE_BASED = "rule_based"  # Fallback when no API available
+
+    def __str__(self) -> str:
+        return str(self.value)
 
 
 @dataclass

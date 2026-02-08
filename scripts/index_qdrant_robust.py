@@ -21,20 +21,22 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 from tqdm import tqdm
 
-# Configuration
-QDRANT_URL = os.getenv("QDRANT_URL", "https://b3f75d28-bcfc-4f69-aeb8-6f3124af0735.eu-central-1-0.aws.cloud.qdrant.io")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Configuration - Load from environment variables
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Validate required credentials
-if not QDRANT_API_KEY:
-    print("❌ Error: QDRANT_API_KEY environment variable is required")
-    print("Usage: QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_qdrant_robust.py")
+if not QDRANT_URL or not QDRANT_API_KEY:
+    print("Error: QDRANT_URL and QDRANT_API_KEY environment variables are required")
+    print("Usage: QDRANT_URL=xxx QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_qdrant_robust.py")
+    print("Or set them in your .env file")
     sys.exit(1)
 
 if not GROQ_API_KEY:
-    print("❌ Error: GROQ_API_KEY environment variable is required")
-    print("Usage: QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_qdrant_robust.py")
+    print("Error: GROQ_API_KEY environment variable is required")
+    print("Usage: QDRANT_URL=xxx QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_qdrant_robust.py")
+    print("Or set them in your .env file")
     sys.exit(1)
 
 COLLECTION_NAME = "autocognitix"

@@ -1,0 +1,1468 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-02-08",
+  "description": "DTC kód - alkatrész megfeleltetés és alkatrész katalógus magyar/angol nyelven",
+  "dtc_parts_mapping": {
+    "P0010": ["camshaft_position_actuator", "engine_oil", "oil_filter"],
+    "P0011": ["camshaft_position_actuator", "engine_oil", "oil_filter", "timing_chain"],
+    "P0012": ["camshaft_position_actuator", "engine_oil", "oil_filter"],
+    "P0016": ["camshaft_position_sensor", "crankshaft_position_sensor", "timing_chain", "timing_belt"],
+    "P0017": ["camshaft_position_sensor", "crankshaft_position_sensor", "timing_chain"],
+    "P0030": ["o2_sensor_upstream", "o2_sensor_heater_fuse"],
+    "P0036": ["o2_sensor_downstream", "o2_sensor_heater_fuse"],
+    "P0100": ["maf_sensor", "air_filter", "maf_sensor_cleaner"],
+    "P0101": ["maf_sensor", "air_filter", "vacuum_hose", "intake_manifold_gasket"],
+    "P0102": ["maf_sensor", "air_filter"],
+    "P0103": ["maf_sensor", "maf_sensor_connector"],
+    "P0106": ["map_sensor", "vacuum_hose", "intake_manifold_gasket"],
+    "P0107": ["map_sensor", "vacuum_hose"],
+    "P0108": ["map_sensor"],
+    "P0110": ["iat_sensor", "air_filter"],
+    "P0111": ["iat_sensor"],
+    "P0112": ["iat_sensor"],
+    "P0113": ["iat_sensor"],
+    "P0115": ["coolant_temp_sensor", "thermostat", "coolant"],
+    "P0116": ["coolant_temp_sensor", "thermostat"],
+    "P0117": ["coolant_temp_sensor"],
+    "P0118": ["coolant_temp_sensor"],
+    "P0120": ["throttle_position_sensor", "throttle_body", "throttle_body_cleaner"],
+    "P0121": ["throttle_position_sensor", "throttle_body"],
+    "P0122": ["throttle_position_sensor"],
+    "P0123": ["throttle_position_sensor"],
+    "P0125": ["thermostat", "coolant_temp_sensor", "coolant"],
+    "P0128": ["thermostat", "coolant_temp_sensor", "coolant"],
+    "P0130": ["o2_sensor_upstream"],
+    "P0131": ["o2_sensor_upstream"],
+    "P0132": ["o2_sensor_upstream"],
+    "P0133": ["o2_sensor_upstream"],
+    "P0134": ["o2_sensor_upstream"],
+    "P0135": ["o2_sensor_upstream", "o2_sensor_heater_fuse"],
+    "P0136": ["o2_sensor_downstream"],
+    "P0137": ["o2_sensor_downstream"],
+    "P0138": ["o2_sensor_downstream"],
+    "P0139": ["o2_sensor_downstream"],
+    "P0140": ["o2_sensor_downstream"],
+    "P0141": ["o2_sensor_downstream", "o2_sensor_heater_fuse"],
+    "P0171": ["maf_sensor", "air_filter", "o2_sensor_upstream", "vacuum_hose", "fuel_pump", "fuel_filter", "fuel_injector"],
+    "P0172": ["maf_sensor", "air_filter", "o2_sensor_upstream", "fuel_injector", "fuel_pressure_regulator"],
+    "P0174": ["maf_sensor", "air_filter", "vacuum_hose", "intake_manifold_gasket"],
+    "P0175": ["maf_sensor", "fuel_injector", "fuel_pressure_regulator"],
+    "P0191": ["fuel_rail_pressure_sensor", "fuel_pump", "fuel_filter"],
+    "P0192": ["fuel_rail_pressure_sensor"],
+    "P0193": ["fuel_rail_pressure_sensor"],
+    "P0200": ["fuel_injector", "fuel_injector_seal"],
+    "P0201": ["fuel_injector", "fuel_injector_seal"],
+    "P0202": ["fuel_injector", "fuel_injector_seal"],
+    "P0203": ["fuel_injector", "fuel_injector_seal"],
+    "P0204": ["fuel_injector", "fuel_injector_seal"],
+    "P0217": ["thermostat", "coolant", "radiator", "water_pump", "radiator_fan"],
+    "P0218": ["transmission_fluid", "transmission_cooler"],
+    "P0219": ["engine_oil", "rev_limiter"],
+    "P0300": ["spark_plug_set", "ignition_coil_set", "fuel_injector_set", "fuel_filter", "air_filter"],
+    "P0301": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0302": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0303": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0304": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0305": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0306": ["spark_plug", "ignition_coil", "fuel_injector", "spark_plug_wire"],
+    "P0320": ["crankshaft_position_sensor", "camshaft_position_sensor"],
+    "P0325": ["knock_sensor"],
+    "P0327": ["knock_sensor"],
+    "P0328": ["knock_sensor"],
+    "P0335": ["crankshaft_position_sensor"],
+    "P0336": ["crankshaft_position_sensor"],
+    "P0340": ["camshaft_position_sensor"],
+    "P0341": ["camshaft_position_sensor", "timing_belt", "timing_chain"],
+    "P0345": ["camshaft_position_sensor"],
+    "P0401": ["egr_valve", "egr_gasket", "egr_vacuum_solenoid"],
+    "P0402": ["egr_valve", "egr_gasket"],
+    "P0403": ["egr_valve", "egr_vacuum_solenoid"],
+    "P0404": ["egr_valve"],
+    "P0405": ["egr_position_sensor"],
+    "P0406": ["egr_position_sensor"],
+    "P0420": ["catalytic_converter", "o2_sensor_upstream", "o2_sensor_downstream"],
+    "P0430": ["catalytic_converter", "o2_sensor_upstream", "o2_sensor_downstream"],
+    "P0440": ["evap_canister", "evap_purge_valve", "fuel_cap"],
+    "P0441": ["evap_purge_valve", "evap_canister"],
+    "P0442": ["fuel_cap", "evap_hose", "evap_canister"],
+    "P0443": ["evap_purge_valve"],
+    "P0446": ["evap_vent_valve", "evap_canister"],
+    "P0449": ["evap_vent_valve"],
+    "P0455": ["fuel_cap", "evap_hose", "evap_canister"],
+    "P0456": ["fuel_cap", "evap_hose"],
+    "P0500": ["vehicle_speed_sensor", "abs_wheel_speed_sensor"],
+    "P0501": ["vehicle_speed_sensor"],
+    "P0505": ["idle_air_control_valve", "throttle_body"],
+    "P0506": ["idle_air_control_valve", "throttle_body", "throttle_body_cleaner"],
+    "P0507": ["idle_air_control_valve", "throttle_body", "vacuum_hose"],
+    "P0520": ["oil_pressure_sensor", "engine_oil"],
+    "P0521": ["oil_pressure_sensor"],
+    "P0522": ["oil_pressure_sensor"],
+    "P0523": ["oil_pressure_sensor"],
+    "P0562": ["battery", "alternator", "voltage_regulator"],
+    "P0563": ["alternator", "voltage_regulator", "battery"],
+    "P0600": ["obd_connector", "ecu"],
+    "P0601": ["ecu"],
+    "P0602": ["ecu"],
+    "P0603": ["ecu", "battery"],
+    "P0604": ["ecu"],
+    "P0606": ["ecu"],
+    "P0700": ["transmission_control_module", "transmission_fluid"],
+    "P0705": ["transmission_range_sensor"],
+    "P0715": ["input_speed_sensor", "transmission_fluid"],
+    "P0720": ["output_speed_sensor"],
+    "P0730": ["transmission_fluid", "transmission_filter", "solenoid_pack"],
+    "P0740": ["torque_converter_clutch_solenoid", "transmission_fluid"],
+    "P0741": ["torque_converter_clutch_solenoid", "torque_converter"],
+    "P0750": ["shift_solenoid_a", "transmission_fluid"],
+    "P0755": ["shift_solenoid_b", "transmission_fluid"],
+    "P0760": ["shift_solenoid_c", "transmission_fluid"],
+    "P0765": ["shift_solenoid_d", "transmission_fluid"],
+    "P1000": ["obd_system_readiness"],
+    "P2096": ["o2_sensor_upstream", "fuel_injector", "fuel_pump", "air_filter"],
+    "P2097": ["o2_sensor_upstream", "fuel_injector", "fuel_pressure_regulator"],
+    "P2101": ["throttle_body", "throttle_position_sensor"],
+    "P2106": ["throttle_body", "throttle_actuator"],
+    "P2110": ["throttle_body", "throttle_actuator"],
+    "P2111": ["throttle_body", "throttle_actuator"],
+    "P2112": ["throttle_body", "throttle_actuator"],
+    "P2135": ["throttle_position_sensor", "accelerator_pedal_sensor"],
+    "P2138": ["accelerator_pedal_sensor"],
+    "P2195": ["o2_sensor_upstream", "maf_sensor", "vacuum_hose"],
+    "P2196": ["o2_sensor_upstream", "fuel_injector"],
+    "P2197": ["o2_sensor_upstream", "maf_sensor"],
+    "P2270": ["o2_sensor_downstream"],
+    "P2271": ["o2_sensor_downstream"]
+  },
+  "parts_catalog": {
+    "sensors": {
+      "description_hu": "Szenzorok",
+      "description_en": "Sensors",
+      "parts": [
+        {
+          "id": "maf_sensor",
+          "name_hu": "Levegotomeg-mero (MAF) szenzor",
+          "name_en": "Mass Air Flow Sensor",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "map_sensor",
+          "name_hu": "Szivocsoszenzor (MAP)",
+          "name_en": "Manifold Absolute Pressure Sensor",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "iat_sensor",
+          "name_hu": "Szivolevego-homerseklet szenzor",
+          "name_en": "Intake Air Temperature Sensor",
+          "avg_price_huf": 8000,
+          "price_range": {"min": 3500, "max": 22000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "coolant_temp_sensor",
+          "name_hu": "Hutofolyadek-homerseklet szenzor",
+          "name_en": "Engine Coolant Temperature Sensor",
+          "avg_price_huf": 6500,
+          "price_range": {"min": 2500, "max": 18000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "o2_sensor_upstream",
+          "name_hu": "Oxigenszenzor (elso/upstream)",
+          "name_en": "Oxygen Sensor (Upstream/Pre-Cat)",
+          "avg_price_huf": 22000,
+          "price_range": {"min": 12000, "max": 65000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "o2_sensor_downstream",
+          "name_hu": "Oxigenszenzor (hatso/downstream)",
+          "name_en": "Oxygen Sensor (Downstream/Post-Cat)",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 10000, "max": 55000},
+          "labor_hours": 0.7,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "crankshaft_position_sensor",
+          "name_hu": "Fotengelyhelyzet-szenzor",
+          "name_en": "Crankshaft Position Sensor",
+          "avg_price_huf": 15000,
+          "price_range": {"min": 6000, "max": 42000},
+          "labor_hours": 0.8,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "camshaft_position_sensor",
+          "name_hu": "Vezerlotengelyhelyzet-szenzor",
+          "name_en": "Camshaft Position Sensor",
+          "avg_price_huf": 16000,
+          "price_range": {"min": 7000, "max": 45000},
+          "labor_hours": 0.6,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "knock_sensor",
+          "name_hu": "Kopogaserzekelo szenzor",
+          "name_en": "Knock Sensor",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 35000},
+          "labor_hours": 1.5,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "throttle_position_sensor",
+          "name_hu": "Fojtoszelep-pozicio szenzor",
+          "name_en": "Throttle Position Sensor",
+          "avg_price_huf": 14000,
+          "price_range": {"min": 6000, "max": 38000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "accelerator_pedal_sensor",
+          "name_hu": "Gazpedal-allaserzekelo",
+          "name_en": "Accelerator Pedal Position Sensor",
+          "avg_price_huf": 25000,
+          "price_range": {"min": 12000, "max": 65000},
+          "labor_hours": 0.7,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "vehicle_speed_sensor",
+          "name_hu": "Jarmusebesseg-szenzor",
+          "name_en": "Vehicle Speed Sensor",
+          "avg_price_huf": 11000,
+          "price_range": {"min": 5000, "max": 32000},
+          "labor_hours": 0.8,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "abs_wheel_speed_sensor",
+          "name_hu": "ABS kereksebesseg-szenzor",
+          "name_en": "ABS Wheel Speed Sensor",
+          "avg_price_huf": 14000,
+          "price_range": {"min": 6000, "max": 38000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "oil_pressure_sensor",
+          "name_hu": "Olajnyomasszenzor",
+          "name_en": "Oil Pressure Sensor",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 3500, "max": 25000},
+          "labor_hours": 0.4,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_rail_pressure_sensor",
+          "name_hu": "Uzemanyag-nyomasszenzor",
+          "name_en": "Fuel Rail Pressure Sensor",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 18000, "max": 85000},
+          "labor_hours": 0.6,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "egr_position_sensor",
+          "name_hu": "EGR pozicioszenzor",
+          "name_en": "EGR Position Sensor",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 42000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "input_speed_sensor",
+          "name_hu": "Valto bemeneti fordulatszamszenzor",
+          "name_en": "Transmission Input Speed Sensor",
+          "avg_price_huf": 22000,
+          "price_range": {"min": 10000, "max": 55000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "output_speed_sensor",
+          "name_hu": "Valto kimeneti fordulatszamszenzor",
+          "name_en": "Transmission Output Speed Sensor",
+          "avg_price_huf": 20000,
+          "price_range": {"min": 9000, "max": 50000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "transmission_range_sensor",
+          "name_hu": "Valto fokozatvalaszto szenzor",
+          "name_en": "Transmission Range Sensor",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 14000, "max": 65000},
+          "labor_hours": 1.2,
+          "difficulty": "medium",
+          "oem_required": false
+        }
+      ]
+    },
+    "filters": {
+      "description_hu": "Szurok",
+      "description_en": "Filters",
+      "parts": [
+        {
+          "id": "air_filter",
+          "name_hu": "Levegoszuro",
+          "name_en": "Air Filter",
+          "avg_price_huf": 4500,
+          "price_range": {"min": 2000, "max": 15000},
+          "labor_hours": 0.2,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "oil_filter",
+          "name_hu": "Olajszuro",
+          "name_en": "Oil Filter",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 12000},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_filter",
+          "name_hu": "Uzemanyagszuro",
+          "name_en": "Fuel Filter",
+          "avg_price_huf": 8000,
+          "price_range": {"min": 3500, "max": 25000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "cabin_filter",
+          "name_hu": "Pollens szuro (utastersznur)",
+          "name_en": "Cabin Air Filter",
+          "avg_price_huf": 5500,
+          "price_range": {"min": 2500, "max": 18000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "transmission_filter",
+          "name_hu": "Valtoszuro",
+          "name_en": "Transmission Filter",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 35000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        }
+      ]
+    },
+    "ignition": {
+      "description_hu": "Gyujtasrendszer",
+      "description_en": "Ignition System",
+      "parts": [
+        {
+          "id": "spark_plug",
+          "name_hu": "Gyujtagyertya (1 db)",
+          "name_en": "Spark Plug (Single)",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 12000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "spark_plug_set",
+          "name_hu": "Gyujtagyertya keszlet (4 db)",
+          "name_en": "Spark Plug Set (4 pcs)",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 45000},
+          "labor_hours": 0.8,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "spark_plug_wire",
+          "name_hu": "Gyujtokabel",
+          "name_en": "Spark Plug Wire",
+          "avg_price_huf": 4500,
+          "price_range": {"min": 2000, "max": 15000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "ignition_coil",
+          "name_hu": "Gyujtotekercs (1 db)",
+          "name_en": "Ignition Coil (Single)",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 0.4,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "ignition_coil_set",
+          "name_hu": "Gyujtotekercs keszlet (4 db)",
+          "name_en": "Ignition Coil Set (4 pcs)",
+          "avg_price_huf": 65000,
+          "price_range": {"min": 28000, "max": 180000},
+          "labor_hours": 1.0,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "ignition_module",
+          "name_hu": "Gyujtasmodul",
+          "name_en": "Ignition Control Module",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 22000, "max": 120000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "distributor_cap",
+          "name_hu": "Elosztofedel",
+          "name_en": "Distributor Cap",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 4000, "max": 22000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "distributor_rotor",
+          "name_hu": "Elosztorotor",
+          "name_en": "Distributor Rotor",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 9000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        }
+      ]
+    },
+    "fuel_system": {
+      "description_hu": "Uzemanyagrendszer",
+      "description_en": "Fuel System",
+      "parts": [
+        {
+          "id": "fuel_pump",
+          "name_hu": "Uzemanyag-szivattyu",
+          "name_en": "Fuel Pump",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_injector",
+          "name_hu": "Befecskendező (1 db)",
+          "name_en": "Fuel Injector (Single)",
+          "avg_price_huf": 25000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_injector_set",
+          "name_hu": "Befecskendozo keszlet (4 db)",
+          "name_en": "Fuel Injector Set (4 pcs)",
+          "avg_price_huf": 85000,
+          "price_range": {"min": 40000, "max": 280000},
+          "labor_hours": 2.5,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_injector_seal",
+          "name_hu": "Befecskendező tomites",
+          "name_en": "Fuel Injector Seal",
+          "avg_price_huf": 2500,
+          "price_range": {"min": 800, "max": 6000},
+          "labor_hours": 0.8,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_pressure_regulator",
+          "name_hu": "Uzemanyag-nyomasszabalyozo",
+          "name_en": "Fuel Pressure Regulator",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_cap",
+          "name_hu": "Tankcsap",
+          "name_en": "Fuel Cap",
+          "avg_price_huf": 5500,
+          "price_range": {"min": 2500, "max": 18000},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "fuel_line",
+          "name_hu": "Uzemanyagvezetek",
+          "name_en": "Fuel Line",
+          "avg_price_huf": 8000,
+          "price_range": {"min": 3500, "max": 22000},
+          "labor_hours": 1.5,
+          "difficulty": "hard",
+          "oem_required": false
+        }
+      ]
+    },
+    "exhaust": {
+      "description_hu": "Kipufogórendszer",
+      "description_en": "Exhaust System",
+      "parts": [
+        {
+          "id": "catalytic_converter",
+          "name_hu": "Katalizator",
+          "name_en": "Catalytic Converter",
+          "avg_price_huf": 185000,
+          "price_range": {"min": 85000, "max": 450000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "exhaust_manifold",
+          "name_hu": "Kipufogó-kollektor",
+          "name_en": "Exhaust Manifold",
+          "avg_price_huf": 65000,
+          "price_range": {"min": 28000, "max": 180000},
+          "labor_hours": 3.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "exhaust_manifold_gasket",
+          "name_hu": "Kipufogó-kollektor tomites",
+          "name_en": "Exhaust Manifold Gasket",
+          "avg_price_huf": 6500,
+          "price_range": {"min": 2500, "max": 18000},
+          "labor_hours": 2.5,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "muffler",
+          "name_hu": "Hangtompító",
+          "name_en": "Muffler",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "exhaust_pipe",
+          "name_hu": "Kipufogócso",
+          "name_en": "Exhaust Pipe",
+          "avg_price_huf": 22000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "exhaust_gasket",
+          "name_hu": "Kipufogo tomites",
+          "name_en": "Exhaust Gasket",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1200, "max": 9000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "flex_pipe",
+          "name_hu": "Flexibilis cso (kompenzator)",
+          "name_en": "Flex Pipe",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        }
+      ]
+    },
+    "emissions": {
+      "description_hu": "Kibocsatascsokkentorendszer",
+      "description_en": "Emissions Control System",
+      "parts": [
+        {
+          "id": "egr_valve",
+          "name_hu": "EGR szelep",
+          "name_en": "EGR Valve",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 18000, "max": 125000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "egr_gasket",
+          "name_hu": "EGR tomites",
+          "name_en": "EGR Gasket",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1200, "max": 9000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "egr_vacuum_solenoid",
+          "name_hu": "EGR vakuumszelep",
+          "name_en": "EGR Vacuum Solenoid",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "evap_canister",
+          "name_hu": "Aktivszenes szuro (EVAP)",
+          "name_en": "EVAP Canister",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 85000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "evap_purge_valve",
+          "name_hu": "EVAP tisztitoszelep",
+          "name_en": "EVAP Purge Valve",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "evap_vent_valve",
+          "name_hu": "EVAP szellozo szelep",
+          "name_en": "EVAP Vent Valve",
+          "avg_price_huf": 15000,
+          "price_range": {"min": 6500, "max": 38000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "evap_hose",
+          "name_hu": "EVAP tomlo",
+          "name_en": "EVAP Hose",
+          "avg_price_huf": 4500,
+          "price_range": {"min": 1800, "max": 12000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "pcv_valve",
+          "name_hu": "PCV szelep",
+          "name_en": "PCV Valve",
+          "avg_price_huf": 5500,
+          "price_range": {"min": 2500, "max": 15000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        }
+      ]
+    },
+    "cooling": {
+      "description_hu": "Hutorendszer",
+      "description_en": "Cooling System",
+      "parts": [
+        {
+          "id": "thermostat",
+          "name_hu": "Termosztat",
+          "name_en": "Thermostat",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 3500, "max": 28000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "thermostat_housing",
+          "name_hu": "Termosztat hazkereset",
+          "name_en": "Thermostat Housing",
+          "avg_price_huf": 15000,
+          "price_range": {"min": 6500, "max": 42000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "water_pump",
+          "name_hu": "Vizszivattyu",
+          "name_en": "Water Pump",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 3.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "radiator",
+          "name_hu": "Huto",
+          "name_en": "Radiator",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 2.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "radiator_hose_upper",
+          "name_hu": "Felso hutotomlo",
+          "name_en": "Upper Radiator Hose",
+          "avg_price_huf": 8000,
+          "price_range": {"min": 3500, "max": 22000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "radiator_hose_lower",
+          "name_hu": "Also hutotomlo",
+          "name_en": "Lower Radiator Hose",
+          "avg_price_huf": 9500,
+          "price_range": {"min": 4000, "max": 25000},
+          "labor_hours": 0.7,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "radiator_fan",
+          "name_hu": "Huto ventilátor",
+          "name_en": "Radiator Fan",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 18000, "max": 120000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "radiator_cap",
+          "name_hu": "Huto sapka",
+          "name_en": "Radiator Cap",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 9000},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "coolant",
+          "name_hu": "Hutofolyadek (5L)",
+          "name_en": "Coolant (5L)",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 4500, "max": 22000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "heater_core",
+          "name_hu": "Futohaz radiatora",
+          "name_en": "Heater Core",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 18000, "max": 125000},
+          "labor_hours": 6.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "expansion_tank",
+          "name_hu": "Kiegyenlito tart",
+          "name_en": "Coolant Expansion Tank",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 35000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        }
+      ]
+    },
+    "electrical": {
+      "description_hu": "Elektromos rendszer",
+      "description_en": "Electrical System",
+      "parts": [
+        {
+          "id": "battery",
+          "name_hu": "Akkumulator",
+          "name_en": "Battery",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 25000, "max": 120000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "alternator",
+          "name_hu": "Generátor",
+          "name_en": "Alternator",
+          "avg_price_huf": 85000,
+          "price_range": {"min": 35000, "max": 250000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "starter_motor",
+          "name_hu": "Onindito",
+          "name_en": "Starter Motor",
+          "avg_price_huf": 65000,
+          "price_range": {"min": 28000, "max": 180000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "voltage_regulator",
+          "name_hu": "Feszultseg-szabalyozo",
+          "name_en": "Voltage Regulator",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "ecu",
+          "name_hu": "Motorvezerlo egyseg (ECU)",
+          "name_en": "Engine Control Unit (ECU)",
+          "avg_price_huf": 250000,
+          "price_range": {"min": 120000, "max": 650000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": true
+        },
+        {
+          "id": "transmission_control_module",
+          "name_hu": "Valtovezerlo modul (TCM)",
+          "name_en": "Transmission Control Module",
+          "avg_price_huf": 185000,
+          "price_range": {"min": 85000, "max": 450000},
+          "labor_hours": 1.5,
+          "difficulty": "hard",
+          "oem_required": true
+        },
+        {
+          "id": "obd_connector",
+          "name_hu": "OBD csatlakozo",
+          "name_en": "OBD Connector",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 3500, "max": 22000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "fuse_box",
+          "name_hu": "Biztositektabla",
+          "name_en": "Fuse Box",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "relay",
+          "name_hu": "Rele",
+          "name_en": "Relay",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 9000},
+          "labor_hours": 0.2,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "o2_sensor_heater_fuse",
+          "name_hu": "Oxigenszenzor futo biztosítek",
+          "name_en": "O2 Sensor Heater Fuse",
+          "avg_price_huf": 500,
+          "price_range": {"min": 200, "max": 1500},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        }
+      ]
+    },
+    "engine": {
+      "description_hu": "Motor",
+      "description_en": "Engine",
+      "parts": [
+        {
+          "id": "timing_belt",
+          "name_hu": "Vezerloszi",
+          "name_en": "Timing Belt",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 4.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "timing_chain",
+          "name_hu": "Vezerlolánc",
+          "name_en": "Timing Chain",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 6.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "timing_belt_kit",
+          "name_hu": "Vezerloszi keszlet (szij + gorgok + szivattyu)",
+          "name_en": "Timing Belt Kit (belt + tensioners + water pump)",
+          "avg_price_huf": 85000,
+          "price_range": {"min": 35000, "max": 220000},
+          "labor_hours": 5.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "camshaft_position_actuator",
+          "name_hu": "Vezerlotengelyallito (VVT)",
+          "name_en": "Camshaft Position Actuator (VVT)",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "valve_cover_gasket",
+          "name_hu": "Szelepfedel tomites",
+          "name_en": "Valve Cover Gasket",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 3500, "max": 25000},
+          "labor_hours": 1.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "head_gasket",
+          "name_hu": "Hengerfejtomites",
+          "name_en": "Head Gasket",
+          "avg_price_huf": 45000,
+          "price_range": {"min": 18000, "max": 120000},
+          "labor_hours": 8.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "intake_manifold_gasket",
+          "name_hu": "Szivocsotomites",
+          "name_en": "Intake Manifold Gasket",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 35000},
+          "labor_hours": 2.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "throttle_body",
+          "name_hu": "Fojtoszeleptest",
+          "name_en": "Throttle Body",
+          "avg_price_huf": 75000,
+          "price_range": {"min": 35000, "max": 200000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "throttle_actuator",
+          "name_hu": "Fojtoszelep-muködteto",
+          "name_en": "Throttle Actuator",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "idle_air_control_valve",
+          "name_hu": "Alapjarati szelep (IAC)",
+          "name_en": "Idle Air Control Valve",
+          "avg_price_huf": 22000,
+          "price_range": {"min": 10000, "max": 55000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "vacuum_hose",
+          "name_hu": "Vakuumtomlo",
+          "name_en": "Vacuum Hose",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1200, "max": 9000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "serpentine_belt",
+          "name_hu": "Ekemszi",
+          "name_en": "Serpentine Belt",
+          "avg_price_huf": 12000,
+          "price_range": {"min": 5000, "max": 35000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "belt_tensioner",
+          "name_hu": "Szijfeszito",
+          "name_en": "Belt Tensioner",
+          "avg_price_huf": 25000,
+          "price_range": {"min": 12000, "max": 65000},
+          "labor_hours": 0.8,
+          "difficulty": "medium",
+          "oem_required": false
+        }
+      ]
+    },
+    "transmission": {
+      "description_hu": "Sebessegvalto",
+      "description_en": "Transmission",
+      "parts": [
+        {
+          "id": "transmission_fluid",
+          "name_hu": "Valtoolaj (ATF/MTF)",
+          "name_en": "Transmission Fluid (ATF/MTF)",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 45000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "transmission_cooler",
+          "name_hu": "Valto hutoradiatora",
+          "name_en": "Transmission Cooler",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "shift_solenoid_a",
+          "name_hu": "Valtoszelep A",
+          "name_en": "Shift Solenoid A",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "shift_solenoid_b",
+          "name_hu": "Valtoszelep B",
+          "name_en": "Shift Solenoid B",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "shift_solenoid_c",
+          "name_hu": "Valtoszelep C",
+          "name_en": "Shift Solenoid C",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "shift_solenoid_d",
+          "name_hu": "Valtoszelep D",
+          "name_en": "Shift Solenoid D",
+          "avg_price_huf": 28000,
+          "price_range": {"min": 12000, "max": 75000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "solenoid_pack",
+          "name_hu": "Szolenoid csomag (valto)",
+          "name_en": "Solenoid Pack (Transmission)",
+          "avg_price_huf": 95000,
+          "price_range": {"min": 45000, "max": 250000},
+          "labor_hours": 3.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "torque_converter",
+          "name_hu": "Nyomatekvalto",
+          "name_en": "Torque Converter",
+          "avg_price_huf": 150000,
+          "price_range": {"min": 75000, "max": 380000},
+          "labor_hours": 6.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "torque_converter_clutch_solenoid",
+          "name_hu": "Nyomatekvalto kuplung szolenoid",
+          "name_en": "Torque Converter Clutch Solenoid",
+          "avg_price_huf": 35000,
+          "price_range": {"min": 15000, "max": 95000},
+          "labor_hours": 2.5,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "clutch_kit",
+          "name_hu": "Kuplung keszlet",
+          "name_en": "Clutch Kit",
+          "avg_price_huf": 85000,
+          "price_range": {"min": 35000, "max": 220000},
+          "labor_hours": 5.0,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "flywheel",
+          "name_hu": "Lendkerek",
+          "name_en": "Flywheel",
+          "avg_price_huf": 95000,
+          "price_range": {"min": 45000, "max": 250000},
+          "labor_hours": 5.0,
+          "difficulty": "hard",
+          "oem_required": false
+        }
+      ]
+    },
+    "brakes": {
+      "description_hu": "Fekrendszer",
+      "description_en": "Brake System",
+      "parts": [
+        {
+          "id": "brake_pads_front",
+          "name_hu": "Elso fekbetet keszlet",
+          "name_en": "Front Brake Pads Set",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 0.8,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "brake_pads_rear",
+          "name_hu": "Hatso fekbetet keszlet",
+          "name_en": "Rear Brake Pads Set",
+          "avg_price_huf": 15000,
+          "price_range": {"min": 6000, "max": 45000},
+          "labor_hours": 0.8,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "brake_rotor_front",
+          "name_hu": "Elso feltarcs",
+          "name_en": "Front Brake Rotor",
+          "avg_price_huf": 22000,
+          "price_range": {"min": 10000, "max": 65000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "brake_rotor_rear",
+          "name_hu": "Hatso feltarcs",
+          "name_en": "Rear Brake Rotor",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "brake_caliper",
+          "name_hu": "Feknyereg",
+          "name_en": "Brake Caliper",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 1.0,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "brake_hose",
+          "name_hu": "Fektomlo",
+          "name_en": "Brake Hose",
+          "avg_price_huf": 8500,
+          "price_range": {"min": 3500, "max": 22000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "brake_fluid",
+          "name_hu": "Fekfolyadek (1L)",
+          "name_en": "Brake Fluid (1L)",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 9000},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "brake_master_cylinder",
+          "name_hu": "Fek focylinder",
+          "name_en": "Brake Master Cylinder",
+          "avg_price_huf": 55000,
+          "price_range": {"min": 25000, "max": 150000},
+          "labor_hours": 1.5,
+          "difficulty": "hard",
+          "oem_required": false
+        },
+        {
+          "id": "abs_module",
+          "name_hu": "ABS modul",
+          "name_en": "ABS Module",
+          "avg_price_huf": 185000,
+          "price_range": {"min": 85000, "max": 450000},
+          "labor_hours": 2.0,
+          "difficulty": "hard",
+          "oem_required": true
+        }
+      ]
+    },
+    "consumables": {
+      "description_hu": "Fogyoanyagok",
+      "description_en": "Consumables",
+      "parts": [
+        {
+          "id": "engine_oil",
+          "name_hu": "Motorolaj (5L)",
+          "name_en": "Engine Oil (5L)",
+          "avg_price_huf": 18000,
+          "price_range": {"min": 8000, "max": 55000},
+          "labor_hours": 0.3,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "maf_sensor_cleaner",
+          "name_hu": "MAF szenzor tisztito",
+          "name_en": "MAF Sensor Cleaner",
+          "avg_price_huf": 4500,
+          "price_range": {"min": 2500, "max": 9000},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "throttle_body_cleaner",
+          "name_hu": "Fojtoszelep tisztito",
+          "name_en": "Throttle Body Cleaner",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1800, "max": 7500},
+          "labor_hours": 0.2,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "contact_cleaner",
+          "name_hu": "Kontaktisztito",
+          "name_en": "Electrical Contact Cleaner",
+          "avg_price_huf": 2500,
+          "price_range": {"min": 1200, "max": 5500},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "dielectric_grease",
+          "name_hu": "Szigetelo zsir",
+          "name_en": "Dielectric Grease",
+          "avg_price_huf": 2500,
+          "price_range": {"min": 1200, "max": 5500},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "antifreeze_concentrate",
+          "name_hu": "Fagyallo koncentratum (1L)",
+          "name_en": "Antifreeze Concentrate (1L)",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1800, "max": 8500},
+          "labor_hours": 0.1,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "power_steering_fluid",
+          "name_hu": "Szervokormany folyadek",
+          "name_en": "Power Steering Fluid",
+          "avg_price_huf": 3500,
+          "price_range": {"min": 1500, "max": 8500},
+          "labor_hours": 0.2,
+          "difficulty": "easy",
+          "oem_required": false
+        },
+        {
+          "id": "windshield_washer_fluid",
+          "name_hu": "Ablakmoso folyadek (5L)",
+          "name_en": "Windshield Washer Fluid (5L)",
+          "avg_price_huf": 1500,
+          "price_range": {"min": 800, "max": 3500},
+          "labor_hours": 0.05,
+          "difficulty": "easy",
+          "oem_required": false
+        }
+      ]
+    },
+    "misc": {
+      "description_hu": "Egyeb alkatrészek",
+      "description_en": "Miscellaneous Parts",
+      "parts": [
+        {
+          "id": "maf_sensor_connector",
+          "name_hu": "MAF szenzor csatlakozo",
+          "name_en": "MAF Sensor Connector",
+          "avg_price_huf": 5500,
+          "price_range": {"min": 2500, "max": 15000},
+          "labor_hours": 0.5,
+          "difficulty": "medium",
+          "oem_required": false
+        },
+        {
+          "id": "obd_system_readiness",
+          "name_hu": "OBD rendszer keszenlet tesztelés",
+          "name_en": "OBD System Readiness Test",
+          "avg_price_huf": 0,
+          "price_range": {"min": 0, "max": 0},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false,
+          "notes_hu": "Nem alkatrész, hanem diagnosztikai eljaras",
+          "notes_en": "Not a part, but a diagnostic procedure"
+        },
+        {
+          "id": "rev_limiter",
+          "name_hu": "Fordulatszamhatar (ECU beallitas)",
+          "name_en": "Rev Limiter (ECU Setting)",
+          "avg_price_huf": 0,
+          "price_range": {"min": 0, "max": 0},
+          "labor_hours": 0.5,
+          "difficulty": "easy",
+          "oem_required": false,
+          "notes_hu": "ECU parametere, nem fizikai alkatresz",
+          "notes_en": "ECU parameter, not a physical part"
+        }
+      ]
+    }
+  },
+  "labor_rates": {
+    "description_hu": "Munkadíj kategóriák Magyarországon",
+    "description_en": "Labor rate categories in Hungary",
+    "rates": {
+      "economy": {
+        "name_hu": "Gazdasagos mühely",
+        "name_en": "Economy Workshop",
+        "hourly_rate_huf": 8000,
+        "rate_range": {"min": 6000, "max": 10000}
+      },
+      "standard": {
+        "name_hu": "Standard szerviz",
+        "name_en": "Standard Service",
+        "hourly_rate_huf": 14000,
+        "rate_range": {"min": 10000, "max": 18000}
+      },
+      "premium": {
+        "name_hu": "Markas szerviz",
+        "name_en": "Authorized Dealer",
+        "hourly_rate_huf": 25000,
+        "rate_range": {"min": 18000, "max": 35000}
+      },
+      "specialist": {
+        "name_hu": "Specialista mühely",
+        "name_en": "Specialist Workshop",
+        "hourly_rate_huf": 20000,
+        "rate_range": {"min": 15000, "max": 28000}
+      }
+    }
+  },
+  "difficulty_descriptions": {
+    "easy": {
+      "name_hu": "Könnyű",
+      "name_en": "Easy",
+      "description_hu": "Alap szerszamokkal elvégezheto, tapasztalt barakkok is megcsinálhatjak",
+      "description_en": "Can be done with basic tools, experienced DIYers can handle it"
+    },
+    "medium": {
+      "name_hu": "Közepes",
+      "name_en": "Medium",
+      "description_hu": "Speci alis szerszamok vagy emelo szükseges, ajanlott szerviz",
+      "description_en": "Requires special tools or lift, workshop recommended"
+    },
+    "hard": {
+      "name_hu": "Nehéz",
+      "name_en": "Hard",
+      "description_hu": "Bonyolult munka, profi szerviz szükseges",
+      "description_en": "Complex work, professional service required"
+    }
+  },
+  "statistics": {
+    "total_dtc_codes": 130,
+    "total_parts": 119,
+    "categories": 13,
+    "price_currency": "HUF",
+    "price_updated": "2026-02-08"
+  }
+}

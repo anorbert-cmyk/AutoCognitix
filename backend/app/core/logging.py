@@ -98,7 +98,7 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._hostname = os.uname().nodename if hasattr(os, 'uname') else "unknown"
+        self._hostname = os.uname().nodename if hasattr(os, "uname") else "unknown"
         self._pid = os.getpid()
 
     def add_fields(
@@ -211,12 +211,14 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
             return frames
 
         for frame_info in traceback.extract_tb(tb, limit=limit):
-            frames.append({
-                "file": frame_info.filename,
-                "line": frame_info.lineno,
-                "function": frame_info.name,
-                "code": frame_info.line,
-            })
+            frames.append(
+                {
+                    "file": frame_info.filename,
+                    "line": frame_info.lineno,
+                    "function": frame_info.name,
+                    "code": frame_info.line,
+                }
+            )
         return frames
 
     def _remove_none_values(self, d: dict[str, Any]) -> None:
@@ -254,7 +256,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         correlation_id = request.headers.get("X-Correlation-ID")
 
         # Distributed tracing headers (W3C Trace Context compatible)
-        trace_id = request.headers.get("X-Trace-ID") or request.headers.get("traceparent", "").split("-")[1] if "-" in request.headers.get("traceparent", "") else str(uuid.uuid4()).replace("-", "")
+        trace_id = (
+            request.headers.get("X-Trace-ID")
+            or request.headers.get("traceparent", "").split("-")[1]
+            if "-" in request.headers.get("traceparent", "")
+            else str(uuid.uuid4()).replace("-", "")
+        )
         span_id = str(uuid.uuid4())[:16]
         parent_span_id = request.headers.get("X-Span-ID") or request.headers.get("X-Parent-Span-ID")
 
@@ -273,12 +280,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # Set error context for enrichment
         ErrorContext.clear()
-        ErrorContext.update({
-            "request_method": request.method,
-            "request_path": request.url.path,
-            "request_query": str(request.query_params) if request.query_params else None,
-            "client_ip": self._get_client_ip(request),
-        })
+        ErrorContext.update(
+            {
+                "request_method": request.method,
+                "request_path": request.url.path,
+                "request_query": str(request.query_params) if request.query_params else None,
+                "client_ip": self._get_client_ip(request),
+            }
+        )
 
         logger = get_logger("request")
 
@@ -310,7 +319,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                         "span_id": span_id,
                         "parent_span_id": parent_span_id,
                     },
-                }
+                },
             )
 
         try:
@@ -346,14 +355,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                             "duration_seconds": round(duration_seconds, 4),
                         },
                         "response": {
-                            "size_bytes": int(response.headers.get("Content-Length", 0)) if response.headers.get("Content-Length") else None,
+                            "size_bytes": int(response.headers.get("Content-Length", 0))
+                            if response.headers.get("Content-Length")
+                            else None,
                             "content_type": response.headers.get("Content-Type"),
                         },
                         "trace": {
                             "trace_id": trace_id,
                             "span_id": span_id,
                         },
-                    }
+                    },
                 )
 
             # Add tracing headers to response
@@ -372,11 +383,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             duration_ms = (time.time() - start_time) * 1000
 
             # Enrich error context
-            ErrorContext.update({
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "duration_ms": round(duration_ms, 2),
-            })
+            ErrorContext.update(
+                {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "duration_ms": round(duration_ms, 2),
+                }
+            )
 
             logger.error(
                 f"Request failed: {request.method} {request.url.path}",
@@ -443,6 +456,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         """Check if IP address is private."""
         try:
             import ipaddress
+
             ip_obj = ipaddress.ip_address(ip)
             return ip_obj.is_private
         except ValueError:
@@ -512,18 +526,28 @@ class PerformanceLogger:
         error_threshold_ms: float = 5000.0,
     ) -> Callable[[F], F]:
         """Decorator for tracking function performance."""
+
         def decorator(func: F) -> F:
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
-                with cls(operation_name, warn_threshold_ms=warn_threshold_ms, error_threshold_ms=error_threshold_ms):
+                with cls(
+                    operation_name,
+                    warn_threshold_ms=warn_threshold_ms,
+                    error_threshold_ms=error_threshold_ms,
+                ):
                     return await func(*args, **kwargs)
 
             @wraps(func)
             def sync_wrapper(*args, **kwargs):
-                with cls(operation_name, warn_threshold_ms=warn_threshold_ms, error_threshold_ms=error_threshold_ms):
+                with cls(
+                    operation_name,
+                    warn_threshold_ms=warn_threshold_ms,
+                    error_threshold_ms=error_threshold_ms,
+                ):
                     return func(*args, **kwargs)
 
             import asyncio
+
             if asyncio.iscoroutinefunction(func):
                 return async_wrapper  # type: ignore
             return sync_wrapper  # type: ignore
@@ -533,6 +557,7 @@ class PerformanceLogger:
 
 class LogLevel:
     """Log level constants for convenience."""
+
     DEBUG = logging.DEBUG
     INFO = logging.INFO
     WARNING = logging.WARNING
@@ -580,14 +605,10 @@ def setup_logging() -> None:
 
     if settings.LOG_FORMAT == "json":
         # JSON format for production
-        formatter = StructuredJsonFormatter(
-            "%(timestamp)s %(level)s %(name)s %(message)s"
-        )
+        formatter = StructuredJsonFormatter("%(timestamp)s %(level)s %(name)s %(message)s")
     else:
         # Human-readable format for development
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-        )
+        formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
@@ -606,8 +627,8 @@ def setup_logging() -> None:
 
             # Configure Sentry logging integration
             sentry_logging = LoggingIntegration(
-                level=logging.INFO,        # Capture info and above as breadcrumbs
-                event_level=logging.ERROR  # Send errors and above as events
+                level=logging.INFO,  # Capture info and above as breadcrumbs
+                event_level=logging.ERROR,  # Send errors and above as events
             )
 
             sentry_sdk.init(
@@ -662,11 +683,7 @@ def log_event(
         message: Human-readable message
         **extra_fields: Additional fields to include in log
     """
-    logger.log(
-        level,
-        message,
-        extra={"event": event, **extra_fields}
-    )
+    logger.log(level, message, extra={"event": event, **extra_fields})
 
 
 def log_database_operation(
@@ -846,7 +863,7 @@ class SpanContext:
                 "span_id": self.span_id,
                 "parent_span_id": self.old_span_id,
                 "attributes": self.attributes,
-            }
+            },
         )
         return self
 

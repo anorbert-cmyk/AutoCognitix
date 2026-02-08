@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 768
     HUSPACY_MODEL: str = "hu_core_news_lg"
 
+    # Email (Resend API)
+    RESEND_API_KEY: Optional[str] = None
+    EMAIL_FROM: str = "AutoCognitix <noreply@autocognitix.hu>"
+    EMAIL_DEMO_MODE: bool = True  # True = csak logolás, nincs tényleges küldés
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"

@@ -23,15 +23,17 @@ from typing import Optional
 from neo4j import AsyncGraphDatabase
 from tqdm import tqdm
 
-# Neo4j Aura connection
-NEO4J_URI = os.getenv("NEO4J_URI", "neo4j+s://ae7124c9.databases.neo4j.io")
+# Neo4j Aura connection - Load from environment variables
+# Set these in your .env file or export them before running
+NEO4J_URI = os.getenv("NEO4J_URI", "")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
 # Validate required credentials
-if not NEO4J_PASSWORD:
-    print("❌ Error: NEO4J_PASSWORD environment variable is required")
-    print("Usage: NEO4J_PASSWORD=xxx python load_all_to_neo4j.py")
+if not NEO4J_URI or not NEO4J_PASSWORD:
+    print("Error: NEO4J_URI and NEO4J_PASSWORD environment variables are required")
+    print("Usage: NEO4J_URI=neo4j+s://xxx.databases.neo4j.io NEO4J_PASSWORD=xxx python load_all_to_neo4j.py")
+    print("Or set them in your .env file")
     sys.exit(1)
 
 DATA_DIR = Path(__file__).parent.parent / "data"

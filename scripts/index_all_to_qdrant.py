@@ -26,22 +26,24 @@ from qdrant_client.models import (
 )
 from tqdm import tqdm
 
-# Qdrant Cloud connection
-QDRANT_URL = os.getenv("QDRANT_URL", "https://b3f75d28-bcfc-4f69-aeb8-6f3124af0735.eu-central-1-0.aws.cloud.qdrant.io")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+# Qdrant Cloud connection - Load from environment variables
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 
 # Groq for embeddings (fast, free tier)
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Validate required credentials
-if not QDRANT_API_KEY:
-    print("❌ Error: QDRANT_API_KEY environment variable is required")
-    print("Usage: QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_all_to_qdrant.py")
+if not QDRANT_URL or not QDRANT_API_KEY:
+    print("Error: QDRANT_URL and QDRANT_API_KEY environment variables are required")
+    print("Usage: QDRANT_URL=xxx QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_all_to_qdrant.py")
+    print("Or set them in your .env file")
     sys.exit(1)
 
 if not GROQ_API_KEY:
-    print("❌ Error: GROQ_API_KEY environment variable is required")
-    print("Usage: QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_all_to_qdrant.py")
+    print("Error: GROQ_API_KEY environment variable is required")
+    print("Usage: QDRANT_URL=xxx QDRANT_API_KEY=xxx GROQ_API_KEY=xxx python index_all_to_qdrant.py")
+    print("Or set them in your .env file")
     sys.exit(1)
 EMBEDDING_MODEL = "nomic-embed-text"  # 768 dimensions
 EMBEDDING_DIM = 768

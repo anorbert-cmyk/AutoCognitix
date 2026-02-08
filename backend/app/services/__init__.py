@@ -67,6 +67,17 @@ from app.services.rag_service import (
     get_context,
     get_rag_service,
 )
+from app.services.email_service import (
+    EmailService,
+    get_email_service,
+    send_password_reset_email,
+    send_welcome_email,
+)
+from app.services.parts_price_service import (
+    PartsPriceService,
+    get_parts_price_service,
+    get_repair_cost_estimate,
+)
 
 __all__ = [
     "AnthropicProvider",
@@ -123,4 +134,13 @@ __all__ = [
     "is_llm_available",
     "llm_generate_response",
     "preprocess_hungarian",
+    # Email Service
+    "EmailService",
+    "get_email_service",
+    "send_password_reset_email",
+    "send_welcome_email",
+    # Parts Price Service
+    "PartsPriceService",
+    "get_parts_price_service",
+    "get_repair_cost_estimate",
 ]

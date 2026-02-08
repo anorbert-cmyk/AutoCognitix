@@ -33,7 +33,7 @@ python-multipart==0.0.9
 
 # HTTP Client
 httpx==0.26.0
-aiohttp==3.9.3
+aiohttp>=3.9.4  # CVE-2024-23334 fix
 
 # AI/ML - LangChain
 langchain==0.1.6

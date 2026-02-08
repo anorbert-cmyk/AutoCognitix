@@ -6,26 +6,32 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-# Python 3.11+ has StrEnum, provide compatibility for earlier versions
-from enum import StrEnum
+# Python 3.9 compatible string enum
+from enum import Enum
 
 
-class DTCCategory(StrEnum):
-    """DTC code categories."""
+class DTCCategory(str, Enum):
+    """DTC code categories (Python 3.9 compatible)."""
 
     POWERTRAIN = "powertrain"  # P codes
     BODY = "body"  # B codes
     CHASSIS = "chassis"  # C codes
     NETWORK = "network"  # U codes
 
+    def __str__(self) -> str:
+        return str(self.value)
 
-class DTCSeverity(StrEnum):
-    """DTC severity levels."""
+
+class DTCSeverity(str, Enum):
+    """DTC severity levels (Python 3.9 compatible)."""
 
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+    def __str__(self) -> str:
+        return str(self.value)
 
 
 class DTCCode(BaseModel):

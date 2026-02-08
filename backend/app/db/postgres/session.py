@@ -239,6 +239,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # Pool Statistics (for monitoring)
 # =============================================================================
 
+
 async def get_pool_status() -> dict:
     """
     Get current connection pool status.
@@ -252,7 +253,7 @@ async def get_pool_status() -> dict:
         "checked_in": pool.checkedin(),
         "checked_out": pool.checkedout(),
         "overflow": pool.overflow(),
-        "invalid": pool.invalidatedcount() if hasattr(pool, 'invalidatedcount') else 0,
+        "invalid": pool.invalidatedcount() if hasattr(pool, "invalidatedcount") else 0,
     }
 
 
@@ -276,6 +277,7 @@ async def check_database_connection() -> bool:
     try:
         async with async_session_maker() as session:
             from sqlalchemy import text
+
             await session.execute(text("SELECT 1"))
             return True
     except Exception as e:
@@ -293,6 +295,7 @@ async def get_database_info() -> dict:
     try:
         async with async_session_maker() as session:
             from sqlalchemy import text
+
             result = await session.execute(text("SELECT version()"))
             version = result.scalar()
 
