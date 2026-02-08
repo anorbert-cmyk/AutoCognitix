@@ -58,12 +58,14 @@ APP_INFO = Info(
     "autocognitix_app_info",
     "AutoCognitix application information",
 )
-APP_INFO.info({
-    "version": "0.1.0",
-    "environment": settings.ENVIRONMENT,
-    "service": settings.PROJECT_NAME,
-    "python_version": "3.11",
-})
+APP_INFO.info(
+    {
+        "version": "0.1.0",
+        "environment": settings.ENVIRONMENT,
+        "service": settings.PROJECT_NAME,
+        "python_version": "3.11",
+    }
+)
 
 # Request metrics
 HTTP_REQUESTS_TOTAL = Counter(
@@ -77,10 +79,23 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
     "HTTP request latency in seconds",
     ["method", "endpoint"],
     buckets=[
-        0.005, 0.01, 0.025, 0.05, 0.075,
-        0.1, 0.25, 0.5, 0.75,
-        1.0, 2.5, 5.0, 7.5, 10.0,
-        15.0, 30.0, 60.0,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0,
+        15.0,
+        30.0,
+        60.0,
     ],
 )
 
@@ -132,6 +147,7 @@ ENDPOINT_LATENCY_PERCENTILES = Summary(
 # =============================================================================
 # Endpoint Normalization
 # =============================================================================
+
 
 class EndpointNormalizer:
     """
@@ -205,6 +221,7 @@ class EndpointNormalizer:
 # =============================================================================
 # Request Tracking Context Manager
 # =============================================================================
+
 
 @contextmanager
 def track_request(
@@ -297,6 +314,7 @@ def track_request(
 # =============================================================================
 # Metrics Middleware
 # =============================================================================
+
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     """
@@ -411,6 +429,7 @@ def get_metrics_middleware() -> type:
 # =============================================================================
 # Metrics Generation
 # =============================================================================
+
 
 async def generate_metrics_response() -> Response:
     """

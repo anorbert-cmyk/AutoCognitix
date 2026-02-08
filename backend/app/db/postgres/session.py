@@ -11,7 +11,6 @@ Optimized for performance with:
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 
 from sqlalchemy.exc import (
     DBAPIError,
@@ -23,7 +22,7 @@ from sqlalchemy.exc import (
     TimeoutError as SQLAlchemyTimeoutError,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -31,6 +30,10 @@ from app.core.exceptions import (
     PostgresException,
 )
 from app.core.logging import get_logger
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = get_logger(__name__)
 
@@ -71,17 +74,16 @@ connect_args = {
 }
 
 # Create async engine with optimized settings
+# Note: NullPool is used for async engines as QueuePool is not compatible with asyncio
+# For production with connection pooling, consider using AsyncAdaptedQueuePool or
+# external connection pooling solutions like PgBouncer
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
-    # Connection pooling
-    poolclass=QueuePool,
-    pool_size=POOL_SIZE,
-    max_overflow=MAX_OVERFLOW,
-    pool_recycle=POOL_RECYCLE,
-    pool_timeout=POOL_TIMEOUT,
-    pool_pre_ping=True,
+    # Connection pooling - NullPool for async compatibility
+    # (QueuePool cannot be used with asyncio engines)
+    poolclass=NullPool,
     # asyncpg specific settings
     connect_args=connect_args,
     # Execution options
@@ -91,8 +93,7 @@ engine = create_async_engine(
 )
 
 logger.info(
-    f"Database engine initialized: pool_size={POOL_SIZE}, "
-    f"max_overflow={MAX_OVERFLOW}, pool_recycle={POOL_RECYCLE}s"
+    "Database engine initialized with NullPool (no connection pooling for async compatibility)"
 )
 
 # Create async session factory with optimized settings

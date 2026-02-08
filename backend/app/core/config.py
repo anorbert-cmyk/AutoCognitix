@@ -41,6 +41,26 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
+    @classmethod
+    def validate_secrets(cls, v: str, info) -> str:
+        """
+        Validate that security secrets meet minimum requirements.
+
+        Secrets must be:
+        - Non-empty strings
+        - At least 32 characters long for cryptographic security
+
+        Raises:
+            ValueError: If secret is invalid
+        """
+        if not v or len(v) < 32:
+            raise ValueError(
+                f"{info.field_name} must be at least 32 characters long. "
+                f"Generate a secure secret with: openssl rand -hex 32"
+            )
+        return v
+
     # CORS - Use Union type to handle both string (from env) and list formats
     BACKEND_CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
 
@@ -53,6 +73,7 @@ class Settings(BaseSettings):
             if v.startswith("["):
                 # JSON format - let pydantic handle it
                 import json
+
                 try:
                     return json.loads(v)
                 except json.JSONDecodeError:

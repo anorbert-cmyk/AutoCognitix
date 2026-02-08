@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Callable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, TypeVar, TYPE_CHECKING
 
 from app.core.exceptions import (
     LLMException,
@@ -23,6 +22,9 @@ from app.core.exceptions import (
     NHTSARateLimitException,
 )
 from app.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = get_logger(__name__)
 
@@ -126,7 +128,7 @@ def calculate_delay(
         return min(retry_after, config.max_delay)
 
     # Calculate exponential backoff
-    delay = config.base_delay * (config.exponential_base ** attempt)
+    delay = config.base_delay * (config.exponential_base**attempt)
 
     # Add jitter if enabled
     if config.jitter:

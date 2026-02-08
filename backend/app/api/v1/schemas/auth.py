@@ -22,6 +22,7 @@ UserRole = Literal["user", "mechanic", "admin"]
 # Password Validation
 # =============================================================================
 
+
 def validate_password_strength(password: str) -> str:
     """
     Validate password strength.
@@ -60,6 +61,7 @@ def validate_password_strength(password: str) -> str:
 # =============================================================================
 # User Registration & Authentication
 # =============================================================================
+
 
 class UserCreate(BaseModel):
     """Schema for user registration."""
@@ -121,6 +123,7 @@ class UserPasswordUpdate(BaseModel):
 # Token Schemas
 # =============================================================================
 
+
 class Token(BaseModel):
     """Schema for JWT token response."""
 
@@ -148,6 +151,7 @@ class TokenPayload(BaseModel):
 # =============================================================================
 # Password Reset Schemas
 # =============================================================================
+
 
 class ForgotPasswordRequest(BaseModel):
     """Schema for forgot password request."""
@@ -184,6 +188,7 @@ class ResetPasswordResponse(BaseModel):
 # Logout Schema
 # =============================================================================
 
+
 class LogoutRequest(BaseModel):
     """Schema for logout request (optional refresh token)."""
 
@@ -199,6 +204,7 @@ class LogoutResponse(BaseModel):
 # =============================================================================
 # Error Responses
 # =============================================================================
+
 
 class AuthErrorResponse(BaseModel):
     """Schema for authentication error response."""

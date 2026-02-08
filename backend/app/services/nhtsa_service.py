@@ -55,7 +55,9 @@ class VINDecodeResult(BaseModel):
     plant_country: Optional[str] = Field(None, description="Manufacturing plant country")
     manufacturer: Optional[str] = Field(None, description="Full manufacturer name")
     engine_cylinders: Optional[int] = Field(None, description="Number of engine cylinders")
-    engine_displacement_l: Optional[float] = Field(None, description="Engine displacement in liters")
+    engine_displacement_l: Optional[float] = Field(
+        None, description="Engine displacement in liters"
+    )
     fuel_type_primary: Optional[str] = Field(None, description="Primary fuel type")
     transmission_style: Optional[str] = Field(None, description="Transmission style")
     drive_type: Optional[str] = Field(None, description="Drive type (FWD, RWD, AWD, etc.)")
@@ -186,6 +188,7 @@ class RedisCache(CacheBackend):
         if self._redis is None:
             try:
                 import redis.asyncio as aioredis
+
                 self._redis = await aioredis.from_url(
                     self._redis_url,
                     encoding="utf-8",
@@ -326,8 +329,7 @@ class NHTSAService:
             now = datetime.now().timestamp()
             # Remove timestamps older than the rate limit window
             self._request_timestamps = [
-                ts for ts in self._request_timestamps
-                if now - ts < self.RATE_LIMIT_WINDOW
+                ts for ts in self._request_timestamps if now - ts < self.RATE_LIMIT_WINDOW
             ]
             # Check if we've exceeded the rate limit
             if len(self._request_timestamps) >= self.REQUESTS_PER_SECOND:
@@ -369,7 +371,9 @@ class NHTSAService:
         client = await self._get_client()
 
         try:
-            logger.debug(f"Making {method} request to {sanitize_log(url)} with params {sanitize_log(str(params))}")
+            logger.debug(
+                f"Making {method} request to {sanitize_log(url)} with params {sanitize_log(str(params))}"
+            )
             response = await client.request(method, url, params=params)
 
             # Check for rate limiting
@@ -465,7 +469,9 @@ class NHTSAService:
             if use_cache and result.is_valid:
                 await cache.set(cache_key, result.model_dump_json(), self.VIN_CACHE_TTL)
 
-            logger.info(f"Decoded VIN {sanitize_log(vin)}: {sanitize_log(result.make)} {sanitize_log(result.model)} {result.model_year}")
+            logger.info(
+                f"Decoded VIN {sanitize_log(vin)}: {sanitize_log(result.make)} {sanitize_log(result.model)} {result.model_year}"
+            )
             return result
 
         except Exception as e:
@@ -507,7 +513,9 @@ class NHTSAService:
             cache = await self._get_cache()
             cached = await cache.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for recalls: {sanitize_log(make)} {sanitize_log(model)} {year}")
+                logger.debug(
+                    f"Cache hit for recalls: {sanitize_log(make)} {sanitize_log(model)} {year}"
+                )
                 return [Recall(**r) for r in json.loads(cached)]
 
         # Make API request
@@ -548,11 +556,15 @@ class NHTSAService:
                     self.RECALLS_CACHE_TTL,
                 )
 
-            logger.info(f"Found {len(recalls)} recalls for {sanitize_log(make)} {sanitize_log(model)} {year}")
+            logger.info(
+                f"Found {len(recalls)} recalls for {sanitize_log(make)} {sanitize_log(model)} {year}"
+            )
             return recalls
 
         except Exception as e:
-            logger.error(f"Failed to get recalls for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}")
+            logger.error(
+                f"Failed to get recalls for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}"
+            )
             raise
 
     # =========================================================================
@@ -590,7 +602,9 @@ class NHTSAService:
             cache = await self._get_cache()
             cached = await cache.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for complaints: {sanitize_log(make)} {sanitize_log(model)} {year}")
+                logger.debug(
+                    f"Cache hit for complaints: {sanitize_log(make)} {sanitize_log(model)} {year}"
+                )
                 return [Complaint(**c) for c in json.loads(cached)]
 
         # Make API request
@@ -633,11 +647,15 @@ class NHTSAService:
                     self.COMPLAINTS_CACHE_TTL,
                 )
 
-            logger.info(f"Found {len(complaints)} complaints for {sanitize_log(make)} {sanitize_log(model)} {year}")
+            logger.info(
+                f"Found {len(complaints)} complaints for {sanitize_log(make)} {sanitize_log(model)} {year}"
+            )
             return complaints
 
         except Exception as e:
-            logger.error(f"Failed to get complaints for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}")
+            logger.error(
+                f"Failed to get complaints for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_log(str(e))}"
+            )
             raise
 
     # =========================================================================

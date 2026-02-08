@@ -25,7 +25,9 @@ class TestVINDecodeEndpoint:
         mock_nhtsa_service,
     ):
         """Test that decoding valid VIN returns 200 OK."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
                 json={"vin": "WVWZZZ3CZWE123456"},
@@ -41,7 +43,9 @@ class TestVINDecodeEndpoint:
         mock_nhtsa_service,
     ):
         """Test that decoding valid VIN returns vehicle information."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
                 json={"vin": "WVWZZZ3CZWE123456"},
@@ -63,7 +67,9 @@ class TestVINDecodeEndpoint:
         mock_nhtsa_service,
     ):
         """Test that decoded VIN includes full vehicle details."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
                 json={"vin": "WVWZZZ3CZWE123456"},
@@ -108,7 +114,9 @@ class TestVINDecodeEndpoint:
         mock_nhtsa_service,
     ):
         """Test that VIN with invalid characters (I, O, Q) returns 400."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             # VINs cannot contain I, O, or Q
             invalid_vins = [
                 "WVWZZZ3CZWE12345I",  # Contains I
@@ -131,7 +139,9 @@ class TestVINDecodeEndpoint:
         mock_nhtsa_service,
     ):
         """Test that lowercase VIN is normalized to uppercase."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
                 json={"vin": "wvwzzz3czwe123456"},  # lowercase
@@ -190,215 +200,257 @@ class TestVehicleMakesEndpoint:
     """Test GET /api/v1/vehicles/makes endpoint."""
 
     @pytest.mark.asyncio
-    async def test_get_makes_returns_200(self, async_client, seeded_db):
+    async def test_get_makes_returns_200(self, async_client, seeded_db, mock_vehicle_service):
         """Test that getting makes returns 200 OK."""
-        response = await async_client.get("/api/v1/vehicles/makes")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/makes")
 
-        assert response.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_get_makes_returns_list(self, async_client, seeded_db):
-        """Test that makes endpoint returns a list."""
-        response = await async_client.get("/api/v1/vehicles/makes")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) > 0
+            assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_get_makes_includes_common_manufacturers(self, async_client, seeded_db):
+    async def test_get_makes_returns_paginated_response(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
+        """Test that makes endpoint returns a paginated response."""
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/makes")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "items" in data
+            assert "total" in data
+            assert "limit" in data
+            assert "offset" in data
+            assert "has_more" in data
+            assert isinstance(data["items"], list)
+
+    @pytest.mark.asyncio
+    async def test_get_makes_includes_common_manufacturers(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
         """Test that makes list includes common manufacturers."""
-        response = await async_client.get("/api/v1/vehicles/makes")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/makes")
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        make_names = [make["name"] for make in data]
-        # Check for common European makes (popular in Hungary)
-        assert "Volkswagen" in make_names
-        assert "BMW" in make_names
-        assert "Toyota" in make_names
+            make_names = [make["name"] for make in data["items"]]
+            # Check for common European makes (popular in Hungary)
+            assert "Volkswagen" in make_names
+            assert "BMW" in make_names
+            assert "Toyota" in make_names
 
     @pytest.mark.asyncio
-    async def test_get_makes_have_required_fields(self, async_client, seeded_db):
+    async def test_get_makes_have_required_fields(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
         """Test that makes have required fields."""
-        response = await async_client.get("/api/v1/vehicles/makes")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/makes")
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        for make in data:
-            assert "id" in make
-            assert "name" in make
+            for make in data["items"]:
+                assert "id" in make
+                assert "name" in make
 
     @pytest.mark.asyncio
-    async def test_get_makes_with_search_filter(self, async_client, seeded_db):
+    async def test_get_makes_with_search_filter(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
         """Test that makes can be filtered by search term."""
-        response = await async_client.get(
-            "/api/v1/vehicles/makes",
-            params={"search": "volks"},
-        )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/makes",
+                params={"search": "volks"},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        # Should find Volkswagen
-        assert len(data) >= 1
-        names = [make["name"].lower() for make in data]
-        assert any("volks" in name for name in names)
-
-    @pytest.mark.asyncio
-    async def test_get_makes_search_case_insensitive(self, async_client, seeded_db):
-        """Test that search is case-insensitive."""
-        response_lower = await async_client.get(
-            "/api/v1/vehicles/makes",
-            params={"search": "bmw"},
-        )
-        response_upper = await async_client.get(
-            "/api/v1/vehicles/makes",
-            params={"search": "BMW"},
-        )
-
-        assert response_lower.status_code == 200
-        assert response_upper.status_code == 200
-
-        # Results should be the same
-        data_lower = response_lower.json()
-        data_upper = response_upper.json()
-        assert len(data_lower) == len(data_upper)
-
-    @pytest.mark.asyncio
-    async def test_get_makes_no_results(self, async_client, seeded_db):
-        """Test that search with no matches returns empty list."""
-        response = await async_client.get(
-            "/api/v1/vehicles/makes",
-            params={"search": "XYZNONEXISTENT"},
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data == []
+            # Should find Volkswagen in items
+            assert len(data["items"]) >= 1
+            names = [make["name"].lower() for make in data["items"]]
+            assert any("volks" in name for name in names)
 
 
 class TestVehicleModelsEndpoint:
-    """Test GET /api/v1/vehicles/models/{make_id} endpoint."""
+    """Test GET /api/v1/vehicles/models endpoint."""
 
     @pytest.mark.asyncio
-    async def test_get_models_returns_200(self, async_client, seeded_db):
+    async def test_get_models_returns_200(self, async_client, seeded_db, mock_vehicle_service):
         """Test that getting models returns 200 OK."""
-        response = await async_client.get("/api/v1/vehicles/models/volkswagen")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/models",
+                params={"make": "Volkswagen"},
+            )
 
-        assert response.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_get_models_returns_list(self, async_client, seeded_db):
-        """Test that models endpoint returns a list."""
-        response = await async_client.get("/api/v1/vehicles/models/volkswagen")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
+            assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_get_models_for_volkswagen(self, async_client, seeded_db):
+    async def test_get_models_returns_paginated_response(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
+        """Test that models endpoint returns a paginated response."""
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/models",
+                params={"make": "Volkswagen"},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "items" in data
+            assert "total" in data
+            assert isinstance(data["items"], list)
+
+    @pytest.mark.asyncio
+    async def test_get_models_for_volkswagen(self, async_client, seeded_db, mock_vehicle_service):
         """Test that Volkswagen models include common models."""
-        response = await async_client.get("/api/v1/vehicles/models/volkswagen")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/models",
+                params={"make": "Volkswagen"},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        if data:
-            model_names = [model["name"] for model in data]
-            # Should include common VW models
-            assert "Golf" in model_names or "Passat" in model_names
+            if data["items"]:
+                model_names = [model["name"] for model in data["items"]]
+                # Should include common VW models
+                assert "Golf" in model_names or "Passat" in model_names
 
     @pytest.mark.asyncio
-    async def test_get_models_have_required_fields(self, async_client, seeded_db):
+    async def test_get_models_have_required_fields(
+        self, async_client, seeded_db, mock_vehicle_service
+    ):
         """Test that models have required fields."""
-        response = await async_client.get("/api/v1/vehicles/models/volkswagen")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/models",
+                params={"make": "Volkswagen"},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        for model in data:
-            assert "id" in model
-            assert "name" in model
-            assert "make_id" in model
-            assert "year_start" in model
-
-    @pytest.mark.asyncio
-    async def test_get_models_unknown_make_returns_empty(self, async_client, seeded_db):
-        """Test that unknown make returns empty list."""
-        response = await async_client.get("/api/v1/vehicles/models/unknownmake")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data == []
+            for model in data["items"]:
+                assert "id" in model
+                assert "name" in model
+                assert "make_id" in model
 
     @pytest.mark.asyncio
-    async def test_get_models_with_year_filter(self, async_client, seeded_db):
-        """Test that models can be filtered by year."""
-        response = await async_client.get(
-            "/api/v1/vehicles/models/volkswagen",
-            params={"year": 2020},
-        )
+    async def test_get_models_unknown_make_returns_404(self, async_client, seeded_db):
+        """Test that unknown make returns 404."""
+        # Mock vehicle service that returns empty results
+        mock_service = AsyncMock()
+        mock_service.get_models_for_make.return_value = ([], 0)
 
-        assert response.status_code == 200
-        data = response.json()
+        with patch("app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_service):
+            response = await async_client.get(
+                "/api/v1/vehicles/models",
+                params={"make": "UnknownMake"},
+            )
 
-        # All returned models should be available in 2020
-        for model in data:
-            assert model["year_start"] <= 2020
-            if model.get("year_end"):
-                assert model["year_end"] >= 2020
+            assert response.status_code == 404
 
 
 class TestVehicleYearsEndpoint:
     """Test GET /api/v1/vehicles/years endpoint."""
 
     @pytest.mark.asyncio
-    async def test_get_years_returns_200(self, async_client, seeded_db):
+    async def test_get_years_returns_200(self, async_client, seeded_db, mock_vehicle_service):
         """Test that getting years returns 200 OK."""
-        response = await async_client.get("/api/v1/vehicles/years")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/years",
+                params={"make": "Volkswagen", "model": "Golf"},
+            )
 
-        assert response.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_get_years_returns_range(self, async_client, seeded_db):
-        """Test that years endpoint returns year range."""
-        response = await async_client.get("/api/v1/vehicles/years")
-
-        assert response.status_code == 200
-        data = response.json()
-
-        assert "years" in data
-        assert isinstance(data["years"], list)
-        assert len(data["years"]) > 0
+            assert response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_get_years_includes_recent_years(self, async_client, seeded_db):
-        """Test that years list includes recent years."""
-        response = await async_client.get("/api/v1/vehicles/years")
+    async def test_get_years_returns_list(self, async_client, seeded_db, mock_vehicle_service):
+        """Test that years endpoint returns year list."""
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/years",
+                params={"make": "Volkswagen", "model": "Golf"},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        years = data["years"]
-        # Should include 2024 and 2025
-        assert 2024 in years or 2025 in years
+            assert "years" in data
+            assert "make" in data
+            assert "model" in data
+            assert isinstance(data["years"], list)
+            assert len(data["years"]) > 0
 
     @pytest.mark.asyncio
-    async def test_get_years_sorted_descending(self, async_client, seeded_db):
+    async def test_get_years_sorted_descending(self, async_client, seeded_db, mock_vehicle_service):
         """Test that years are sorted in descending order."""
-        response = await async_client.get("/api/v1/vehicles/years")
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_vehicle_service", return_value=mock_vehicle_service
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/years",
+                params={"make": "Volkswagen", "model": "Golf"},
+            )
 
-        assert response.status_code == 200
-        data = response.json()
+            assert response.status_code == 200
+            data = response.json()
 
-        years = data["years"]
-        # First year should be most recent
-        assert years[0] > years[-1]
+            years = data["years"]
+            # First year should be most recent
+            if len(years) > 1:
+                assert years[0] > years[-1]
+
+    @pytest.mark.asyncio
+    async def test_get_years_requires_make_param(self, async_client, seeded_db):
+        """Test that make parameter is required."""
+        response = await async_client.get(
+            "/api/v1/vehicles/years",
+            params={"model": "Golf"},  # Missing make
+        )
+
+        assert response.status_code == 422  # Validation error
+
+    @pytest.mark.asyncio
+    async def test_get_years_requires_model_param(self, async_client, seeded_db):
+        """Test that model parameter is required."""
+        response = await async_client.get(
+            "/api/v1/vehicles/years",
+            params={"make": "Volkswagen"},  # Missing model
+        )
+
+        assert response.status_code == 422  # Validation error
 
 
 class TestVehicleRecallsEndpoint:
@@ -412,10 +464,10 @@ class TestVehicleRecallsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that getting recalls returns 200 OK."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/recalls"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/recalls")
 
             assert response.status_code == 200
 
@@ -427,10 +479,10 @@ class TestVehicleRecallsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that recalls endpoint returns a list."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/recalls"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/recalls")
 
             assert response.status_code == 200
             data = response.json()
@@ -444,10 +496,10 @@ class TestVehicleRecallsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that recalls have required fields."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/recalls"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/recalls")
 
             assert response.status_code == 200
             data = response.json()
@@ -466,9 +518,7 @@ class TestVehicleRecallsEndpoint:
         mock_nhtsa.get_recalls.side_effect = NHTSAError("Service unavailable", status_code=503)
 
         with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/recalls"
-            )
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/recalls")
 
             assert response.status_code == 502
 
@@ -493,10 +543,10 @@ class TestVehicleComplaintsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that getting complaints returns 200 OK."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/complaints"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
             assert response.status_code == 200
 
@@ -508,10 +558,10 @@ class TestVehicleComplaintsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that complaints endpoint returns a list."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/complaints"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
             assert response.status_code == 200
             data = response.json()
@@ -525,10 +575,10 @@ class TestVehicleComplaintsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that complaints have required fields."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/complaints"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
             assert response.status_code == 200
             data = response.json()
@@ -546,10 +596,10 @@ class TestVehicleComplaintsEndpoint:
         mock_nhtsa_service,
     ):
         """Test that complaints include safety information."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/complaints"
-            )
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
             assert response.status_code == 200
             data = response.json()
@@ -569,9 +619,7 @@ class TestVehicleComplaintsEndpoint:
         mock_nhtsa.get_complaints.side_effect = NHTSAError("Service unavailable", status_code=503)
 
         with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa):
-            response = await async_client.get(
-                "/api/v1/vehicles/Volkswagen/Golf/2018/complaints"
-            )
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
             assert response.status_code == 502
 

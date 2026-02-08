@@ -18,22 +18,16 @@ Author: AutoCognitix Team
 
 from __future__ import annotations
 
-import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
 # Python 3.11+ has StrEnum, provide compatibility for earlier versions
-if sys.version_info >= (3, 11):
-    from enum import StrEnum
-else:
-    class StrEnum(str, Enum):
-        """String enum for Python < 3.11 compatibility."""
-        pass
+from enum import StrEnum
+
 
 logger = get_logger(__name__)
 
@@ -42,8 +36,10 @@ logger = get_logger(__name__)
 # Enums and Data Classes
 # =============================================================================
 
+
 class LLMProviderType(StrEnum):
     """Supported LLM provider types."""
+
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     OLLAMA = "ollama"
@@ -53,6 +49,7 @@ class LLMProviderType(StrEnum):
 @dataclass
 class LLMMessage:
     """Message for LLM conversation."""
+
     role: str  # "system", "user", "assistant"
     content: str
 
@@ -60,6 +57,7 @@ class LLMMessage:
 @dataclass
 class LLMResponse:
     """Response from LLM."""
+
     content: str
     model: str
     provider: LLMProviderType
@@ -81,8 +79,20 @@ class LLMResponse:
 
 
 @dataclass
+class LLMStreamChunk:
+    """A chunk of streaming response from LLM."""
+
+    content: str
+    model: str
+    provider: LLMProviderType
+    is_final: bool = False
+    finish_reason: str | None = None
+
+
+@dataclass
 class LLMConfig:
     """Configuration for LLM requests."""
+
     temperature: float = 0.3
     max_tokens: int = 4096
     top_p: float = 1.0
@@ -93,6 +103,7 @@ class LLMConfig:
 # =============================================================================
 # Abstract Base Provider
 # =============================================================================
+
 
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
@@ -127,6 +138,34 @@ class BaseLLMProvider(ABC):
         """Generate a response from the LLM."""
         pass
 
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        config: LLMConfig | None = None,
+    ):
+        """
+        Generate a streaming response from the LLM.
+
+        Yields LLMStreamChunk objects as the response is generated.
+        Default implementation falls back to non-streaming.
+
+        Args:
+            messages: List of messages for the conversation.
+            config: Optional LLM configuration override.
+
+        Yields:
+            LLMStreamChunk objects with partial content.
+        """
+        # Default fallback: use non-streaming and yield single chunk
+        response = await self.generate(messages, config)
+        yield LLMStreamChunk(
+            content=response.content,
+            model=response.model,
+            provider=response.provider,
+            is_final=True,
+            finish_reason=response.finish_reason,
+        )
+
     async def generate_with_system(
         self,
         system_prompt: str,
@@ -150,10 +189,35 @@ class BaseLLMProvider(ABC):
         ]
         return await self.generate(messages, config)
 
+    async def generate_stream_with_system(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        config: LLMConfig | None = None,
+    ):
+        """
+        Convenience method to generate streaming response with system and user prompts.
+
+        Args:
+            system_prompt: System prompt for context setting.
+            user_prompt: User prompt with the actual request.
+            config: Optional LLM configuration override.
+
+        Yields:
+            LLMStreamChunk objects with partial content.
+        """
+        messages = [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(role="user", content=user_prompt),
+        ]
+        async for chunk in self.generate_stream(messages, config):
+            yield chunk
+
 
 # =============================================================================
 # Anthropic Provider
 # =============================================================================
+
 
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude provider."""
@@ -178,6 +242,7 @@ class AnthropicProvider(BaseLLMProvider):
         if self._client is None:
             try:
                 from anthropic import AsyncAnthropic
+
                 self._client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
                 logger.info(f"Anthropic client initialized with model: {self.model_name}")
             except ImportError:
@@ -201,10 +266,12 @@ class AnthropicProvider(BaseLLMProvider):
             if msg.role == "system":
                 system_content = msg.content
             else:
-                api_messages.append({
-                    "role": msg.role,
-                    "content": msg.content,
-                })
+                api_messages.append(
+                    {
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                )
 
         try:
             response = await client.messages.create(
@@ -236,10 +303,66 @@ class AnthropicProvider(BaseLLMProvider):
             logger.error(f"Anthropic API error: {e}")
             raise
 
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        config: LLMConfig | None = None,
+    ):
+        """Generate streaming response using Anthropic Claude."""
+        cfg = config or self.config
+        client = self._get_client()
+
+        # Extract system message
+        system_content = ""
+        api_messages = []
+
+        for msg in messages:
+            if msg.role == "system":
+                system_content = msg.content
+            else:
+                api_messages.append(
+                    {
+                        "role": msg.role,
+                        "content": msg.content,
+                    }
+                )
+
+        try:
+            async with client.messages.stream(
+                model=self.model_name,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                system=system_content,
+                messages=api_messages,
+                stop_sequences=cfg.stop_sequences if cfg.stop_sequences else None,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield LLMStreamChunk(
+                        content=text,
+                        model=self.model_name,
+                        provider=self.provider_type,
+                        is_final=False,
+                    )
+
+                # Final chunk
+                final_message = await stream.get_final_message()
+                yield LLMStreamChunk(
+                    content="",
+                    model=self.model_name,
+                    provider=self.provider_type,
+                    is_final=True,
+                    finish_reason=final_message.stop_reason,
+                )
+
+        except Exception as e:
+            logger.error(f"Anthropic streaming API error: {e}")
+            raise
+
 
 # =============================================================================
 # OpenAI Provider
 # =============================================================================
+
 
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider."""
@@ -264,6 +387,7 @@ class OpenAIProvider(BaseLLMProvider):
         if self._client is None:
             try:
                 from openai import AsyncOpenAI
+
                 self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
                 logger.info(f"OpenAI client initialized with model: {self.model_name}")
             except ImportError:
@@ -279,10 +403,7 @@ class OpenAIProvider(BaseLLMProvider):
         cfg = config or self.config
         client = self._get_client()
 
-        api_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
         try:
             response = await client.chat.completions.create(
@@ -312,10 +433,55 @@ class OpenAIProvider(BaseLLMProvider):
             logger.error(f"OpenAI API error: {e}")
             raise
 
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        config: LLMConfig | None = None,
+    ):
+        """Generate streaming response using OpenAI GPT."""
+        cfg = config or self.config
+        client = self._get_client()
+
+        api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+
+        try:
+            stream = await client.chat.completions.create(
+                model=self.model_name,
+                messages=api_messages,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                top_p=cfg.top_p,
+                stop=cfg.stop_sequences if cfg.stop_sequences else None,
+                stream=True,
+            )
+
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield LLMStreamChunk(
+                        content=chunk.choices[0].delta.content,
+                        model=self.model_name,
+                        provider=self.provider_type,
+                        is_final=False,
+                    )
+
+                if chunk.choices and chunk.choices[0].finish_reason:
+                    yield LLMStreamChunk(
+                        content="",
+                        model=self.model_name,
+                        provider=self.provider_type,
+                        is_final=True,
+                        finish_reason=chunk.choices[0].finish_reason,
+                    )
+
+        except Exception as e:
+            logger.error(f"OpenAI streaming API error: {e}")
+            raise
+
 
 # =============================================================================
 # Ollama Provider
 # =============================================================================
+
 
 class OllamaProvider(BaseLLMProvider):
     """Ollama local LLM provider."""
@@ -336,6 +502,7 @@ class OllamaProvider(BaseLLMProvider):
         """Check if Ollama is running and accessible."""
         try:
             import httpx
+
             response = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=2.0)
             return response.status_code == 200
         except Exception:
@@ -353,10 +520,7 @@ class OllamaProvider(BaseLLMProvider):
             import httpx
 
             # Convert messages to Ollama format
-            api_messages = [
-                {"role": msg.role, "content": msg.content}
-                for msg in messages
-            ]
+            api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -399,6 +563,7 @@ class OllamaProvider(BaseLLMProvider):
 # =============================================================================
 # Rule-Based Fallback Provider
 # =============================================================================
+
 
 class RuleBasedProvider(BaseLLMProvider):
     """
@@ -454,6 +619,7 @@ class RuleBasedProvider(BaseLLMProvider):
 # =============================================================================
 # LLM Provider Factory
 # =============================================================================
+
 
 class LLMProviderFactory:
     """Factory for creating and managing LLM providers."""
@@ -516,7 +682,11 @@ class LLMProviderFactory:
                 return provider_type
 
         # Try providers in order of preference
-        for provider_type in [LLMProviderType.ANTHROPIC, LLMProviderType.OPENAI, LLMProviderType.OLLAMA]:
+        for provider_type in [
+            LLMProviderType.ANTHROPIC,
+            LLMProviderType.OPENAI,
+            LLMProviderType.OLLAMA,
+        ]:
             provider_class = cls._providers[provider_type]
             provider = provider_class()
             if provider.is_available():

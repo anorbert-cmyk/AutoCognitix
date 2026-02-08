@@ -13,7 +13,6 @@ Endpoints:
 - /metrics/summary - Human-readable JSON metrics summary
 """
 
-
 from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
@@ -82,6 +81,7 @@ async def get_metrics_summary_endpoint():
             db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
         from sqlalchemy import create_engine
+
         engine = create_engine(db_url)
         with engine.connect() as conn:
             result = conn.execute(text("SELECT COUNT(*) FROM dtc_codes"))

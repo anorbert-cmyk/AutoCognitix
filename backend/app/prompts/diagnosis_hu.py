@@ -184,6 +184,7 @@ Ez a szoveg egy szabaly-alapu diagnosztikai sablon, amely az LLM eleresenek hian
 # Context Formatting Functions
 # =============================================================================
 
+
 def format_dtc_context(dtc_data: list[dict[str, Any]]) -> str:
     """
     Format DTC code information for prompt.
@@ -332,10 +333,16 @@ def format_repair_context(repair_data: dict[str, Any]) -> str:
                 symp_lines.append(f"- {name} ({confidence:.0%})")
         sections.append("\n".join(symp_lines))
 
-    return "\n\n".join(sections) if sections else "Nincs kapcsolodo komponens vagy javitas az adatbazisban."
+    return (
+        "\n\n".join(sections)
+        if sections
+        else "Nincs kapcsolodo komponens vagy javitas az adatbazisban."
+    )
 
 
-def format_recall_context(recalls: list[dict[str, Any]], complaints: list[dict[str, Any]] | None = None) -> str:
+def format_recall_context(
+    recalls: list[dict[str, Any]], complaints: list[dict[str, Any]] | None = None
+) -> str:
     """
     Format NHTSA recalls and complaints for prompt.
 
@@ -395,9 +402,11 @@ def format_recall_context(recalls: list[dict[str, Any]], complaints: list[dict[s
 # Prompt Building
 # =============================================================================
 
+
 @dataclass
 class DiagnosisPromptContext:
     """Container for all diagnosis prompt context."""
+
     make: str
     model: str
     year: int
@@ -423,7 +432,9 @@ def build_diagnosis_prompt(context: DiagnosisPromptContext) -> str:
     Returns:
         Formatted prompt string ready for LLM.
     """
-    dtc_formatted = "\n".join([f"- {code}" for code in (context.dtc_codes or [])]) or "Nincs hibakod"
+    dtc_formatted = (
+        "\n".join([f"- {code}" for code in (context.dtc_codes or [])]) or "Nincs hibakod"
+    )
 
     return DIAGNOSIS_USER_PROMPT_HU.format(
         make=context.make,
@@ -446,9 +457,11 @@ def build_diagnosis_prompt(context: DiagnosisPromptContext) -> str:
 # Response Parsing
 # =============================================================================
 
+
 @dataclass
 class ParsedDiagnosisResponse:
     """Parsed diagnosis response from LLM."""
+
     summary: str = ""
     probable_causes: list[dict[str, Any]] = None
     diagnostic_steps: list[str] = None
@@ -486,13 +499,13 @@ def parse_diagnosis_response(response_text: str) -> ParsedDiagnosisResponse:
     result = ParsedDiagnosisResponse(raw_response=response_text)
 
     # Try to extract JSON from response
-    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+    json_match = re.search(r"```json\s*(.*?)\s*```", response_text, re.DOTALL)
 
     if json_match:
         json_str = json_match.group(1)
     else:
         # Try to find raw JSON object
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
+        json_match = re.search(r"\{[\s\S]*\}", response_text)
         if json_match:
             json_str = json_match.group(0)
         else:
@@ -573,16 +586,22 @@ def _fallback_parse(response_text: str, result: ParsedDiagnosisResponse) -> Pars
         ParsedDiagnosisResponse with extracted data.
     """
     # Try to extract summary
-    summary_match = re.search(r'(?:OSSZEFOGLALO|summary)[:\s]*([^\n]+(?:\n(?![A-Z#*\-\d])[^\n]+)*)',
-                             response_text, re.IGNORECASE)
+    summary_match = re.search(
+        r"(?:OSSZEFOGLALO|summary)[:\s]*([^\n]+(?:\n(?![A-Z#*\-\d])[^\n]+)*)",
+        response_text,
+        re.IGNORECASE,
+    )
     if summary_match:
         result.summary = summary_match.group(1).strip()
 
     # Try to extract causes as bullet points
-    causes_section = re.search(r'(?:LEHETSEGES OKOK|probable.?causes?)[:\s]*((?:\n[-*\d].*)+)',
-                               response_text, re.IGNORECASE)
+    causes_section = re.search(
+        r"(?:LEHETSEGES OKOK|probable.?causes?)[:\s]*((?:\n[-*\d].*)+)",
+        response_text,
+        re.IGNORECASE,
+    )
     if causes_section:
-        causes = re.findall(r'[-*\d]+\.?\s*(.+)', causes_section.group(1))
+        causes = re.findall(r"[-*\d]+\.?\s*(.+)", causes_section.group(1))
         result.probable_causes = [
             {
                 "title": c[:50] + "..." if len(c) > 50 else c,
@@ -595,10 +614,11 @@ def _fallback_parse(response_text: str, result: ParsedDiagnosisResponse) -> Pars
         ]
 
     # Try to extract safety warnings
-    safety_section = re.search(r'(?:BIZTONSAGI|safety)[:\s]*((?:\n[-*].*)+)',
-                               response_text, re.IGNORECASE)
+    safety_section = re.search(
+        r"(?:BIZTONSAGI|safety)[:\s]*((?:\n[-*].*)+)", response_text, re.IGNORECASE
+    )
     if safety_section:
-        warnings = re.findall(r'[-*]\s*(.+)', safety_section.group(1))
+        warnings = re.findall(r"[-*]\s*(.+)", safety_section.group(1))
         result.safety_warnings = [w.strip() for w in warnings if w.strip()]
 
     result.confidence_score = 0.3  # Lower confidence for fallback parsing
@@ -668,19 +688,25 @@ def generate_rule_based_diagnosis(
         possible_causes = dtc.get("possible_causes", [])
 
         # Create cause entry
-        cause_title = f"{code}: {description[:50]}..." if len(description) > 50 else f"{code}: {description}"
+        cause_title = (
+            f"{code}: {description[:50]}..." if len(description) > 50 else f"{code}: {description}"
+        )
 
         cause = {
             "title": cause_title,
             "description": description,
-            "confidence": {"critical": 0.9, "high": 0.75, "medium": 0.6, "low": 0.4}.get(severity, 0.5),
+            "confidence": {"critical": 0.9, "high": 0.75, "medium": 0.6, "low": 0.4}.get(
+                severity, 0.5
+            ),
             "related_dtc_codes": [code],
             "components": [],
         }
 
         # Add specific causes if available
         if possible_causes:
-            cause["description"] += "\n\nLehetseges okok:\n" + "\n".join(f"- {c}" for c in possible_causes[:3])
+            cause["description"] += "\n\nLehetseges okok:\n" + "\n".join(
+                f"- {c}" for c in possible_causes[:3]
+            )
 
         result.probable_causes.append(cause)
 
@@ -718,17 +744,13 @@ def generate_rule_based_diagnosis(
             consequence = recall.get("consequence", "")
 
             if consequence:
-                result.safety_warnings.append(
-                    f"VISSZAHIVAS ({component}): {consequence[:100]}..."
-                )
+                result.safety_warnings.append(f"VISSZAHIVAS ({component}): {consequence[:100]}...")
 
     # Add critical severity warnings
     for dtc in dtc_codes:
         severity = dtc.get("severity", "medium")
         if severity in ("critical", "high"):
-            result.safety_warnings.append(
-                SEVERITY_DESCRIPTIONS.get(severity, "")
-            )
+            result.safety_warnings.append(SEVERITY_DESCRIPTIONS.get(severity, ""))
 
     # Remove duplicates from warnings
     result.safety_warnings = list(set(result.safety_warnings))

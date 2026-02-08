@@ -18,19 +18,19 @@ import asyncio
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.diagnosis import (
     DiagnosisHistoryItem,
     DiagnosisRequest,
     DiagnosisResponse,
     ProbableCause,
+    RelatedComplaint,
+    RelatedRecall,
     RepairRecommendation,
     Source,
 )
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
-from app.db.postgres.models import DTCCode
 from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
 from app.services.embedding_service import preprocess_hungarian
 from app.services.nhtsa_service import (
@@ -41,6 +41,11 @@ from app.services.nhtsa_service import (
     VINDecodeResult,
     get_nhtsa_service,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.db.postgres.models import DTCCode
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -168,7 +173,9 @@ class DiagnosisService:
             vin_data: VINDecodeResult | None = None
             if request.vin:
                 vin_data = await self._decode_vin(request.vin)
-                logger.info(f"VIN decoded: {sanitize_log(vin_data.make)} {sanitize_log(vin_data.model)}")
+                logger.info(
+                    f"VIN decoded: {sanitize_log(vin_data.make)} {sanitize_log(vin_data.model)}"
+                )
 
             # Step 2: Validate and enrich DTC codes
             dtc_details = await self._validate_and_enrich_dtc_codes(request.dtc_codes)
@@ -184,9 +191,7 @@ class DiagnosisService:
                 model=request.vehicle_model,
                 year=request.vehicle_year,
             )
-            logger.info(
-                f"Found {len(recalls)} recalls and {len(complaints)} complaints"
-            )
+            logger.info(f"Found {len(recalls)} recalls and {len(complaints)} complaints")
 
             # Step 5: Run RAG pipeline
             rag_result = await self._run_rag_pipeline(
@@ -276,9 +281,7 @@ class DiagnosisService:
     # DTC Code Validation
     # =========================================================================
 
-    async def _validate_and_enrich_dtc_codes(
-        self, dtc_codes: list[str]
-    ) -> list[DTCCode]:
+    async def _validate_and_enrich_dtc_codes(self, dtc_codes: list[str]) -> list[DTCCode]:
         """
         Validate DTC codes and fetch their details from database.
 
@@ -291,7 +294,12 @@ class DiagnosisService:
         Note:
             Unknown DTC codes are logged but not rejected,
             allowing diagnosis to proceed with partial information.
+            Empty DTC lists are also handled gracefully.
         """
+        if not dtc_codes:
+            logger.warning("No DTC codes provided for diagnosis - proceeding with symptoms only")
+            return []
+
         validated_codes: list[DTCCode] = []
         unknown_codes: list[str] = []
 
@@ -473,26 +481,34 @@ class DiagnosisService:
             }
 
             # Convert recalls and complaints to dicts
-            recalls_dicts = [
-                {
-                    "campaign_number": r.campaign_number,
-                    "component": r.component,
-                    "summary": r.summary,
-                    "consequence": r.consequence,
-                    "remedy": r.remedy,
-                }
-                for r in recalls
-            ] if recalls else None
+            recalls_dicts = (
+                [
+                    {
+                        "campaign_number": r.campaign_number,
+                        "component": r.component,
+                        "summary": r.summary,
+                        "consequence": r.consequence,
+                        "remedy": r.remedy,
+                    }
+                    for r in recalls
+                ]
+                if recalls
+                else None
+            )
 
-            complaints_dicts = [
-                {
-                    "components": c.components,
-                    "summary": c.summary,
-                    "crash": c.crash,
-                    "fire": c.fire,
-                }
-                for c in complaints
-            ] if complaints else None
+            complaints_dicts = (
+                [
+                    {
+                        "components": c.components,
+                        "summary": c.summary,
+                        "crash": c.crash,
+                        "fire": c.fire,
+                    }
+                    for c in complaints
+                ]
+                if complaints
+                else None
+            )
 
             # Execute RAG diagnosis with correct parameters
             result = await diagnose(
@@ -508,43 +524,48 @@ class DiagnosisService:
             return {
                 "probable_causes": [
                     {
-                        "title": cause.title,
-                        "description": cause.description,
-                        "confidence": cause.confidence,
-                        "related_dtc_codes": cause.related_dtc_codes,
-                        "components": cause.components,
+                        "title": cause.get("title", ""),
+                        "description": cause.get("description", ""),
+                        "confidence": cause.get("confidence", 0.5),
+                        "related_dtc_codes": cause.get("related_dtc_codes", []),
+                        "components": cause.get("components", []),
                     }
                     for cause in result.probable_causes
                 ],
                 "recommended_repairs": [
                     {
-                        "title": repair.title,
+                        "title": repair.name,
                         "description": repair.description,
                         "estimated_cost_min": repair.estimated_cost_min,
                         "estimated_cost_max": repair.estimated_cost_max,
-                        "estimated_cost_currency": repair.estimated_cost_currency,
+                        "estimated_cost_currency": "HUF",
                         "difficulty": repair.difficulty,
-                        "parts_needed": repair.parts_needed,
+                        "parts_needed": [p.get("name", "") for p in repair.parts]
+                        if repair.parts
+                        else [],
                         "estimated_time_minutes": repair.estimated_time_minutes,
                     }
-                    for repair in result.recommended_repairs
+                    for repair in result.repair_recommendations
                 ],
                 "confidence_score": result.confidence_score,
                 "sources": [
                     {
-                        "type": source.type,
-                        "title": source.title,
-                        "url": source.url,
-                        "relevance_score": source.relevance_score,
+                        "type": source.get("type", "database"),
+                        "title": source.get("title", ""),
+                        "url": source.get("url"),
+                        "relevance_score": source.get("relevance_score", 0.5),
                     }
                     for source in result.sources
                 ],
+                "safety_warnings": result.safety_warnings,
+                "diagnostic_steps": result.diagnostic_steps,
+                "processing_time_ms": result.processing_time_ms,
+                "model_used": result.model_used,
+                "used_fallback": result.used_fallback,
             }
 
         except ImportError:
-            logger.warning(
-                "RAG service not available, using fallback diagnosis"
-            )
+            logger.warning("RAG service not available, using fallback diagnosis")
             return self._fallback_diagnosis(
                 dtc_details=dtc_details,
                 recalls=recalls,
@@ -657,54 +678,68 @@ class DiagnosisService:
         # Generate causes from DTC codes
         for dtc in dtc_details:
             for idx, cause in enumerate(dtc.possible_causes[:3]):
-                probable_causes.append({
-                    "title": f"{dtc.code} - {cause[:50]}..." if len(cause) > 50 else f"{dtc.code} - {cause}",
-                    "description": cause,
-                    "confidence": max(0.3, 0.7 - (idx * 0.1)),
-                    "related_dtc_codes": [dtc.code],
-                    "components": [],
-                })
+                probable_causes.append(
+                    {
+                        "title": f"{dtc.code} - {cause[:50]}..."
+                        if len(cause) > 50
+                        else f"{dtc.code} - {cause}",
+                        "description": cause,
+                        "confidence": max(0.3, 0.7 - (idx * 0.1)),
+                        "related_dtc_codes": [dtc.code],
+                        "components": [],
+                    }
+                )
 
             # Add diagnostic steps as repair recommendations
             for step in dtc.diagnostic_steps[:2]:
-                recommended_repairs.append({
-                    "title": f"Diagnozis: {dtc.code}",
-                    "description": step,
-                    "difficulty": "intermediate",
-                    "parts_needed": [],
-                })
+                recommended_repairs.append(
+                    {
+                        "title": f"Diagnozis: {dtc.code}",
+                        "description": step,
+                        "difficulty": "intermediate",
+                        "parts_needed": [],
+                    }
+                )
 
-            sources.append({
-                "type": "database",
-                "title": f"DTC Database - {dtc.code}",
-                "url": None,
-                "relevance_score": 0.8,
-            })
+            sources.append(
+                {
+                    "type": "database",
+                    "title": f"DTC Database - {dtc.code}",
+                    "url": None,
+                    "relevance_score": 0.8,
+                }
+            )
 
         # Add recall information
         for recall in recalls[:3]:
-            probable_causes.append({
-                "title": f"NHTSA Recall: {recall.component}",
-                "description": recall.summary,
-                "confidence": 0.9,
-                "related_dtc_codes": [],
-                "components": [recall.component],
-            })
+            probable_causes.append(
+                {
+                    "title": f"NHTSA Recall: {recall.component}",
+                    "description": recall.summary,
+                    "confidence": 0.9,
+                    "related_dtc_codes": [],
+                    "components": [recall.component],
+                }
+            )
 
             if recall.remedy:
-                recommended_repairs.append({
-                    "title": f"Recall javitas: {recall.component}",
-                    "description": recall.remedy,
-                    "difficulty": "professional",
-                    "parts_needed": [],
-                })
+                recommended_repairs.append(
+                    {
+                        "title": f"Recall javitas: {recall.component}",
+                        "description": recall.remedy,
+                        "difficulty": "professional",
+                        "parts_needed": [],
+                    }
+                )
 
-            sources.append({
-                "type": "recall",
-                "title": f"NHTSA Recall {recall.campaign_number}",
-                "url": None,
-                "relevance_score": 0.95,
-            })
+            sources.append(
+                {
+                    "type": "recall",
+                    "title": f"NHTSA Recall {recall.campaign_number}",
+                    "url": None,
+                    "relevance_score": 0.95,
+                }
+            )
 
         # Calculate confidence based on available data
         confidence = 0.3
@@ -787,6 +822,55 @@ class DiagnosisService:
             for source in rag_result.get("sources", [])
         ]
 
+        # Build related recalls
+        related_recalls = [
+            RelatedRecall(
+                campaign_number=recall.campaign_number,
+                component=recall.component,
+                summary=recall.summary or "",
+                consequence=recall.consequence,
+                remedy=recall.remedy,
+                recall_date=None,  # Not available from NHTSA service
+            )
+            for recall in recalls[:5]  # Limit to 5 most relevant
+        ]
+
+        # Build similar complaints
+        similar_complaints = [
+            RelatedComplaint(
+                odi_number=None,  # Not available in current model
+                components=complaint.components or "",
+                summary=complaint.summary or "",
+                crash=complaint.crash,
+                fire=complaint.fire,
+                similarity_score=0.7,  # Default similarity score
+            )
+            for complaint in complaints[:5]  # Limit to 5 most relevant
+        ]
+
+        # Determine urgency level based on severity and recalls
+        urgency_level = self._determine_urgency(dtc_details, recalls, complaints)
+
+        # Build safety warnings
+        safety_warnings = rag_result.get("safety_warnings", [])
+
+        # Add recall-based warnings
+        for recall in recalls[:3]:
+            if recall.consequence:
+                safety_warnings.append(
+                    f"VISSZAHIVAS ({recall.component}): {recall.consequence[:150]}..."
+                )
+
+        # Add critical DTC warnings
+        for dtc in dtc_details:
+            if dtc.severity == "critical":
+                safety_warnings.append(
+                    f"KRITIKUS: {dtc.code} - {dtc.description_hu or dtc.description_en}"
+                )
+
+        # Remove duplicates
+        safety_warnings = list(dict.fromkeys(safety_warnings))
+
         return DiagnosisResponse(
             id=diagnosis_id,
             vehicle_make=request.vehicle_make,
@@ -798,8 +882,59 @@ class DiagnosisService:
             recommended_repairs=recommended_repairs,
             confidence_score=rag_result.get("confidence_score", 0.5),
             sources=sources,
+            similar_complaints=similar_complaints,
+            related_recalls=related_recalls,
+            urgency_level=urgency_level,
+            safety_warnings=safety_warnings,
+            diagnostic_steps=rag_result.get("diagnostic_steps", []),
+            processing_time_ms=rag_result.get("processing_time_ms"),
+            model_used=rag_result.get("model_used"),
+            used_fallback=rag_result.get("used_fallback", False),
             created_at=datetime.utcnow(),
         )
+
+    def _determine_urgency(
+        self,
+        dtc_details: list[DTCCode],
+        recalls: list[Recall],
+        complaints: list[Complaint],
+    ) -> str:
+        """
+        Determine urgency level based on DTC severity, recalls, and complaints.
+
+        Args:
+            dtc_details: List of DTC codes with details.
+            recalls: NHTSA recalls.
+            complaints: NHTSA complaints.
+
+        Returns:
+            Urgency level string: low, medium, high, or critical.
+        """
+        urgency = "low"
+
+        # Check for critical DTC codes
+        if any(dtc.severity == "critical" for dtc in dtc_details):
+            return "critical"
+
+        # Check for recalls with safety implications
+        if recalls:
+            for recall in recalls:
+                if recall.consequence and any(
+                    keyword in recall.consequence.lower()
+                    for keyword in ["crash", "fire", "injury", "death", "baleset", "tuz"]
+                ):
+                    return "critical"
+            urgency = "high"
+        # Check for complaints with crash/fire
+        elif any(complaint.crash or complaint.fire for complaint in complaints) or any(
+            dtc.severity == "high" for dtc in dtc_details
+        ):
+            urgency = "high"
+        # Check for medium severity DTCs
+        elif any(dtc.severity == "medium" for dtc in dtc_details):
+            urgency = "medium"
+
+        return urgency
 
     # =========================================================================
     # Database Operations
@@ -822,6 +957,14 @@ class DiagnosisService:
             user_id: Optional user ID.
         """
         try:
+            # Check if session is still valid
+            if not self.db.is_active:
+                logger.warning(
+                    "Database session expired, skipping diagnosis session save. "
+                    "Session will be recreated by dependency injection on next request."
+                )
+                return
+
             session_data = {
                 "id": diagnosis_id,
                 "user_id": user_id,
@@ -871,18 +1014,14 @@ class DiagnosisService:
                 dtc_codes=session.dtc_codes,
                 symptoms=session.symptoms_text,
                 probable_causes=[
-                    ProbableCause(**cause)
-                    for cause in result.get("probable_causes", [])
+                    ProbableCause(**cause) for cause in result.get("probable_causes", [])
                 ],
                 recommended_repairs=[
                     RepairRecommendation(**repair)
                     for repair in result.get("recommended_repairs", [])
                 ],
                 confidence_score=session.confidence_score,
-                sources=[
-                    Source(**source)
-                    for source in result.get("sources", [])
-                ],
+                sources=[Source(**source) for source in result.get("sources", [])],
                 created_at=session.created_at,
             )
 

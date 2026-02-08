@@ -52,11 +52,13 @@ APP_INFO = Info(
     "autocognitix_app",
     "AutoCognitix application information",
 )
-APP_INFO.info({
-    "version": "0.1.0",
-    "environment": settings.ENVIRONMENT,
-    "service": settings.PROJECT_NAME,
-})
+APP_INFO.info(
+    {
+        "version": "0.1.0",
+        "environment": settings.ENVIRONMENT,
+        "service": settings.PROJECT_NAME,
+    }
+)
 
 # =============================================================================
 # HTTP Request Metrics
@@ -337,6 +339,7 @@ USERS_TOTAL = Gauge(
 # =============================================================================
 # Metric Collection Functions
 # =============================================================================
+
 
 def update_system_metrics() -> None:
     """Update system resource metrics."""
@@ -697,6 +700,7 @@ def set_db_pool_metrics(database: str, active: int, idle: int, waiting: int = 0)
 # Metrics Middleware
 # =============================================================================
 
+
 class MetricsMiddleware(BaseHTTPMiddleware):
     """
     Middleware for automatic request metrics collection.
@@ -805,6 +809,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         """Check if value looks like a UUID."""
         try:
             import uuid as uuid_module
+
             uuid_module.UUID(value)
             return True
         except (ValueError, AttributeError):
@@ -824,6 +829,7 @@ def get_metrics_middleware() -> Callable:
 # =============================================================================
 # Metrics Export
 # =============================================================================
+
 
 async def generate_metrics_response() -> Response:
     """
@@ -854,8 +860,12 @@ def get_metrics_summary() -> dict[str, Any]:
         "service": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
         "system": {
-            "cpu_percent": SYSTEM_CPU_PERCENT._value._value if hasattr(SYSTEM_CPU_PERCENT._value, '_value') else 0,
-            "memory_percent": SYSTEM_MEMORY_PERCENT._value._value if hasattr(SYSTEM_MEMORY_PERCENT._value, '_value') else 0,
+            "cpu_percent": SYSTEM_CPU_PERCENT._value._value
+            if hasattr(SYSTEM_CPU_PERCENT._value, "_value")
+            else 0,
+            "memory_percent": SYSTEM_MEMORY_PERCENT._value._value
+            if hasattr(SYSTEM_MEMORY_PERCENT._value, "_value")
+            else 0,
         },
         "endpoints": {
             "metrics": "/metrics",

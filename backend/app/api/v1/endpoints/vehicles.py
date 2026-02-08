@@ -1,17 +1,31 @@
 """
-Vehicle endpoints - vehicle information and VIN decoding.
+Vehicle endpoints - vehicle information, VIN decoding, recalls, and complaints.
+
+Provides endpoints to:
+- List vehicle makes from Neo4j database
+- List vehicle models for a make
+- Get available years for a make/model
+- Decode VIN using NHTSA API
+- Get recalls and complaints from NHTSA
 """
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from app.api.v1.schemas.vehicle import (
+    PaginatedResponse,
+    VehicleCommonIssue,
+    VehicleCommonIssuesResponse,
     VehicleMake,
     VehicleModel,
+    VehicleYearsResponse,
     VINDecodeRequest,
     VINDecodeResponse,
 )
+from app.core.logging import get_logger
 from app.services.nhtsa_service import (
     Complaint,
     NHTSAError,
@@ -19,8 +33,10 @@ from app.services.nhtsa_service import (
     Recall,
     get_nhtsa_service,
 )
+from app.services.vehicle_service import VehicleService, get_vehicle_service
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 # =============================================================================
@@ -44,10 +60,10 @@ VIN_DECODE_RESPONSES = {
                     "body_type": "Hatchback",
                     "fuel_type": "Gasoline",
                     "region": "Europe",
-                    "country_of_origin": "Germany"
+                    "country_of_origin": "Germany",
                 }
             }
-        }
+        },
     },
     400: {
         "description": "Invalid VIN",
@@ -56,15 +72,17 @@ VIN_DECODE_RESPONSES = {
                 "examples": {
                     "invalid_length": {
                         "summary": "VIN wrong length",
-                        "value": {"detail": "VIN must be exactly 17 characters"}
+                        "value": {"detail": "VIN must be exactly 17 characters"},
                     },
                     "invalid_chars": {
                         "summary": "Invalid characters",
-                        "value": {"detail": "VIN contains invalid characters (I, O, Q are not allowed)"}
-                    }
+                        "value": {
+                            "detail": "VIN contains invalid characters (I, O, Q are not allowed)"
+                        },
+                    },
                 }
             }
-        }
+        },
     },
     502: {
         "description": "NHTSA API error",
@@ -72,22 +90,33 @@ VIN_DECODE_RESPONSES = {
             "application/json": {
                 "example": {"detail": "NHTSA API error: Service temporarily unavailable"}
             }
-        }
-    }
+        },
+    },
 }
 
 MAKES_RESPONSES = {
     200: {
-        "description": "List of vehicle makes",
+        "description": "List of vehicle makes with pagination",
         "content": {
             "application/json": {
-                "example": [
-                    {"id": "volkswagen", "name": "Volkswagen", "country": "Germany", "logo_url": None},
-                    {"id": "audi", "name": "Audi", "country": "Germany", "logo_url": None},
-                    {"id": "bmw", "name": "BMW", "country": "Germany", "logo_url": None}
-                ]
+                "example": {
+                    "items": [
+                        {"id": "audi", "name": "Audi", "country": "Germany", "logo_url": None},
+                        {"id": "bmw", "name": "BMW", "country": "Germany", "logo_url": None},
+                        {
+                            "id": "volkswagen",
+                            "name": "Volkswagen",
+                            "country": "Germany",
+                            "logo_url": None,
+                        },
+                    ],
+                    "total": 150,
+                    "limit": 20,
+                    "offset": 0,
+                    "has_more": True,
+                }
             }
-        }
+        },
     }
 }
 
@@ -96,27 +125,39 @@ MODELS_RESPONSES = {
         "description": "List of vehicle models for the specified make",
         "content": {
             "application/json": {
-                "example": [
-                    {
-                        "id": "golf",
-                        "name": "Golf",
-                        "make_id": "volkswagen",
-                        "year_start": 1974,
-                        "year_end": None,
-                        "body_types": []
-                    },
-                    {
-                        "id": "passat",
-                        "name": "Passat",
-                        "make_id": "volkswagen",
-                        "year_start": 1973,
-                        "year_end": None,
-                        "body_types": []
-                    }
-                ]
+                "example": {
+                    "items": [
+                        {
+                            "id": "golf",
+                            "name": "Golf",
+                            "make_id": "volkswagen",
+                            "year_start": 1974,
+                            "year_end": None,
+                            "body_types": ["Hatchback", "Wagon"],
+                        },
+                        {
+                            "id": "passat",
+                            "name": "Passat",
+                            "make_id": "volkswagen",
+                            "year_start": 1973,
+                            "year_end": None,
+                            "body_types": ["Sedan", "Wagon"],
+                        },
+                    ],
+                    "total": 45,
+                    "limit": 20,
+                    "offset": 0,
+                    "has_more": True,
+                }
             }
-        }
-    }
+        },
+    },
+    404: {
+        "description": "Make not found",
+        "content": {
+            "application/json": {"example": {"detail": "No models found for make: UnknownMake"}}
+        },
+    },
 }
 
 YEARS_RESPONSES = {
@@ -124,10 +165,22 @@ YEARS_RESPONSES = {
         "description": "Available vehicle years",
         "content": {
             "application/json": {
-                "example": {"years": [2027, 2026, 2025, 2024, 2023, 2022, 2021, 2020]}
+                "example": {
+                    "years": [2026, 2025, 2024, 2023, 2022, 2021, 2020],
+                    "make": "Volkswagen",
+                    "model": "Golf",
+                }
             }
-        }
-    }
+        },
+    },
+    404: {
+        "description": "Vehicle not found",
+        "content": {
+            "application/json": {
+                "example": {"detail": "No vehicle found for Volkswagen UnknownModel"}
+            }
+        },
+    },
 }
 
 RECALLS_RESPONSES = {
@@ -139,25 +192,27 @@ RECALLS_RESPONSES = {
                     {
                         "campaign_number": "24V123000",
                         "manufacturer": "Volkswagen",
-                        "subject": "Fuel Pump May Fail",
+                        "make": "Volkswagen",
+                        "model": "Golf",
+                        "model_year": 2018,
+                        "recall_date": "2024-01-15",
+                        "component": "FUEL SYSTEM",
                         "summary": "The fuel pump may fail causing the engine to stall without warning.",
                         "consequence": "An engine stall while driving increases the risk of a crash.",
                         "remedy": "Dealers will replace the fuel pump free of charge.",
-                        "report_received_date": "2024-01-15",
-                        "component": "FUEL SYSTEM"
+                        "notes": None,
+                        "nhtsa_id": "24V123",
                     }
                 ]
             }
-        }
+        },
     },
     502: {
         "description": "NHTSA API error",
         "content": {
-            "application/json": {
-                "example": {"detail": "NHTSA API error: Failed to fetch recalls"}
-            }
-        }
-    }
+            "application/json": {"example": {"detail": "NHTSA API error: Failed to fetch recalls"}}
+        },
+    },
 }
 
 COMPLAINTS_RESPONSES = {
@@ -167,20 +222,23 @@ COMPLAINTS_RESPONSES = {
             "application/json": {
                 "example": [
                     {
-                        "odi_number": "12345678",
+                        "odinumber": "12345678",
                         "manufacturer": "Volkswagen",
+                        "make": "Volkswagen",
+                        "model": "Golf",
+                        "model_year": 2018,
                         "crash": False,
                         "fire": False,
-                        "number_of_injuries": 0,
-                        "number_of_deaths": 0,
+                        "injuries": 0,
+                        "deaths": 0,
+                        "complaint_date": "2023-06-20",
                         "date_of_incident": "2023-06-15",
-                        "date_complaint_filed": "2023-06-20",
+                        "components": "ENGINE",
                         "summary": "The vehicle experienced sudden power loss while driving on the highway.",
-                        "components": "ENGINE"
                     }
                 ]
             }
-        }
+        },
     },
     502: {
         "description": "NHTSA API error",
@@ -188,24 +246,264 @@ COMPLAINTS_RESPONSES = {
             "application/json": {
                 "example": {"detail": "NHTSA API error: Failed to fetch complaints"}
             }
-        }
+        },
+    },
+}
+
+COMMON_ISSUES_RESPONSES = {
+    200: {
+        "description": "Common issues for the specified vehicle",
+        "content": {
+            "application/json": {
+                "example": {
+                    "make": "Volkswagen",
+                    "model": "Golf",
+                    "year": 2018,
+                    "issues": [
+                        {
+                            "code": "P0420",
+                            "description_en": "Catalyst System Efficiency Below Threshold",
+                            "description_hu": "Katalizator hatekonysaga az also hatar alatt",
+                            "severity": "medium",
+                            "frequency": "common",
+                            "occurrence_count": 150,
+                        }
+                    ],
+                }
+            }
+        },
     }
 }
 
 
 # =============================================================================
-# Response Models for new endpoints
+# Vehicle Makes
 # =============================================================================
 
 
-class RecallSummary(Recall):
-    """Recall response model (re-exports from nhtsa_service)."""
-    pass
+@router.get(
+    "/makes",
+    response_model=PaginatedResponse[VehicleMake],
+    responses=MAKES_RESPONSES,
+    summary="Get vehicle makes",
+    description="""
+**Get list of vehicle manufacturers** (makes) from the database.
+
+Queries Neo4j for all unique makes across 8,145+ vehicles.
+
+**Features:**
+- Pagination support with limit/offset
+- Search filter for finding specific makes
+- Country of origin included when available
+
+**Examples:**
+- `/api/v1/vehicles/makes` - All makes (paginated)
+- `/api/v1/vehicles/makes?search=volk` - Makes containing "volk"
+- `/api/v1/vehicles/makes?limit=50&offset=0` - First 50 makes
+    """,
+)
+async def get_vehicle_makes(
+    search: Optional[str] = Query(
+        None, min_length=1, description="Search term for filtering makes"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    vehicle_service: VehicleService = Depends(get_vehicle_service),
+) -> dict[str, Any]:
+    """
+    Get list of vehicle makes (manufacturers).
+
+    Args:
+        search: Optional search term to filter makes
+        limit: Maximum number of results
+        offset: Number of results to skip
+        vehicle_service: Vehicle service instance
+
+    Returns:
+        Paginated list of vehicle makes
+    """
+    try:
+        makes_data, total = await vehicle_service.get_all_makes(
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+
+        items = [
+            VehicleMake(
+                id=make["id"],
+                name=make["name"],
+                country=make.get("country"),
+                logo_url=None,
+            )
+            for make in makes_data
+        ]
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching makes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vehicle makes: {e!s}",
+        )
 
 
-class ComplaintSummary(Complaint):
-    """Complaint response model (re-exports from nhtsa_service)."""
-    pass
+# =============================================================================
+# Vehicle Models
+# =============================================================================
+
+
+@router.get(
+    "/models",
+    response_model=PaginatedResponse[VehicleModel],
+    responses=MODELS_RESPONSES,
+    summary="Get vehicle models",
+    description="""
+**Get list of vehicle models** for a specific manufacturer.
+
+Queries Neo4j for all models matching the specified make.
+
+**Features:**
+- Pagination support with limit/offset
+- Optional search filter within models
+- Year range and body types included
+
+**Examples:**
+- `/api/v1/vehicles/models?make=Toyota` - All Toyota models
+- `/api/v1/vehicles/models?make=Volkswagen&search=golf` - VW Golf models
+    """,
+)
+async def get_vehicle_models(
+    make: str = Query(..., min_length=1, description="Vehicle make (manufacturer)"),
+    search: Optional[str] = Query(
+        None, min_length=1, description="Search term for filtering models"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    vehicle_service: VehicleService = Depends(get_vehicle_service),
+) -> dict[str, Any]:
+    """
+    Get list of models for a specific make.
+
+    Args:
+        make: Vehicle make (manufacturer)
+        search: Optional search term to filter models
+        limit: Maximum number of results
+        offset: Number of results to skip
+        vehicle_service: Vehicle service instance
+
+    Returns:
+        Paginated list of vehicle models
+    """
+    try:
+        models_data, total = await vehicle_service.get_models_for_make(
+            make=make,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+
+        if not models_data and offset == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No models found for make: {make}",
+            )
+
+        items = [
+            VehicleModel(
+                id=model["id"],
+                name=model["name"],
+                make_id=model["make_id"],
+                year_start=model.get("year_start"),
+                year_end=model.get("year_end"),
+                body_types=model.get("body_types", []),
+            )
+            for model in models_data
+        ]
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching models for {make}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vehicle models: {e!s}",
+        )
+
+
+# =============================================================================
+# Vehicle Years
+# =============================================================================
+
+
+@router.get(
+    "/years",
+    response_model=VehicleYearsResponse,
+    responses=YEARS_RESPONSES,
+    summary="Get available years",
+    description="""
+**Get list of available vehicle years** for a specific make and model.
+
+Returns all years when the vehicle was produced.
+
+**Example:**
+`/api/v1/vehicles/years?make=Toyota&model=Camry`
+    """,
+)
+async def get_available_years(
+    make: str = Query(..., min_length=1, description="Vehicle make"),
+    model: str = Query(..., min_length=1, description="Vehicle model"),
+    vehicle_service: VehicleService = Depends(get_vehicle_service),
+) -> VehicleYearsResponse:
+    """
+    Get list of available vehicle years for a specific make and model.
+
+    Args:
+        make: Vehicle make
+        model: Vehicle model
+        vehicle_service: Vehicle service instance
+
+    Returns:
+        List of years in descending order
+    """
+    try:
+        years = await vehicle_service.get_years_for_vehicle(make=make, model=model)
+
+        if not years:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No vehicle found for {make} {model}",
+            )
+
+        return VehicleYearsResponse(
+            years=years,
+            make=make,
+            model=model,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching years for {make} {model}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch vehicle years: {e!s}",
+        )
 
 
 # =============================================================================
@@ -236,7 +534,7 @@ Uses the NHTSA vPIC API for decoding.
 async def decode_vin(
     request: VINDecodeRequest,
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
-):
+) -> VINDecodeResponse:
     """
     Decode a VIN (Vehicle Identification Number) to get vehicle details.
 
@@ -244,6 +542,7 @@ async def decode_vin(
 
     Args:
         request: VIN decode request
+        nhtsa_service: NHTSA service instance
 
     Returns:
         Decoded vehicle information
@@ -326,163 +625,11 @@ async def decode_vin(
             detail=f"NHTSA API error: {e.message}",
         )
     except Exception as e:
+        logger.error(f"Error decoding VIN {vin}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to decode VIN: {e!s}",
         )
-
-
-# =============================================================================
-# Vehicle Makes
-# =============================================================================
-
-
-@router.get(
-    "/makes",
-    response_model=list[VehicleMake],
-    responses=MAKES_RESPONSES,
-    summary="Get vehicle makes",
-    description="""
-**Get list of vehicle manufacturers** (makes).
-
-Optionally filter by search term to find specific makes.
-
-**Examples:**
-- `/api/v1/vehicles/makes` - All makes
-- `/api/v1/vehicles/makes?search=volk` - Makes containing "volk"
-    """,
-)
-async def get_vehicle_makes(
-    search: str | None = Query(None, min_length=1, description="Search term for filtering makes"),
-):
-    """
-    Get list of vehicle makes (manufacturers).
-
-    Args:
-        search: Optional search term to filter makes
-
-    Returns:
-        List of vehicle makes
-    """
-    # Static list as fallback - can be extended to use NHTSA API later
-    makes = [
-        VehicleMake(id="audi", name="Audi", country="Germany"),
-        VehicleMake(id="bmw", name="BMW", country="Germany"),
-        VehicleMake(id="citroen", name="Citroën", country="France"),
-        VehicleMake(id="fiat", name="Fiat", country="Italy"),
-        VehicleMake(id="ford", name="Ford", country="USA"),
-        VehicleMake(id="honda", name="Honda", country="Japan"),
-        VehicleMake(id="hyundai", name="Hyundai", country="South Korea"),
-        VehicleMake(id="kia", name="Kia", country="South Korea"),
-        VehicleMake(id="mazda", name="Mazda", country="Japan"),
-        VehicleMake(id="mercedes", name="Mercedes-Benz", country="Germany"),
-        VehicleMake(id="nissan", name="Nissan", country="Japan"),
-        VehicleMake(id="opel", name="Opel", country="Germany"),
-        VehicleMake(id="peugeot", name="Peugeot", country="France"),
-        VehicleMake(id="renault", name="Renault", country="France"),
-        VehicleMake(id="seat", name="SEAT", country="Spain"),
-        VehicleMake(id="skoda", name="Škoda", country="Czech Republic"),
-        VehicleMake(id="suzuki", name="Suzuki", country="Japan"),
-        VehicleMake(id="toyota", name="Toyota", country="Japan"),
-        VehicleMake(id="volkswagen", name="Volkswagen", country="Germany"),
-        VehicleMake(id="volvo", name="Volvo", country="Sweden"),
-    ]
-
-    if search:
-        search_lower = search.lower()
-        makes = [m for m in makes if search_lower in m.name.lower()]
-
-    return makes
-
-
-# =============================================================================
-# Vehicle Models
-# =============================================================================
-
-
-@router.get(
-    "/models/{make_id}",
-    response_model=list[VehicleModel],
-    responses=MODELS_RESPONSES,
-    summary="Get vehicle models",
-    description="""
-**Get list of vehicle models** for a specific manufacturer.
-
-Optionally filter by year to get models available for that year.
-
-**Examples:**
-- `/api/v1/vehicles/models/volkswagen` - All VW models
-- `/api/v1/vehicles/models/volkswagen?year=2020` - VW models from 2020
-    """,
-)
-async def get_vehicle_models(
-    make_id: str,
-    year: int | None = Query(None, ge=1900, le=2030, description="Filter by year"),
-):
-    """
-    Get list of models for a specific make.
-
-    Args:
-        make_id: ID of the vehicle make
-        year: Optional year to filter models
-
-    Returns:
-        List of vehicle models
-    """
-    # TODO: Implement with database or NHTSA API
-    # Placeholder data for Volkswagen models
-    if make_id == "volkswagen":
-        models = [
-            VehicleModel(id="golf", name="Golf", make_id="volkswagen", year_start=1974, year_end=None),
-            VehicleModel(id="passat", name="Passat", make_id="volkswagen", year_start=1973, year_end=None),
-            VehicleModel(id="polo", name="Polo", make_id="volkswagen", year_start=1975, year_end=None),
-            VehicleModel(id="tiguan", name="Tiguan", make_id="volkswagen", year_start=2007, year_end=None),
-            VehicleModel(id="touran", name="Touran", make_id="volkswagen", year_start=2003, year_end=None),
-            VehicleModel(id="arteon", name="Arteon", make_id="volkswagen", year_start=2017, year_end=None),
-            VehicleModel(id="id3", name="ID.3", make_id="volkswagen", year_start=2020, year_end=None),
-            VehicleModel(id="id4", name="ID.4", make_id="volkswagen", year_start=2021, year_end=None),
-        ]
-
-        if year:
-            models = [
-                m for m in models
-                if m.year_start <= year and (m.year_end is None or m.year_end >= year)
-            ]
-
-        return models
-
-    # Return empty list for unknown makes (will be populated from database)
-    return []
-
-
-# =============================================================================
-# Vehicle Years
-# =============================================================================
-
-
-@router.get(
-    "/years",
-    responses=YEARS_RESPONSES,
-    summary="Get available years",
-    description="""
-**Get list of available vehicle years** for selection.
-
-Returns years from 1980 to current year + 1 (for next model year vehicles).
-    """,
-)
-async def get_available_years():
-    """
-    Get list of available vehicle years.
-
-    Returns:
-        List of years from 1980 to current year + 1
-    """
-    from datetime import datetime
-
-    current_year = datetime.now().year
-    years = list(range(current_year + 1, 1979, -1))
-
-    return {"years": years}
 
 
 # =============================================================================
@@ -509,7 +656,7 @@ async def get_vehicle_recalls(
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
-):
+) -> list[Recall]:
     """
     Get recall information for a specific vehicle.
 
@@ -519,6 +666,7 @@ async def get_vehicle_recalls(
         make: Vehicle manufacturer name
         model: Vehicle model name
         year: Model year
+        nhtsa_service: NHTSA service instance
 
     Returns:
         List of recalls for the specified vehicle
@@ -536,6 +684,7 @@ async def get_vehicle_recalls(
             detail=f"NHTSA API error: {e.message}",
         )
     except Exception as e:
+        logger.error(f"Error fetching recalls for {make} {model} {year}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch recalls: {e!s}",
@@ -567,7 +716,7 @@ async def get_vehicle_complaints(
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
-):
+) -> list[Complaint]:
     """
     Get complaint information for a specific vehicle.
 
@@ -577,9 +726,10 @@ async def get_vehicle_complaints(
         make: Vehicle manufacturer name
         model: Vehicle model name
         year: Model year
+        nhtsa_service: NHTSA service instance
 
     Returns:
-        List of complaints for the specified vehicle (includes summary and count)
+        List of complaints for the specified vehicle
 
     Raises:
         HTTPException: If NHTSA API request fails
@@ -594,7 +744,80 @@ async def get_vehicle_complaints(
             detail=f"NHTSA API error: {e.message}",
         )
     except Exception as e:
+        logger.error(f"Error fetching complaints for {make} {model} {year}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch complaints: {e!s}",
+        )
+
+
+# =============================================================================
+# Common Issues (from Neo4j)
+# =============================================================================
+
+
+@router.get(
+    "/{make}/{model}/common-issues",
+    response_model=VehicleCommonIssuesResponse,
+    responses=COMMON_ISSUES_RESPONSES,
+    summary="Get common vehicle issues",
+    description="""
+**Get common DTC codes and issues** for a specific vehicle from the Neo4j knowledge graph.
+
+Returns issues that are commonly reported for this make/model combination,
+including frequency and occurrence data.
+
+**Example:**
+`/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018`
+    """,
+)
+async def get_vehicle_common_issues(
+    make: str = Path(..., description="Vehicle make (e.g., Volkswagen)"),
+    model: str = Path(..., description="Vehicle model (e.g., Golf)"),
+    year: Optional[int] = Query(None, ge=1900, le=2030, description="Optional year filter"),
+    vehicle_service: VehicleService = Depends(get_vehicle_service),
+) -> VehicleCommonIssuesResponse:
+    """
+    Get common issues for a specific vehicle from the knowledge graph.
+
+    Args:
+        make: Vehicle manufacturer name
+        model: Vehicle model name
+        year: Optional year filter
+        vehicle_service: Vehicle service instance
+
+    Returns:
+        Common issues response with list of DTC codes and their frequency
+    """
+    try:
+        issues_data = await vehicle_service.get_vehicle_common_issues(
+            make=make,
+            model=model,
+            year=year,
+        )
+
+        issues = [
+            VehicleCommonIssue(
+                code=issue["code"],
+                description_en=issue.get("description_en"),
+                description_hu=issue.get("description_hu"),
+                severity=issue.get("severity"),
+                frequency=issue.get("frequency"),
+                occurrence_count=issue.get("occurrence_count"),
+            )
+            for issue in issues_data
+        ]
+
+        return VehicleCommonIssuesResponse(
+            make=make,
+            model=model,
+            year=year,
+            issues=issues,
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching common issues for {make} {model}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch common issues: {e!s}",
         )

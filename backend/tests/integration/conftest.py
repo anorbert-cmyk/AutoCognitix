@@ -371,6 +371,74 @@ def mock_qdrant_client():
     return mock_client
 
 
+@pytest.fixture
+def mock_vehicle_service():
+    """Mock vehicle service for testing Neo4j vehicle queries."""
+    mock_service = AsyncMock()
+
+    # Mock get_all_makes
+    mock_service.get_all_makes.return_value = (
+        [
+            {"id": "volkswagen", "name": "Volkswagen", "country": "Germany"},
+            {"id": "bmw", "name": "BMW", "country": "Germany"},
+            {"id": "toyota", "name": "Toyota", "country": "Japan"},
+            {"id": "ford", "name": "Ford", "country": "USA"},
+        ],
+        4,  # total
+    )
+
+    # Mock get_models_for_make
+    mock_service.get_models_for_make.return_value = (
+        [
+            {
+                "id": "golf",
+                "name": "Golf",
+                "make_id": "volkswagen",
+                "year_start": 1974,
+                "year_end": None,
+                "body_types": ["Hatchback", "Wagon"],
+            },
+            {
+                "id": "passat",
+                "name": "Passat",
+                "make_id": "volkswagen",
+                "year_start": 1973,
+                "year_end": None,
+                "body_types": ["Sedan", "Wagon"],
+            },
+        ],
+        2,  # total
+    )
+
+    # Mock get_years_for_vehicle
+    mock_service.get_years_for_vehicle.return_value = [
+        2026,
+        2025,
+        2024,
+        2023,
+        2022,
+        2021,
+        2020,
+        2019,
+        2018,
+        2017,
+    ]
+
+    # Mock get_vehicle_common_issues
+    mock_service.get_vehicle_common_issues.return_value = [
+        {
+            "code": "P0420",
+            "description_en": "Catalyst System Efficiency Below Threshold",
+            "description_hu": "Katalizator hatekonysaga az also hatar alatt",
+            "severity": "medium",
+            "frequency": "common",
+            "occurrence_count": 150,
+        },
+    ]
+
+    return mock_service
+
+
 # =============================================================================
 # FastAPI Test Client Fixtures
 # =============================================================================
@@ -477,12 +545,12 @@ def valid_vins():
 def invalid_vins():
     """List of invalid VIN numbers for testing."""
     return [
-        "INVALID",           # Too short
-        "WVWZZZ3CZWE12345O", # Contains invalid character O
-        "WVWZZZ3CZWE12345I", # Contains invalid character I
-        "WVWZZZ3CZWE12345Q", # Contains invalid character Q
-        "WVWZZZ3CZWE",       # Too short
-        "WVWZZZ3CZWE123456789", # Too long
+        "INVALID",  # Too short
+        "WVWZZZ3CZWE12345O",  # Contains invalid character O
+        "WVWZZZ3CZWE12345I",  # Contains invalid character I
+        "WVWZZZ3CZWE12345Q",  # Contains invalid character Q
+        "WVWZZZ3CZWE",  # Too short
+        "WVWZZZ3CZWE123456789",  # Too long
     ]
 
 

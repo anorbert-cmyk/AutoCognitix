@@ -22,19 +22,18 @@ import traceback
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from functools import wraps
-from typing import Any, Optional, TypeVar
-
-# Python 3.11+ has datetime.UTC, for older versions use timezone.utc
-UTC = timezone.utc
+from typing import Any, Optional, TypeVar, TYPE_CHECKING
 
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from starlette.responses import Response
+    from starlette.requests import Request
 
 # Context variables for request correlation and distributed tracing
 request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)

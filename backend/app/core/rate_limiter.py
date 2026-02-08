@@ -10,15 +10,17 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,7 @@ class InMemoryRateLimiter:
     def _cleanup_old_requests(self, key: str, window_seconds: int) -> None:
         """Remove requests older than the window."""
         cutoff = time.time() - window_seconds
-        self._requests[key] = [
-            (ts, count)
-            for ts, count in self._requests[key]
-            if ts > cutoff
-        ]
+        self._requests[key] = [(ts, count) for ts, count in self._requests[key] if ts > cutoff]
 
     def is_allowed(
         self,
@@ -344,6 +342,7 @@ def rate_limit(
     and is primarily for documentation purposes. The actual limiting
     is done at the middleware level.
     """
+
     def decorator(func: Callable) -> Callable:
         # Store rate limit info on the function for documentation
         func._rate_limit = {

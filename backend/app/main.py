@@ -6,13 +6,14 @@ Main FastAPI Application Entry Point
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.csrf import CSRFMiddleware
 from app.core.error_handlers import setup_all_exception_handlers
 from app.core.etag import CacheControlMiddleware, ETagMiddleware
 from app.core.logging import RequestLoggingMiddleware, get_logger, setup_logging
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Initialize Redis cache
     try:
         from app.db.redis_cache import get_cache_service
+
         cache = await get_cache_service()
         stats = await cache.get_stats()
         logger.info(f"Redis cache initialized: {stats.get('status', 'unknown')}")
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Close Redis connection
     try:
         from app.db.redis_cache import _cache_service
+
         if _cache_service:
             await _cache_service.disconnect()
             logger.info("Redis cache connection closed")
@@ -173,8 +176,43 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         allow_origins=settings.BACKEND_CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Request-ID"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-Requested-With",
+            "X-Request-ID",
+            "X-CSRF-Token",
+        ],
         expose_headers=["X-Request-ID", "X-Correlation-ID"],
+    )
+
+    # Security headers middleware - protect against common web vulnerabilities
+    @application.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        """Add security headers to all responses."""
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if not settings.DEBUG:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+    # CSRF protection middleware - double-submit cookie pattern
+    # Exclude health checks, metrics, and docs from CSRF validation
+    application.add_middleware(
+        CSRFMiddleware,
+        exclude_paths=[
+            "/health",
+            "/metrics",
+            "/api/v1/metrics",
+            "/api/v1/docs",
+            "/api/v1/redoc",
+            "/api/v1/openapi.json",
+        ],
     )
 
     # Setup exception handlers
@@ -202,6 +240,7 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         For full details, use /api/v1/health/live
         """
         from app.api.v1.endpoints.health import liveness_check
+
         return await liveness_check()
 
     # Readiness probe at root level
@@ -212,6 +251,7 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         For full details, use /api/v1/health/ready
         """
         from app.api.v1.endpoints.health import readiness_check
+
         return await readiness_check()
 
     # Detailed health endpoint at root level (redirects to API v1)
@@ -222,6 +262,7 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         For full details, use /api/v1/health/detailed
         """
         from app.api.v1.endpoints.health import detailed_health_check
+
         return await detailed_health_check()
 
     # Database stats at root level
@@ -232,6 +273,7 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         For full details, use /api/v1/health/db
         """
         from app.api.v1.endpoints.health import database_stats
+
         return await database_stats()
 
     # Metrics endpoint at root level
@@ -242,6 +284,7 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         For full details, use /api/v1/metrics
         """
         from app.api.v1.endpoints.metrics import get_metrics
+
         return await get_metrics()
 
     return application

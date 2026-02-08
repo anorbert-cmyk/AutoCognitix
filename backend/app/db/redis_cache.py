@@ -19,14 +19,16 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional, TypeVar, TYPE_CHECKING
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ T = TypeVar("T")
 # =============================================================================
 # Cache TTL Configuration (in seconds)
 # =============================================================================
+
 
 class CacheTTL:
     """Cache time-to-live configuration per data type."""
@@ -69,6 +72,7 @@ class CacheTTL:
 # Cache Key Prefixes
 # =============================================================================
 
+
 class CachePrefix:
     """Cache key prefixes for namespace organization."""
 
@@ -89,6 +93,7 @@ class CachePrefix:
 # =============================================================================
 # Redis Cache Service
 # =============================================================================
+
 
 class RedisCacheService:
     """
@@ -333,10 +338,7 @@ class RedisCacheService:
 
         try:
             values = await self._client.mget(keys)
-            return [
-                json.loads(v) if v else None
-                for v in values
-            ]
+            return [json.loads(v) if v else None for v in values]
         except Exception as e:
             logger.warning(f"Redis MGET error: {e}")
             await self._record_failure()
@@ -506,10 +508,7 @@ class RedisCacheService:
         texts: list[str],
     ) -> list[list[float] | None]:
         """Get multiple cached embeddings."""
-        keys = [
-            f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode()).hexdigest()}"
-            for t in texts
-        ]
+        keys = [f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode()).hexdigest()}" for t in texts]
         return await self.mget(keys)
 
     # =========================================================================
@@ -612,6 +611,7 @@ async def get_cache_service() -> RedisCacheService:
 # Cache Decorator
 # =============================================================================
 
+
 def cached(
     prefix: str,
     ttl: int = CacheTTL.API_RESPONSE,
@@ -630,6 +630,7 @@ def cached(
         async def get_dtc_code(code: str) -> dict:
             ...
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         async def wrapper(*args, **kwargs) -> T:
@@ -665,4 +666,5 @@ def cached(
             return result
 
         return wrapper
+
     return decorator

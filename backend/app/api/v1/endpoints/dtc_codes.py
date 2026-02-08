@@ -17,10 +17,9 @@ Performance optimizations:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.dtc import (
     DTCBulkImport,
@@ -31,11 +30,14 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.log_sanitizer import sanitize_log
-from app.db.postgres.models import DTCCode as DTCCodeModel
 from app.db.postgres.repositories import DTCCodeRepository
 from app.db.postgres.session import get_db
 from app.db.qdrant_client import qdrant_client
 from app.services.embedding_service import get_embedding_service
+
+if TYPE_CHECKING:
+    from app.db.postgres.models import DTCCode as DTCCodeModel
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ SEARCH_RESPONSES = {
                         "category": "powertrain",
                         "is_generic": True,
                         "severity": "medium",
-                        "relevance_score": 0.95
+                        "relevance_score": 0.95,
                     },
                     {
                         "code": "P0100",
@@ -67,11 +69,11 @@ SEARCH_RESPONSES = {
                         "category": "powertrain",
                         "is_generic": True,
                         "severity": "medium",
-                        "relevance_score": 0.82
-                    }
+                        "relevance_score": 0.82,
+                    },
                 ]
             }
-        }
+        },
     }
 }
 
@@ -91,41 +93,41 @@ DTC_DETAIL_RESPONSES = {
                     "symptoms": [
                         "Motor teljesitmenyvesztese",
                         "Egyenetlen alapjarat",
-                        "Nehez inditas"
+                        "Nehez inditas",
                     ],
                     "possible_causes": [
                         "Szennyezett MAF szenzor",
                         "Levegoszuro eltomodes",
-                        "Vakuumszivarga"
+                        "Vakuumszivarga",
                     ],
                     "diagnostic_steps": [
                         "Vizualisan ellenorizze a MAF szenzort",
                         "Tisztitsa meg a MAF szenzort specialis tisztitoval",
-                        "Ellenorizze a levegoszurot"
+                        "Ellenorizze a levegoszurot",
                     ],
                     "related_codes": ["P0100", "P0102", "P0103"],
                     "common_vehicles": [],
-                    "manufacturer_code": None
+                    "manufacturer_code": None,
                 }
             }
-        }
+        },
     },
     400: {
         "description": "Invalid DTC code format",
         "content": {
             "application/json": {
-                "example": {"detail": "Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100"}
+                "example": {
+                    "detail": "Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100"
+                }
             }
-        }
+        },
     },
     404: {
         "description": "DTC code not found",
         "content": {
-            "application/json": {
-                "example": {"detail": "DTC code P9999 not found in database"}
-            }
-        }
-    }
+            "application/json": {"example": {"detail": "DTC code P9999 not found in database"}}
+        },
+    },
 }
 
 RELATED_CODES_RESPONSES = {
@@ -141,20 +143,16 @@ RELATED_CODES_RESPONSES = {
                         "category": "powertrain",
                         "is_generic": True,
                         "severity": "medium",
-                        "relevance_score": 0.9
+                        "relevance_score": 0.9,
                     }
                 ]
             }
-        }
+        },
     },
     404: {
         "description": "DTC code not found",
-        "content": {
-            "application/json": {
-                "example": {"detail": "DTC code P9999 not found"}
-            }
-        }
-    }
+        "content": {"application/json": {"example": {"detail": "DTC code P9999 not found"}}},
+    },
 }
 
 CATEGORIES_RESPONSES = {
@@ -168,18 +166,18 @@ CATEGORIES_RESPONSES = {
                         "name": "Powertrain",
                         "name_hu": "Hajtaslánc",
                         "description": "Engine, transmission, and emission systems",
-                        "description_hu": "Motor, váltó és emissziós rendszerek"
+                        "description_hu": "Motor, váltó és emissziós rendszerek",
                     },
                     {
                         "code": "B",
                         "name": "Body",
                         "name_hu": "Karosszéria",
                         "description": "Body systems including airbags, A/C, lighting",
-                        "description_hu": "Karosszéria rendszerek: légzsákok, klíma, világítás"
-                    }
+                        "description_hu": "Karosszéria rendszerek: légzsákok, klíma, világítás",
+                    },
                 ]
             }
-        }
+        },
     }
 }
 
@@ -193,19 +191,15 @@ CREATE_DTC_RESPONSES = {
                     "description_en": "Mass Air Flow Circuit Range/Performance",
                     "description_hu": "Levegotomeg-mero aramkor tartomany/teljesitmeny hiba",
                     "category": "powertrain",
-                    "is_generic": True
+                    "is_generic": True,
                 }
             }
-        }
+        },
     },
     400: {
         "description": "DTC code already exists",
-        "content": {
-            "application/json": {
-                "example": {"detail": "DTC code P0101 already exists"}
-            }
-        }
-    }
+        "content": {"application/json": {"example": {"detail": "DTC code P0101 already exists"}}},
+    },
 }
 
 BULK_IMPORT_RESPONSES = {
@@ -213,15 +207,9 @@ BULK_IMPORT_RESPONSES = {
         "description": "Bulk import completed",
         "content": {
             "application/json": {
-                "example": {
-                    "created": 10,
-                    "updated": 5,
-                    "skipped": 2,
-                    "errors": [],
-                    "total": 17
-                }
+                "example": {"created": 10, "updated": 5, "skipped": 2, "errors": [], "total": 17}
             }
-        }
+        },
     }
 }
 
@@ -230,10 +218,12 @@ BULK_IMPORT_RESPONSES = {
 # Redis Cache Helpers
 # =============================================================================
 
+
 async def _get_cache_service():
     """Get Redis cache service, handling import errors gracefully."""
     try:
         from app.db.redis_cache import get_cache_service
+
         return await get_cache_service()
     except Exception as e:
         logger.debug(f"Cache service unavailable: {e}")
@@ -300,18 +290,20 @@ async def _get_neo4j_relationships(code: str) -> dict[str, Any]:
     """
     try:
         from app.db.neo4j_models import get_diagnostic_path
+
         return await get_diagnostic_path(code)
     except ImportError:
         logger.warning("Neo4j models not available")
         return {}
     except Exception as e:
-        logger.warning(f"Error fetching Neo4j relationships for {sanitize_log(code)}: {sanitize_log(str(e))}")
+        logger.warning(
+            f"Error fetching Neo4j relationships for {sanitize_log(code)}: {sanitize_log(str(e))}"
+        )
         return {}
 
 
 def _dtc_model_to_search_result(
-    dtc: DTCCodeModel,
-    relevance_score: float | None = None
+    dtc: DTCCodeModel, relevance_score: float | None = None
 ) -> DTCSearchResult:
     """Convert PostgreSQL model to API schema."""
     return DTCSearchResult(
@@ -326,8 +318,7 @@ def _dtc_model_to_search_result(
 
 
 def _dtc_model_to_detail(
-    dtc: DTCCodeModel,
-    neo4j_data: dict[str, Any] | None = None
+    dtc: DTCCodeModel, neo4j_data: dict[str, Any] | None = None
 ) -> DTCCodeDetail:
     """Convert PostgreSQL model to detailed API schema, enriching with Neo4j data."""
     # Start with PostgreSQL data
@@ -442,9 +433,9 @@ async def search_dtc_codes(
 
     # Check if query looks like a DTC code (starts with P, B, C, or U)
     is_code_query = (
-        len(query) >= 1 and
-        query[0].upper() in "PBCU" and
-        (len(query) == 1 or query[1:2].isdigit() or query[1:].upper() == query[1:])
+        len(query) >= 1
+        and query[0].upper() in "PBCU"
+        and (len(query) == 1 or query[1:2].isdigit() or query[1:].upper() == query[1:])
     )
 
     results: list[DTCSearchResult] = []
@@ -502,10 +493,11 @@ async def search_dtc_codes(
                     # Fetch full details from PostgreSQL
                     dtc = await repository.get_by_code(code)
                     if dtc:
-                        results.append(_dtc_model_to_search_result(
-                            dtc,
-                            relevance_score=result.get("score", 0.5)
-                        ))
+                        results.append(
+                            _dtc_model_to_search_result(
+                                dtc, relevance_score=result.get("score", 0.5)
+                            )
+                        )
                         existing_codes.add(code)
 
         except Exception as e:
@@ -748,7 +740,9 @@ async def get_related_codes(
                     # Fetch from PostgreSQL for full details
                     related_dtc = await repository.get_by_code(related_node.code)
                     if related_dtc:
-                        results.append(_dtc_model_to_search_result(related_dtc, relevance_score=0.85))
+                        results.append(
+                            _dtc_model_to_search_result(related_dtc, relevance_score=0.85)
+                        )
                         existing_codes.add(related_node.code)
     except Exception as e:
         logger.warning(f"Error fetching Neo4j related codes: {sanitize_log(str(e))}")
@@ -824,19 +818,21 @@ async def create_dtc_code(
         )
 
     # Create the DTC code
-    dtc = await repository.create({
-        "code": dtc_data.code.upper(),
-        "description_en": dtc_data.description_en,
-        "description_hu": dtc_data.description_hu,
-        "category": dtc_data.category.value,
-        "severity": dtc_data.severity.value,
-        "is_generic": dtc_data.is_generic,
-        "system": dtc_data.system,
-        "symptoms": dtc_data.symptoms,
-        "possible_causes": dtc_data.possible_causes,
-        "diagnostic_steps": dtc_data.diagnostic_steps,
-        "related_codes": dtc_data.related_codes,
-    })
+    dtc = await repository.create(
+        {
+            "code": dtc_data.code.upper(),
+            "description_en": dtc_data.description_en,
+            "description_hu": dtc_data.description_hu,
+            "category": dtc_data.category.value,
+            "severity": dtc_data.severity.value,
+            "is_generic": dtc_data.is_generic,
+            "system": dtc_data.system,
+            "symptoms": dtc_data.symptoms,
+            "possible_causes": dtc_data.possible_causes,
+            "diagnostic_steps": dtc_data.diagnostic_steps,
+            "related_codes": dtc_data.related_codes,
+        }
+    )
 
     await db.commit()
 
@@ -924,7 +920,9 @@ async def bulk_import_dtc_codes(
 
         except Exception as e:
             errors.append({"code": dtc_data.code, "error": str(e)})
-            logger.error(f"Error importing DTC {sanitize_log(dtc_data.code)}: {sanitize_log(str(e))}")
+            logger.error(
+                f"Error importing DTC {sanitize_log(dtc_data.code)}: {sanitize_log(str(e))}"
+            )
 
     await db.commit()
 

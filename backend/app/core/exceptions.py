@@ -10,19 +10,12 @@ This module defines a hierarchy of exceptions with:
 
 from __future__ import annotations
 
-import sys
-from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException, status
 
 # Python 3.11+ has StrEnum, provide compatibility for earlier versions
-if sys.version_info >= (3, 11):
-    from enum import StrEnum
-else:
-    class StrEnum(str, Enum):
-        """String enum for Python < 3.11 compatibility."""
-        pass
+from enum import StrEnum
 
 # =============================================================================
 # Error Codes Enum
@@ -96,7 +89,6 @@ ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
     ErrorCode.RATE_LIMITED: "Tul sok keres. Kerem, varjon egy kicsit, majd probalkozzon ujra.",
     ErrorCode.REQUEST_TIMEOUT: "A keres idotullpes miatt megszakadt. Kerem, probalkozzon ujra.",
     ErrorCode.BAD_REQUEST: "Hibas keres formatum.",
-
     # Database errors
     ErrorCode.DATABASE_ERROR: "Adatbazis hiba tortent. Kerem, probalkozzon kesobb.",
     ErrorCode.DATABASE_CONNECTION: "Nem sikerult csatlakozni az adatbazishoz.",
@@ -109,7 +101,6 @@ ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
     ErrorCode.QDRANT_CONNECTION: "Nem sikerult csatlakozni a Qdrant adatbazishoz.",
     ErrorCode.REDIS_ERROR: "Redis cache hiba.",
     ErrorCode.REDIS_CONNECTION: "Nem sikerult csatlakozni a Redis szerverhez.",
-
     # External API errors
     ErrorCode.EXTERNAL_API_ERROR: "Kulso szolgaltatas hiba. Kerem, probalkozzon kesobb.",
     ErrorCode.NHTSA_ERROR: "NHTSA szolgaltatas hiba.",
@@ -119,7 +110,6 @@ ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
     ErrorCode.LLM_RATE_LIMITED: "AI szolgaltatas korlat tullepve. Kerem, varjon.",
     ErrorCode.LLM_TIMEOUT: "AI szolgaltatas nem valaszol.",
     ErrorCode.LLM_UNAVAILABLE: "AI szolgaltatas jelenleg nem elerheto.",
-
     # Business logic errors
     ErrorCode.DTC_VALIDATION_ERROR: "Ervenytelen DTC hibakod formatum.",
     ErrorCode.VIN_VALIDATION_ERROR: "Ervenytelen alvazszam (VIN) formatum.",
@@ -127,7 +117,6 @@ ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
     ErrorCode.DIAGNOSIS_ERROR: "Hiba tortent a diagnosztika soran.",
     ErrorCode.EMBEDDING_ERROR: "Szovegfeldolgozasi hiba tortent.",
     ErrorCode.RAG_ERROR: "Tudasbazis keresesi hiba.",
-
     # Authentication errors
     ErrorCode.AUTH_ERROR: "Hitelesitesi hiba.",
     ErrorCode.INVALID_CREDENTIALS: "Hibas felhasznalonev vagy jelszo.",

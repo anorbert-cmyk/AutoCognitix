@@ -133,9 +133,7 @@ class QdrantService:
                 vector=vector,
                 payload=payload if payloads else {},
             )
-            for id_, vector, payload in zip(
-                ids, vectors, payloads or [{}] * len(ids), strict=False
-            )
+            for id_, vector, payload in zip(ids, vectors, payloads or [{}] * len(ids), strict=False)
         ]
 
         self.client.upsert(

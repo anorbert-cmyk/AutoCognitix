@@ -16,23 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 # Python 3.11+ has StrEnum, provide compatibility for earlier versions
-if sys.version_info >= (3, 11):
-    from enum import StrEnum
-else:
-    class StrEnum(str, Enum):
-        """String enum for Python < 3.11 compatibility."""
-        pass
+from enum import StrEnum
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.neo4j_models import get_diagnostic_path
@@ -62,6 +54,9 @@ from app.services.llm_provider import (
     is_llm_available,
 )
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = get_logger(__name__)
 
 
@@ -72,6 +67,7 @@ logger = get_logger(__name__)
 
 class ConfidenceLevel(StrEnum):
     """Confidence levels for diagnosis."""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -80,6 +76,7 @@ class ConfidenceLevel(StrEnum):
 
 class RetrievalSource(StrEnum):
     """Sources for context retrieval."""
+
     QDRANT_DTC = "qdrant_dtc"
     QDRANT_SYMPTOM = "qdrant_symptom"
     NEO4J_GRAPH = "neo4j_graph"
@@ -90,6 +87,7 @@ class RetrievalSource(StrEnum):
 @dataclass
 class VehicleInfo:
     """Vehicle information for diagnosis."""
+
     make: str
     model: str
     year: int
@@ -111,6 +109,7 @@ class VehicleInfo:
 @dataclass
 class RetrievedItem:
     """Item retrieved from any source."""
+
     content: Dict[str, Any]
     source: RetrievalSource
     score: float
@@ -120,6 +119,7 @@ class RetrievedItem:
 @dataclass
 class RAGContext:
     """Context assembled for RAG generation."""
+
     dtc_items: List[RetrievedItem] = field(default_factory=list)
     symptom_items: List[RetrievedItem] = field(default_factory=list)
     graph_items: List[RetrievedItem] = field(default_factory=list)
@@ -138,11 +138,11 @@ class RAGContext:
     def get_all_items(self) -> List[RetrievedItem]:
         """Get all retrieved items from all sources."""
         return (
-            self.dtc_items +
-            self.symptom_items +
-            self.graph_items +
-            self.text_items +
-            self.recall_items
+            self.dtc_items
+            + self.symptom_items
+            + self.graph_items
+            + self.text_items
+            + self.recall_items
         )
 
     def to_formatted_string(self) -> str:
@@ -167,6 +167,7 @@ class RAGContext:
 @dataclass
 class RepairRecommendation:
     """Repair recommendation with cost and time estimates."""
+
     name: str
     description: str
     difficulty: str
@@ -180,6 +181,7 @@ class RepairRecommendation:
 @dataclass
 class DiagnosisResult:
     """Complete diagnosis result with confidence and recommendations."""
+
     dtc_codes: List[str]
     symptoms: str
     vehicle_info: VehicleInfo
@@ -256,7 +258,7 @@ class HybridRanker:
         item_scores: Dict[str, float] = {}
         item_objects: Dict[str, RetrievedItem] = {}
 
-        for weight, ranked_list in zip(weights, ranked_lists):
+        for weight, ranked_list in zip(weights, ranked_lists, strict=False):
             for rank, item in enumerate(ranked_list, 1):
                 # Create unique key for item
                 item_key = self._get_item_key(item)
@@ -444,16 +446,20 @@ class RAGService:
 
             items = []
             for result in results:
-                source = (RetrievalSource.QDRANT_DTC
-                         if collection == QdrantService.DTC_COLLECTION
-                         else RetrievalSource.QDRANT_SYMPTOM)
+                source = (
+                    RetrievalSource.QDRANT_DTC
+                    if collection == QdrantService.DTC_COLLECTION
+                    else RetrievalSource.QDRANT_SYMPTOM
+                )
 
-                items.append(RetrievedItem(
-                    content=result.get("payload", {}),
-                    source=source,
-                    score=result.get("score", 0),
-                    metadata={"id": result.get("id")},
-                ))
+                items.append(
+                    RetrievedItem(
+                        content=result.get("payload", {}),
+                        source=source,
+                        score=result.get("score", 0),
+                        metadata={"id": result.get("id")},
+                    )
+                )
 
             # Cache results
             self._cache.set(items, "qdrant", collection, query, filters)
@@ -498,12 +504,14 @@ class RAGService:
 
             if path_data:
                 # Create item for DTC
-                items.append(RetrievedItem(
-                    content=path_data.get("dtc", {}),
-                    source=RetrievalSource.NEO4J_GRAPH,
-                    score=1.0,  # High confidence for direct match
-                    metadata={"code": code},
-                ))
+                items.append(
+                    RetrievedItem(
+                        content=path_data.get("dtc", {}),
+                        source=RetrievalSource.NEO4J_GRAPH,
+                        score=1.0,  # High confidence for direct match
+                        metadata={"code": code},
+                    )
+                )
 
                 # Combine graph data
                 combined_data["components"].extend(path_data.get("components", []))
@@ -540,41 +548,45 @@ class RAGService:
         try:
             # Direct DTC code lookup
             if dtc_codes:
-                stmt = select(DTCCode).where(
-                    DTCCode.code.in_([c.upper() for c in dtc_codes])
-                )
+                stmt = select(DTCCode).where(DTCCode.code.in_([c.upper() for c in dtc_codes]))
                 result = await self._db_session.execute(stmt)
                 dtc_records = result.scalars().all()
 
                 for dtc in dtc_records:
-                    items.append(RetrievedItem(
-                        content={
-                            "code": dtc.code,
-                            "description": dtc.description_hu or dtc.description_en,
-                            "description_hu": dtc.description_hu,
-                            "description_en": dtc.description_en,
-                            "category": dtc.category,
-                            "severity": dtc.severity,
-                            "symptoms": dtc.symptoms,
-                            "possible_causes": dtc.possible_causes,
-                            "diagnostic_steps": dtc.diagnostic_steps,
-                        },
-                        source=RetrievalSource.POSTGRES_TEXT,
-                        score=1.0,  # Direct match
-                        metadata={"id": dtc.id},
-                    ))
+                    items.append(
+                        RetrievedItem(
+                            content={
+                                "code": dtc.code,
+                                "description": dtc.description_hu or dtc.description_en,
+                                "description_hu": dtc.description_hu,
+                                "description_en": dtc.description_en,
+                                "category": dtc.category,
+                                "severity": dtc.severity,
+                                "symptoms": dtc.symptoms,
+                                "possible_causes": dtc.possible_causes,
+                                "diagnostic_steps": dtc.diagnostic_steps,
+                            },
+                            source=RetrievalSource.POSTGRES_TEXT,
+                            score=1.0,  # Direct match
+                            metadata={"id": dtc.id},
+                        )
+                    )
 
             # Text search in DTC descriptions and symptoms
             if query:
                 # Use ILIKE for simple text matching
                 # In production, use PostgreSQL full-text search with tsvector
-                search_stmt = select(DTCCode).where(
-                    or_(
-                        DTCCode.description_en.ilike(f"%{query}%"),
-                        DTCCode.description_hu.ilike(f"%{query}%"),
-                        func.array_to_string(DTCCode.symptoms, ' ').ilike(f"%{query}%"),
+                search_stmt = (
+                    select(DTCCode)
+                    .where(
+                        or_(
+                            DTCCode.description_en.ilike(f"%{query}%"),
+                            DTCCode.description_hu.ilike(f"%{query}%"),
+                            func.array_to_string(DTCCode.symptoms, " ").ilike(f"%{query}%"),
+                        )
                     )
-                ).limit(top_k)
+                    .limit(top_k)
+                )
 
                 result = await self._db_session.execute(search_stmt)
                 search_records = result.scalars().all()
@@ -584,22 +596,24 @@ class RAGService:
                     if any(i.content.get("code") == dtc.code for i in items):
                         continue
 
-                    items.append(RetrievedItem(
-                        content={
-                            "code": dtc.code,
-                            "description": dtc.description_hu or dtc.description_en,
-                            "description_hu": dtc.description_hu,
-                            "description_en": dtc.description_en,
-                            "category": dtc.category,
-                            "severity": dtc.severity,
-                            "symptoms": dtc.symptoms,
-                            "possible_causes": dtc.possible_causes,
-                            "diagnostic_steps": dtc.diagnostic_steps,
-                        },
-                        source=RetrievalSource.POSTGRES_TEXT,
-                        score=0.7,  # Lower score for text match
-                        metadata={"id": dtc.id},
-                    ))
+                    items.append(
+                        RetrievedItem(
+                            content={
+                                "code": dtc.code,
+                                "description": dtc.description_hu or dtc.description_en,
+                                "description_hu": dtc.description_hu,
+                                "description_en": dtc.description_en,
+                                "category": dtc.category,
+                                "severity": dtc.severity,
+                                "symptoms": dtc.symptoms,
+                                "possible_causes": dtc.possible_causes,
+                                "diagnostic_steps": dtc.diagnostic_steps,
+                            },
+                            source=RetrievalSource.POSTGRES_TEXT,
+                            score=0.7,  # Lower score for text match
+                            metadata={"id": dtc.id},
+                        )
+                    )
 
             # Search known issues
             if query or vehicle_make:
@@ -614,9 +628,7 @@ class RAGService:
                         )
                     )
                 if vehicle_make:
-                    conditions.append(
-                        KnownIssue.applicable_makes.any(vehicle_make)
-                    )
+                    conditions.append(KnownIssue.applicable_makes.any(vehicle_make))
 
                 if conditions:
                     issue_stmt = issue_stmt.where(or_(*conditions)).limit(top_k)
@@ -624,19 +636,21 @@ class RAGService:
                     issue_records = result.scalars().all()
 
                     for issue in issue_records:
-                        items.append(RetrievedItem(
-                            content={
-                                "title": issue.title,
-                                "description": issue.description,
-                                "symptoms": issue.symptoms,
-                                "causes": issue.causes,
-                                "solutions": issue.solutions,
-                                "related_dtc_codes": issue.related_dtc_codes,
-                            },
-                            source=RetrievalSource.POSTGRES_TEXT,
-                            score=issue.confidence,
-                            metadata={"id": issue.id, "type": "known_issue"},
-                        ))
+                        items.append(
+                            RetrievedItem(
+                                content={
+                                    "title": issue.title,
+                                    "description": issue.description,
+                                    "symptoms": issue.symptoms,
+                                    "causes": issue.causes,
+                                    "solutions": issue.solutions,
+                                    "related_dtc_codes": issue.related_dtc_codes,
+                                },
+                                source=RetrievalSource.POSTGRES_TEXT,
+                                score=issue.confidence,
+                                metadata={"id": issue.id, "type": "known_issue"},
+                            )
+                        )
 
         except Exception as e:
             logger.error(f"PostgreSQL search error: {e}")
@@ -724,27 +738,30 @@ class RAGService:
         # Process recalls and complaints
         if recalls:
             for recall in recalls:
-                context.recall_items.append(RetrievedItem(
-                    content=recall,
-                    source=RetrievalSource.NHTSA,
-                    score=0.95,  # High relevance for recalls
-                    metadata={"type": "recall"},
-                ))
+                context.recall_items.append(
+                    RetrievedItem(
+                        content=recall,
+                        source=RetrievalSource.NHTSA,
+                        score=0.95,  # High relevance for recalls
+                        metadata={"type": "recall"},
+                    )
+                )
 
         if complaints:
             for complaint in complaints[:5]:  # Limit complaints
-                context.recall_items.append(RetrievedItem(
-                    content=complaint,
-                    source=RetrievalSource.NHTSA,
-                    score=0.6,
-                    metadata={"type": "complaint"},
-                ))
+                context.recall_items.append(
+                    RetrievedItem(
+                        content=complaint,
+                        source=RetrievalSource.NHTSA,
+                        score=0.6,
+                        metadata={"type": "complaint"},
+                    )
+                )
 
         # Hybrid ranking of DTC results
         all_dtc_lists = [context.dtc_items, context.text_items]
         combined_dtc = self._ranker.reciprocal_rank_fusion(
-            [items for items in all_dtc_lists if items],
-            weights=[1.0, 0.8]
+            [items for items in all_dtc_lists if items], weights=[1.0, 0.8]
         )
 
         # Format context strings
@@ -764,8 +781,14 @@ class RAGService:
 
         context.repair_context = format_repair_context(graph_data)
 
-        recall_data = [item.content for item in context.recall_items if item.metadata.get("type") == "recall"]
-        complaint_data = [item.content for item in context.recall_items if item.metadata.get("type") == "complaint"]
+        recall_data = [
+            item.content for item in context.recall_items if item.metadata.get("type") == "recall"
+        ]
+        complaint_data = [
+            item.content
+            for item in context.recall_items
+            if item.metadata.get("type") == "complaint"
+        ]
         context.recall_context = format_recall_context(recall_data, complaint_data)
 
         return context
@@ -898,10 +921,16 @@ class RAGService:
             logger.info("No LLM available, using rule-based diagnosis")
             # Prepare DTC data for rule-based diagnosis
             dtc_data = [item.content for item in context.dtc_items + context.text_items]
-            recall_data = [item.content for item in context.recall_items
-                         if item.metadata.get("type") == "recall"]
-            complaint_data = [item.content for item in context.recall_items
-                            if item.metadata.get("type") == "complaint"]
+            recall_data = [
+                item.content
+                for item in context.recall_items
+                if item.metadata.get("type") == "recall"
+            ]
+            complaint_data = [
+                item.content
+                for item in context.recall_items
+                if item.metadata.get("type") == "complaint"
+            ]
 
             return generate_rule_based_diagnosis(
                 dtc_codes=dtc_data,
@@ -937,8 +966,11 @@ class RAGService:
 
             # Fallback to rule-based
             dtc_data = [item.content for item in context.dtc_items + context.text_items]
-            recall_data = [item.content for item in context.recall_items
-                         if item.metadata.get("type") == "recall"]
+            recall_data = [
+                item.content
+                for item in context.recall_items
+                if item.metadata.get("type") == "recall"
+            ]
 
             result = generate_rule_based_diagnosis(
                 dtc_codes=dtc_data,
@@ -1023,21 +1055,25 @@ class RAGService:
         model_name = provider.model_name
         provider_name = provider.provider_type.value
 
-        used_fallback = (provider.provider_type == LLMProviderType.RULE_BASED or
-                        diagnosis.parse_error is not None)
+        used_fallback = (
+            provider.provider_type == LLMProviderType.RULE_BASED
+            or diagnosis.parse_error is not None
+        )
 
         # Build repair recommendations
         repair_recommendations = []
         for repair in diagnosis.recommended_repairs:
-            repair_recommendations.append(RepairRecommendation(
-                name=repair.get("title", ""),
-                description=repair.get("description", ""),
-                difficulty=repair.get("difficulty", "intermediate"),
-                estimated_time_minutes=repair.get("estimated_time_minutes"),
-                estimated_cost_min=repair.get("estimated_cost_min"),
-                estimated_cost_max=repair.get("estimated_cost_max"),
-                parts=repair.get("parts_needed", []),
-            ))
+            repair_recommendations.append(
+                RepairRecommendation(
+                    name=repair.get("title", ""),
+                    description=repair.get("description", ""),
+                    difficulty=repair.get("difficulty", "intermediate"),
+                    estimated_time_minutes=repair.get("estimated_time_minutes"),
+                    estimated_cost_min=repair.get("estimated_cost_min"),
+                    estimated_cost_max=repair.get("estimated_cost_max"),
+                    parts=repair.get("parts_needed", []),
+                )
+            )
 
         # Build sources
         sources = []
@@ -1046,17 +1082,23 @@ class RAGService:
         for item in context.get_all_items()[:10]:
             source_name = f"{item.source.value}"
             if source_name not in seen_sources:
-                sources.append({
-                    "type": item.source.value,
-                    "title": item.content.get("code") or item.content.get("title", source_name),
-                    "relevance_score": item.score,
-                })
+                sources.append(
+                    {
+                        "type": item.source.value,
+                        "title": item.content.get("code") or item.content.get("title", source_name),
+                        "relevance_score": item.score,
+                    }
+                )
                 seen_sources.add(source_name)
 
         processing_time = int((time.time() - start_time) * 1000)
 
         # Combine confidence from context and diagnosis
-        final_confidence = max(confidence_score, diagnosis.confidence_score) if diagnosis.probable_causes else confidence_score
+        final_confidence = (
+            max(confidence_score, diagnosis.confidence_score)
+            if diagnosis.probable_causes
+            else confidence_score
+        )
 
         result = DiagnosisResult(
             dtc_codes=dtc_codes,

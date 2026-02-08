@@ -15,13 +15,15 @@ Performance Optimizations:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
-from uuid import UUID
+from typing import Any, Generic, TypeVar, TYPE_CHECKING
 
 from sqlalchemy import and_, func, or_, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from uuid import UUID
 
 # Generic type for models
 ModelType = TypeVar("ModelType", bound=Base)
@@ -88,7 +90,11 @@ class BaseRepository(Generic[ModelType]):
 
 
 class UserRepository(BaseRepository[User]):
-    """Repository for User operations with email-based lookups."""
+    """Repository for User operations with email-based lookups and authentication support."""
+
+    # Account lockout settings
+    MAX_FAILED_ATTEMPTS: int = 5
+    LOCKOUT_DURATION_MINUTES: int = 30
 
     def __init__(self, db: AsyncSession) -> None:
         """Initialize the User repository."""
@@ -106,6 +112,158 @@ class UserRepository(BaseRepository[User]):
         """
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
+
+    async def is_account_locked(self, user: User) -> bool:
+        """
+        Check if a user account is currently locked due to failed login attempts.
+
+        Args:
+            user: The user to check.
+
+        Returns:
+            True if account is locked, False otherwise.
+        """
+        if not user.locked_until:
+            return False
+
+        # Check if lockout period has expired
+        now = datetime.utcnow()
+        if user.locked_until <= now:
+            # Lockout expired, reset the counter
+            user.locked_until = None
+            user.failed_login_attempts = 0
+            await self.db.flush()
+            return False
+
+        return True
+
+    async def record_failed_login(self, user: User) -> bool:
+        """
+        Record a failed login attempt and lock account if threshold reached.
+
+        Args:
+            user: The user who failed to login.
+
+        Returns:
+            True if account is now locked, False otherwise.
+        """
+        from datetime import timedelta
+
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+        user.last_failed_login = datetime.utcnow()
+
+        # Lock account if max attempts exceeded
+        if user.failed_login_attempts >= self.MAX_FAILED_ATTEMPTS:
+            user.locked_until = datetime.utcnow() + timedelta(minutes=self.LOCKOUT_DURATION_MINUTES)
+            await self.db.flush()
+            return True
+
+        await self.db.flush()
+        return False
+
+    async def record_successful_login(self, user: User) -> None:
+        """
+        Record a successful login and reset failed attempt counter.
+
+        Args:
+            user: The user who logged in successfully.
+        """
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        user.last_login_at = datetime.utcnow()
+        await self.db.flush()
+
+    async def update_password(self, user: User, hashed_password: str) -> None:
+        """
+        Update user's password.
+
+        Args:
+            user: The user to update.
+            hashed_password: The new hashed password.
+        """
+        user.hashed_password = hashed_password
+        user.password_reset_token = None
+        user.password_reset_expires = None
+        await self.db.flush()
+
+    async def set_password_reset_token(self, user: User, token: str) -> None:
+        """
+        Set password reset token for a user.
+
+        Args:
+            user: The user requesting password reset.
+            token: The password reset token (JWT).
+        """
+        from datetime import timedelta
+
+        user.password_reset_token = token
+        user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+        await self.db.flush()
+
+    async def verify_email(self, user: User) -> None:
+        """
+        Mark user's email as verified.
+
+        Args:
+            user: The user whose email was verified.
+        """
+        user.is_email_verified = True
+        user.email_verification_token = None
+        await self.db.flush()
+
+    async def set_email_verification_token(self, user: User, token: str) -> None:
+        """
+        Set email verification token for a user.
+
+        Args:
+            user: The user to set the token for.
+            token: The verification token.
+        """
+        user.email_verification_token = token
+        await self.db.flush()
+
+    async def get_active_users(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[User]:
+        """
+        Get all active users with pagination.
+
+        Args:
+            skip: Number of records to skip.
+            limit: Maximum number of records to return.
+
+        Returns:
+            List of active User objects.
+        """
+        result = await self.db.execute(
+            select(User)
+            .where(User.is_active == True)  # noqa: E712
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def deactivate(self, user: User) -> None:
+        """
+        Deactivate a user account.
+
+        Args:
+            user: The user to deactivate.
+        """
+        user.is_active = False
+        await self.db.flush()
+
+    async def activate(self, user: User) -> None:
+        """
+        Activate a user account.
+
+        Args:
+            user: The user to activate.
+        """
+        user.is_active = True
+        await self.db.flush()
 
 
 class DTCCodeRepository(BaseRepository[DTCCode]):
@@ -174,9 +332,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         if not dtc or not dtc.related_codes:
             return []
 
-        result = await self.db.execute(
-            select(DTCCode).where(DTCCode.code.in_(dtc.related_codes))
-        )
+        result = await self.db.execute(select(DTCCode).where(DTCCode.code.in_(dtc.related_codes)))
         return list(result.scalars().all())
 
 
@@ -305,18 +461,13 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         base_query = select(DiagnosisSession).where(and_(*conditions))
 
         # Get total count efficiently
-        count_query = select(func.count()).select_from(
-            base_query.subquery()
-        )
+        count_query = select(func.count()).select_from(base_query.subquery())
         count_result = await self.db.execute(count_query)
         total = count_result.scalar() or 0
 
         # Get paginated results
         items_query = (
-            base_query
-            .order_by(DiagnosisSession.created_at.desc())
-            .offset(skip)
-            .limit(limit)
+            base_query.order_by(DiagnosisSession.created_at.desc()).offset(skip).limit(limit)
         )
         items_result = await self.db.execute(items_query)
         items = list(items_result.scalars().all())
@@ -342,9 +493,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         if user_id:
             conditions.append(DiagnosisSession.user_id == user_id)
 
-        result = await self.db.execute(
-            select(DiagnosisSession).where(and_(*conditions))
-        )
+        result = await self.db.execute(select(DiagnosisSession).where(and_(*conditions)))
         session = result.scalar_one_or_none()
 
         if not session:
@@ -461,10 +610,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         """)
 
         if user_id:
-            result = await self.db.execute(
-                query,
-                {"user_id": str(user_id), "limit": limit}
-            )
+            result = await self.db.execute(query, {"user_id": str(user_id), "limit": limit})
         else:
             # Global frequency (without user filter)
             query = text("""
@@ -504,9 +650,7 @@ class DTCCodeBatchRepository:
             return {}
 
         upper_codes = [c.upper() for c in codes]
-        result = await self.db.execute(
-            select(DTCCode).where(DTCCode.code.in_(upper_codes))
-        )
+        result = await self.db.execute(select(DTCCode).where(DTCCode.code.in_(upper_codes)))
         dtcs = result.scalars().all()
         return {dtc.code: dtc for dtc in dtcs}
 
@@ -566,9 +710,5 @@ class DTCCodeBatchRepository:
         for symptom in symptoms:
             conditions.append(DTCCode.symptoms.contains([symptom]))
 
-        result = await self.db.execute(
-            select(DTCCode)
-            .where(or_(*conditions))
-            .limit(limit)
-        )
+        result = await self.db.execute(select(DTCCode).where(or_(*conditions)).limit(limit))
         return list(result.scalars().all())

@@ -4,9 +4,25 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 2 befejezve, Railway deployment konfigurálva
+**Státusz:** Sprint 5 befejezve - Adatbázisok feltöltve, AI indexelés kész
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
+
+## Aktuális Adatbázis Állapot (2026-02-08)
+
+| Adatbázis | Tartalom | Méret |
+|-----------|----------|-------|
+| **Neo4j Aura** | Vehicles, DTC, Complaints, Recalls | 26,816 node |
+| **Qdrant Cloud** | HuBERT embeddings (768-dim) | 35,000+ vector |
+| **PostgreSQL** | Users, Sessions, History | Kész |
+| **Redis** | Cache, Session | Kész |
+
+### HuBERT Embedding - Miért használjuk?
+A **SZTAKI-HLT/hubert-base-cc** modell magyar nyelvre optimalizált BERT változat:
+- **Szemantikus keresés**: Panasz/tünet → hasonló DTC/recall keresés
+- **768-dim vektorok**: Qdrant-ban tárolva, cosine similarity alapú keresés
+- **Lokális futás**: Nincs API limit (Groq kimerült), GPU/MPS gyorsítás
+- **RAG alapja**: A diagnosztikai AI innen keres releváns információt
 
 ## Tech Stack
 
@@ -213,6 +229,12 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 
 ## Tanulságok és Döntések
 
+### 2026-02-08 - Adatbázis feltöltés befejezve
+- HuBERT lokális embedding: Groq API limit helyett lokális modell (nincs rate limit)
+- Python 3.9 kompatibilitás: `strict=False` zip()-ben nem támogatott
+- NHTSA mezőnevek: normalizált format használ snake_case-t (`odi_number`, nem `ODI_ID`)
+- Checkpoint rendszer: robusztus resume támogatás batch operációkhoz
+
 ### 2024-02-03 - Projekt indítás
 - Qdrant választva pgvector helyett (jobb teljesítmény)
 - Neo4j gráf modell a diagnosztikai kapcsolatokhoz
@@ -221,28 +243,18 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 
 ## TODO - Következő Sprintek
 
-### Sprint 2: Adatbázis réteg (FOLYAMATBAN)
-- [ ] Alembic első migráció
-- [x] Neo4j seed adatok (seed_database.py)
-- [ ] Qdrant collection inicializálás
-
-### Sprint 3: API implementáció
-- [ ] Auth végpontok működőképessé
-- [ ] DTC CRUD műveletek
-- [ ] Vehicle repository
-- [ ] API végpontok frissítése új szolgáltatásokkal
-
-### Sprint 4: Adatforrás integráció (KÉSZ)
-- [x] NHTSA API kliens (nhtsa_service.py)
-- [ ] OBDb import script
-- [x] Generikus DTC kódok importálása (63 kód)
-
-### Sprint 5: AI/RAG (KÉSZ)
+### Sprint 2-5: ✅ BEFEJEZVE
+- [x] Neo4j seed adatok (26,816 node)
+- [x] Qdrant HuBERT indexelés (35,000+ vector)
 - [x] huBERT embedding service (embedding_service.py)
-- [ ] Qdrant indexelés
 - [x] LangChain RAG chain (rag_service.py)
-- [x] Magyar prompt template
-- [x] Diagnosis service (diagnosis_service.py)
+- [x] NHTSA API kliens (nhtsa_service.py)
+
+### Sprint 6: API & Frontend (KÖVETKEZŐ)
+- [ ] Auth végpontok működőképessé
+- [ ] DTC keresés API endpoint
+- [ ] Vehicle lookup API
+- [ ] Frontend diagnosis wizard
 
 ## Deployment - Railway
 

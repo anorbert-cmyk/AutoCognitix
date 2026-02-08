@@ -5,10 +5,12 @@ Diagnosis schemas - core diagnostic request/response models.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
-from uuid import UUID
+from typing import List, Optional, TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 class DiagnosisRequest(BaseModel):
@@ -18,11 +20,17 @@ class DiagnosisRequest(BaseModel):
     vehicle_model: str = Field(..., min_length=1, max_length=100, description="Vehicle model")
     vehicle_year: int = Field(..., ge=1900, le=2030, description="Vehicle year")
     vehicle_engine: Optional[str] = Field(None, max_length=100, description="Engine type/code")
-    vin: Optional[str] = Field(None, min_length=17, max_length=17, description="Vehicle Identification Number")
+    vin: Optional[str] = Field(
+        None, min_length=17, max_length=17, description="Vehicle Identification Number"
+    )
 
     dtc_codes: List[str] = Field(..., min_length=1, max_length=20, description="List of DTC codes")
-    symptoms: str = Field(..., min_length=10, max_length=2000, description="Symptom description in Hungarian")
-    additional_context: Optional[str] = Field(None, max_length=1000, description="Additional context")
+    symptoms: str = Field(
+        ..., min_length=10, max_length=2000, description="Symptom description in Hungarian"
+    )
+    additional_context: Optional[str] = Field(
+        None, max_length=1000, description="Additional context"
+    )
 
     class Config:
         json_schema_extra = {
@@ -47,6 +55,12 @@ class ProbableCause(BaseModel):
     related_dtc_codes: List[str] = Field(default_factory=list, description="Related DTC codes")
     components: List[str] = Field(default_factory=list, description="Affected components")
 
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Clamp confidence score to valid range [0.0, 1.0]."""
+        return max(0.0, min(1.0, v))
+
 
 class RepairRecommendation(BaseModel):
     """Schema for repair recommendation."""
@@ -56,9 +70,14 @@ class RepairRecommendation(BaseModel):
     estimated_cost_min: Optional[int] = Field(None, ge=0, description="Minimum estimated cost")
     estimated_cost_max: Optional[int] = Field(None, ge=0, description="Maximum estimated cost")
     estimated_cost_currency: str = Field("HUF", description="Currency code")
-    difficulty: str = Field("intermediate", description="Difficulty level: beginner, intermediate, advanced, professional")
+    difficulty: str = Field(
+        "intermediate",
+        description="Difficulty level: beginner, intermediate, advanced, professional",
+    )
     parts_needed: List[str] = Field(default_factory=list, description="List of parts needed")
-    estimated_time_minutes: Optional[int] = Field(None, ge=0, description="Estimated repair time in minutes")
+    estimated_time_minutes: Optional[int] = Field(
+        None, ge=0, description="Estimated repair time in minutes"
+    )
 
 
 class Source(BaseModel):
@@ -68,6 +87,49 @@ class Source(BaseModel):
     title: str = Field(..., description="Source title")
     url: Optional[str] = Field(None, description="Source URL if available")
     relevance_score: float = Field(..., ge=0, le=1, description="Relevance score (0-1)")
+
+    @field_validator("relevance_score")
+    @classmethod
+    def validate_relevance_score(cls, v: float) -> float:
+        """Clamp relevance score to valid range [0.0, 1.0]."""
+        return max(0.0, min(1.0, v))
+
+
+class RelatedRecall(BaseModel):
+    """Schema for related NHTSA recall information."""
+
+    campaign_number: str = Field(..., description="NHTSA campaign number")
+    component: str = Field(..., description="Affected component")
+    summary: str = Field(..., description="Recall summary")
+    consequence: Optional[str] = Field(None, description="Potential consequence")
+    remedy: Optional[str] = Field(None, description="Recommended remedy")
+    recall_date: Optional[str] = Field(None, description="Recall date")
+
+
+class RelatedComplaint(BaseModel):
+    """Schema for related NHTSA complaint information."""
+
+    odi_number: Optional[str] = Field(None, description="ODI complaint number")
+    components: str = Field(..., description="Affected components")
+    summary: str = Field(..., description="Complaint summary")
+    crash: bool = Field(False, description="Whether crash was involved")
+    fire: bool = Field(False, description="Whether fire was involved")
+    similarity_score: float = Field(..., ge=0, le=1, description="Similarity to current issue")
+
+    @field_validator("similarity_score")
+    @classmethod
+    def validate_similarity_score(cls, v: float) -> float:
+        """Clamp similarity score to valid range [0.0, 1.0]."""
+        return max(0.0, min(1.0, v))
+
+
+class UrgencyLevel(str):
+    """Urgency level for diagnosis."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class DiagnosisResponse(BaseModel):
@@ -85,7 +147,39 @@ class DiagnosisResponse(BaseModel):
     confidence_score: float = Field(..., ge=0, le=1, description="Overall diagnosis confidence")
     sources: List[Source] = Field(default_factory=list, description="Information sources used")
 
+    # Enhanced fields for recalls and complaints
+    similar_complaints: List[RelatedComplaint] = Field(
+        default_factory=list, description="Similar NHTSA complaints found for this vehicle"
+    )
+    related_recalls: List[RelatedRecall] = Field(
+        default_factory=list, description="Related NHTSA recalls for this vehicle"
+    )
+
+    # Urgency and safety
+    urgency_level: str = Field(
+        default="medium", description="Urgency level: low, medium, high, critical"
+    )
+    safety_warnings: List[str] = Field(
+        default_factory=list, description="Safety warnings if any critical issues detected"
+    )
+
+    # Diagnostic steps
+    diagnostic_steps: List[str] = Field(
+        default_factory=list, description="Recommended diagnostic steps"
+    )
+
+    # Processing metadata
+    processing_time_ms: Optional[int] = Field(None, description="Processing time in milliseconds")
+    model_used: Optional[str] = Field(None, description="AI model used for diagnosis")
+    used_fallback: bool = Field(False, description="Whether fallback diagnosis was used")
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    @field_validator("confidence_score")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Clamp confidence score to valid range [0.0, 1.0]."""
+        return max(0.0, min(1.0, v))
 
     class Config:
         from_attributes = True
@@ -112,8 +206,12 @@ class DiagnosisHistoryFilter(BaseModel):
     """Filter parameters for diagnosis history queries."""
 
     vehicle_make: Optional[str] = Field(None, max_length=100, description="Filter by vehicle make")
-    vehicle_model: Optional[str] = Field(None, max_length=100, description="Filter by vehicle model")
-    vehicle_year: Optional[int] = Field(None, ge=1900, le=2030, description="Filter by vehicle year")
+    vehicle_model: Optional[str] = Field(
+        None, max_length=100, description="Filter by vehicle model"
+    )
+    vehicle_year: Optional[int] = Field(
+        None, ge=1900, le=2030, description="Filter by vehicle year"
+    )
     dtc_code: Optional[str] = Field(None, max_length=10, description="Filter by DTC code")
     date_from: Optional[datetime] = Field(None, description="Filter by start date")
     date_to: Optional[datetime] = Field(None, description="Filter by end date")
@@ -215,3 +313,88 @@ class DeleteResponse(BaseModel):
     success: bool
     message: str
     deleted_id: Optional[UUID] = None
+
+
+# =============================================================================
+# Streaming Response Schemas
+# =============================================================================
+
+
+class StreamingEventType(str):
+    """Types of streaming events."""
+
+    START = "start"
+    CONTEXT = "context"
+    ANALYSIS = "analysis"
+    CAUSE = "cause"
+    REPAIR = "repair"
+    WARNING = "warning"
+    COMPLETE = "complete"
+    ERROR = "error"
+
+
+class StreamingEvent(BaseModel):
+    """Schema for streaming diagnosis events (Server-Sent Events)."""
+
+    event_type: str = Field(
+        ...,
+        description="Event type: start, context, analysis, cause, repair, warning, complete, error",
+    )
+    data: dict = Field(default_factory=dict, description="Event data payload")
+    diagnosis_id: UUID = Field(..., description="Diagnosis session ID")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
+    progress: Optional[float] = Field(None, ge=0, le=1, description="Progress indicator (0-1)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "event_type": "cause",
+                "data": {
+                    "title": "MAF szenzor hiba",
+                    "description": "A levegotomeg-mero szenzor hibas jeleket kuld.",
+                    "confidence": 0.85,
+                },
+                "diagnosis_id": "550e8400-e29b-41d4-a716-446655440000",
+                "timestamp": "2024-02-03T10:30:00Z",
+                "progress": 0.6,
+            }
+        }
+
+
+class DiagnosisStreamRequest(BaseModel):
+    """Request schema for streaming vehicle diagnosis."""
+
+    vehicle_make: str = Field(..., min_length=1, max_length=100, description="Vehicle manufacturer")
+    vehicle_model: str = Field(..., min_length=1, max_length=100, description="Vehicle model")
+    vehicle_year: int = Field(..., ge=1900, le=2030, description="Vehicle year")
+    vehicle_engine: Optional[str] = Field(None, max_length=100, description="Engine type/code")
+    vin: Optional[str] = Field(
+        None, min_length=17, max_length=17, description="Vehicle Identification Number"
+    )
+
+    dtc_codes: List[str] = Field(..., min_length=1, max_length=20, description="List of DTC codes")
+    symptoms: str = Field(
+        ..., min_length=10, max_length=2000, description="Symptom description in Hungarian"
+    )
+    additional_context: Optional[str] = Field(
+        None, max_length=1000, description="Additional context"
+    )
+
+    # Streaming options
+    include_context: bool = Field(True, description="Include retrieved context in stream")
+    include_progress: bool = Field(True, description="Include progress updates")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "vehicle_make": "Volkswagen",
+                "vehicle_model": "Golf",
+                "vehicle_year": 2018,
+                "vehicle_engine": "2.0 TSI",
+                "dtc_codes": ["P0101", "P0171"],
+                "symptoms": "A motor nehezen indul hidegben, egyenetlenul jar alapjaraton, es a fogyasztas megnott.",
+                "additional_context": "A problema telen rosszabb.",
+                "include_context": True,
+                "include_progress": True,
+            }
+        }

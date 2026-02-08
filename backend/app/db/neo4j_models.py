@@ -4,8 +4,11 @@ Neo4j graph database models using Neomodel.
 
 from __future__ import annotations
 
+import asyncio
+
 from neomodel import (
     ArrayProperty,
+    BooleanProperty,
     FloatProperty,
     IntegerProperty,
     RelationshipFrom,
@@ -49,7 +52,7 @@ class UsesPartRel(StructuredRel):
     """Relationship: Repair uses Part."""
 
     quantity = IntegerProperty(default=1)
-    optional = StringProperty(default="false")
+    optional = BooleanProperty(default=False)
 
 
 class HasCommonIssueRel(StructuredRel):
@@ -66,7 +69,7 @@ class RequiresRepairRel(StructuredRel):
     """Relationship: DTC requires Repair for specific vehicle."""
 
     confidence = FloatProperty(default=0.7)
-    is_primary_fix = StringProperty(default="false")  # true/false as string for neomodel
+    is_primary_fix = BooleanProperty(default=False)
     estimated_labor_hours = FloatProperty()
 
 
@@ -75,7 +78,7 @@ class UsesEngineRel(StructuredRel):
 
     year_start = IntegerProperty()
     year_end = IntegerProperty()
-    is_base_engine = StringProperty(default="false")
+    is_base_engine = BooleanProperty(default=False)
     variant_name = StringProperty()  # e.g., "2.0 TSI 190HP"
 
 
@@ -99,7 +102,9 @@ class DTCNode(StructuredNode):
 
     # Relationships
     causes = RelationshipTo("SymptomNode", "CAUSES", model=CausesRel)
-    indicates_failure_of = RelationshipTo("ComponentNode", "INDICATES_FAILURE_OF", model=IndicatesFailureRel)
+    indicates_failure_of = RelationshipTo(
+        "ComponentNode", "INDICATES_FAILURE_OF", model=IndicatesFailureRel
+    )
     related_to = RelationshipTo("DTCNode", "RELATED_TO")
 
 
@@ -134,7 +139,9 @@ class ComponentNode(StructuredNode):
     part_number = StringProperty()
 
     # Relationships
-    failure_indicated_by = RelationshipFrom("DTCNode", "INDICATES_FAILURE_OF", model=IndicatesFailureRel)
+    failure_indicated_by = RelationshipFrom(
+        "DTCNode", "INDICATES_FAILURE_OF", model=IndicatesFailureRel
+    )
     repaired_by = RelationshipTo("RepairNode", "REPAIRED_BY", model=RepairedByRel)
     contains = RelationshipTo("ComponentNode", "CONTAINS")
     contained_in = RelationshipFrom("ComponentNode", "CONTAINS")
@@ -147,7 +154,9 @@ class RepairNode(StructuredNode):
     name = StringProperty(required=True, index=True)
     description = StringProperty()
     description_hu = StringProperty()
-    difficulty = StringProperty(default="intermediate")  # beginner, intermediate, advanced, professional
+    difficulty = StringProperty(
+        default="intermediate"
+    )  # beginner, intermediate, advanced, professional
     estimated_time_minutes = IntegerProperty()
     estimated_cost_min = IntegerProperty()
     estimated_cost_max = IntegerProperty()
@@ -270,15 +279,15 @@ async def create_dtc_symptom_relationship(
 ) -> bool:
     """Create a relationship between a DTC and a symptom."""
     try:
-        dtc = DTCNode.nodes.get_or_none(code=dtc_code)
+        dtc = await asyncio.to_thread(DTCNode.nodes.get_or_none, code=dtc_code)
         if not dtc:
             return False
 
-        symptom = SymptomNode.nodes.get_or_none(name=symptom_name)
+        symptom = await asyncio.to_thread(SymptomNode.nodes.get_or_none, name=symptom_name)
         if not symptom:
-            symptom = SymptomNode(name=symptom_name).save()
+            symptom = await asyncio.to_thread(lambda: SymptomNode(name=symptom_name).save())
 
-        dtc.causes.connect(symptom, {"confidence": confidence})
+        await asyncio.to_thread(dtc.causes.connect, symptom, {"confidence": confidence})
         return True
     except Exception:
         return False
@@ -308,11 +317,13 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     # Get symptoms
     for symptom in dtc.causes.all():
         rel = dtc.causes.relationship(symptom)
-        result["symptoms"].append({
-            "name": symptom.name,
-            "description": symptom.description_hu or symptom.description,
-            "confidence": rel.confidence,
-        })
+        result["symptoms"].append(
+            {
+                "name": symptom.name,
+                "description": symptom.description_hu or symptom.description,
+                "confidence": rel.confidence,
+            }
+        )
 
     # Get components
     for component in dtc.indicates_failure_of.all():
@@ -340,12 +351,14 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
             # Get parts for this repair
             for part in repair.uses_parts.all():
                 part_rel = repair.uses_parts.relationship(part)
-                repair_data["parts"].append({
-                    "name": part.name_hu or part.name,
-                    "part_number": part.part_number,
-                    "price_range": f"{part.price_min}-{part.price_max} {part.currency}",
-                    "quantity": part_rel.quantity,
-                })
+                repair_data["parts"].append(
+                    {
+                        "name": part.name_hu or part.name,
+                        "part_number": part.part_number,
+                        "price_range": f"{part.price_min}-{part.price_max} {part.currency}",
+                        "quantity": part_rel.quantity,
+                    }
+                )
 
             comp_data["repairs"].append(repair_data)
             result["repairs"].append(repair_data)
@@ -408,26 +421,30 @@ async def get_vehicle_common_issues(make: str, model: str, year: int | None = No
         for component in dtc.indicates_failure_of.all():
             for repair in component.repaired_by.all():
                 component.repaired_by.relationship(repair)
-                dtc_data["recommended_repairs"].append({
-                    "name": repair.description_hu or repair.name,
-                    "difficulty": repair.difficulty,
-                    "estimated_time_minutes": repair.estimated_time_minutes,
-                    "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
-                })
+                dtc_data["recommended_repairs"].append(
+                    {
+                        "name": repair.description_hu or repair.name,
+                        "difficulty": repair.difficulty,
+                        "estimated_time_minutes": repair.estimated_time_minutes,
+                        "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+                    }
+                )
 
         result["common_dtcs"].append(dtc_data)
 
     # Get common repairs directly linked to vehicle
     for repair in vehicle.common_repair.all():
         rel = vehicle.common_repair.relationship(repair)
-        result["common_repairs"].append({
-            "name": repair.description_hu or repair.name,
-            "difficulty": repair.difficulty,
-            "confidence": rel.confidence,
-            "is_primary_fix": rel.is_primary_fix == "true",
-            "estimated_time_minutes": repair.estimated_time_minutes,
-            "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
-        })
+        result["common_repairs"].append(
+            {
+                "name": repair.description_hu or repair.name,
+                "difficulty": repair.difficulty,
+                "confidence": rel.confidence,
+                "is_primary_fix": bool(rel.is_primary_fix),
+                "estimated_time_minutes": repair.estimated_time_minutes,
+                "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+            }
+        )
 
     return result
 
@@ -464,23 +481,27 @@ async def get_engine_common_issues(engine_code: str) -> dict:
     # Get common DTC issues
     for dtc in engine.common_issues.all():
         rel = engine.common_issues.relationship(dtc)
-        result["common_dtcs"].append({
-            "code": dtc.code,
-            "description": dtc.description_hu or dtc.description_en,
-            "severity": dtc.severity,
-            "frequency": rel.frequency,
-        })
+        result["common_dtcs"].append(
+            {
+                "code": dtc.code,
+                "description": dtc.description_hu or dtc.description_en,
+                "severity": dtc.severity,
+                "frequency": rel.frequency,
+            }
+        )
 
     # Get vehicles using this engine
     for vehicle in engine.used_in.all():
         rel = engine.used_in.relationship(vehicle)
-        result["vehicles_using"].append({
-            "make": vehicle.make,
-            "model": vehicle.model,
-            "year_start": rel.year_start or vehicle.year_start,
-            "year_end": rel.year_end or vehicle.year_end,
-            "variant": rel.variant_name,
-        })
+        result["vehicles_using"].append(
+            {
+                "make": vehicle.make,
+                "model": vehicle.model,
+                "year_start": rel.year_start or vehicle.year_start,
+                "year_end": rel.year_end or vehicle.year_end,
+                "variant": rel.variant_name,
+            }
+        )
 
     return result
 
@@ -503,12 +524,14 @@ async def find_similar_vehicles(make: str, model: str) -> list:
     similar = []
     for other_vehicle in vehicle.shares_platform_with.all():
         rel = vehicle.shares_platform_with.relationship(other_vehicle)
-        similar.append({
-            "make": other_vehicle.make,
-            "model": other_vehicle.model,
-            "platform": rel.platform_code,
-            "year_start": other_vehicle.year_start,
-            "year_end": other_vehicle.year_end,
-        })
+        similar.append(
+            {
+                "make": other_vehicle.make,
+                "model": other_vehicle.model,
+                "platform": rel.platform_code,
+                "year_start": other_vehicle.year_start,
+                "year_end": other_vehicle.year_end,
+            }
+        )
 
     return similar

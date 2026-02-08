@@ -44,8 +44,10 @@ router = APIRouter()
 # Response Models
 # =============================================================================
 
+
 class ServiceHealth(BaseModel):
     """Health status for a single service."""
+
     name: str
     status: str  # "healthy", "degraded", "unhealthy", "unknown"
     latency_ms: float = 0.0
@@ -55,6 +57,7 @@ class ServiceHealth(BaseModel):
 
 class DetailedHealthResponse(BaseModel):
     """Detailed health response with all services."""
+
     status: str
     version: str
     environment: str
@@ -65,6 +68,7 @@ class DetailedHealthResponse(BaseModel):
 
 class ReadinessResponse(BaseModel):
     """Readiness probe response."""
+
     status: str
     checks: dict[str, bool]
     checked_at: str
@@ -72,12 +76,14 @@ class ReadinessResponse(BaseModel):
 
 class LivenessResponse(BaseModel):
     """Liveness probe response."""
+
     status: str
     checked_at: str
 
 
 class DatabaseStats(BaseModel):
     """Database statistics."""
+
     postgres: dict[str, Any]
     neo4j: dict[str, Any]
     qdrant: dict[str, Any]
@@ -99,6 +105,7 @@ def get_startup_time() -> float:
 # =============================================================================
 # Health Check Functions
 # =============================================================================
+
 
 async def check_postgres_health() -> ServiceHealth:
     """Check PostgreSQL database health."""
@@ -143,7 +150,7 @@ async def check_postgres_health() -> ServiceHealth:
             details={
                 "table_counts": table_counts,
                 "pool_status": pool_status,
-            }
+            },
         )
 
     except Exception as e:
@@ -200,8 +207,10 @@ async def check_neo4j_health() -> ServiceHealth:
             details={
                 "node_counts": node_counts,
                 "relationship_count": rel_count,
-                "uri": settings.NEO4J_URI.split("@")[-1] if "@" in settings.NEO4J_URI else settings.NEO4J_URI,
-            }
+                "uri": settings.NEO4J_URI.split("@")[-1]
+                if "@" in settings.NEO4J_URI
+                else settings.NEO4J_URI,
+            },
         )
 
     except AuthError as e:
@@ -281,7 +290,7 @@ async def check_qdrant_health() -> ServiceHealth:
                 "location": qdrant_location,
                 "collections_count": len(collections.collections),
                 "collections": collection_info,
-            }
+            },
         )
 
     except Exception as e:
@@ -329,7 +338,7 @@ async def check_redis_health() -> ServiceHealth:
                 "used_memory_human": memory.get("used_memory_human", "unknown"),
                 "uptime_in_seconds": info.get("uptime_in_seconds", 0),
                 "total_commands_processed": info.get("total_commands_processed", 0),
-            }
+            },
         )
 
     except redis.ConnectionError as e:
@@ -355,6 +364,7 @@ async def check_redis_health() -> ServiceHealth:
 # =============================================================================
 # API Endpoints
 # =============================================================================
+
 
 @router.get("/live", response_model=LivenessResponse, tags=["Health"])
 async def liveness_check():
@@ -409,7 +419,7 @@ async def readiness_check():
             extra={
                 "event": "readiness_failed",
                 "checks": checks,
-            }
+            },
         )
         raise HTTPException(
             status_code=503,
@@ -417,7 +427,7 @@ async def readiness_check():
                 "status": "not_ready",
                 "checks": checks,
                 "message": "Critical services unavailable",
-            }
+            },
         )
 
     return ReadinessResponse(
@@ -518,7 +528,7 @@ async def detailed_health_check():
             "overall_status": overall_status,
             "services": {name: svc.status for name, svc in services.items()},
             "uptime_seconds": round(uptime, 2),
-        }
+        },
     )
 
     return DetailedHealthResponse(
@@ -554,9 +564,13 @@ async def database_stats():
     )
 
     return {
-        "postgres": postgres.details if not isinstance(postgres, Exception) else {"error": str(postgres)},
+        "postgres": postgres.details
+        if not isinstance(postgres, Exception)
+        else {"error": str(postgres)},
         "neo4j": neo4j.details if not isinstance(neo4j, Exception) else {"error": str(neo4j)},
         "qdrant": qdrant.details if not isinstance(qdrant, Exception) else {"error": str(qdrant)},
-        "redis": redis_health.details if not isinstance(redis_health, Exception) else {"error": str(redis_health)},
+        "redis": redis_health.details
+        if not isinstance(redis_health, Exception)
+        else {"error": str(redis_health)},
         "checked_at": datetime.utcnow().isoformat() + "Z",
     }

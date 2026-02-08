@@ -32,6 +32,7 @@ from app.services.llm_provider import (
     LLMProviderFactory,
     LLMProviderType,
     LLMResponse,
+    LLMStreamChunk,
     OllamaProvider,
     OpenAIProvider,
     RuleBasedProvider,
@@ -86,6 +87,7 @@ __all__ = [
     # LLM Provider
     "LLMProviderType",
     "LLMResponse",
+    "LLMStreamChunk",
     "NHTSAError",
     # NHTSA Service
     "NHTSAService",

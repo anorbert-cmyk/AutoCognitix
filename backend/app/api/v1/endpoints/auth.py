@@ -8,12 +8,11 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.auth import (
     ForgotPasswordRequest,
@@ -38,9 +37,12 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
-from app.db.postgres.models import User
 from app.db.postgres.repositories import UserRepository
 from app.db.postgres.session import get_db
+
+if TYPE_CHECKING:
+    from app.db.postgres.models import User
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ async def get_current_user_from_token(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = decode_token(token)
+    payload = await decode_token(token)
 
     if not payload:
         logger.warning("Invalid token provided")
@@ -215,9 +217,7 @@ LOGIN_RESPONSES: dict[int, dict[str, Any]] = {
     },
     401: {
         "description": "Hibás bejelentkezési adatok",
-        "content": {
-            "application/json": {"example": {"detail": "Hibás email cím vagy jelszó"}}
-        },
+        "content": {"application/json": {"example": {"detail": "Hibás email cím vagy jelszó"}}},
     },
     423: {
         "description": "Fiók zárolva",
@@ -246,9 +246,7 @@ REFRESH_RESPONSES: dict[int, dict[str, Any]] = {
     },
     401: {
         "description": "Érvénytelen vagy lejárt refresh token",
-        "content": {
-            "application/json": {"example": {"detail": "Érvénytelen refresh token"}}
-        },
+        "content": {"application/json": {"example": {"detail": "Érvénytelen refresh token"}}},
     },
 }
 
@@ -269,9 +267,7 @@ ME_RESPONSES: dict[int, dict[str, Any]] = {
     },
     401: {
         "description": "Érvénytelen vagy lejárt access token",
-        "content": {
-            "application/json": {"example": {"detail": "Érvénytelen access token"}}
-        },
+        "content": {"application/json": {"example": {"detail": "Érvénytelen access token"}}},
     },
 }
 
@@ -512,7 +508,7 @@ async def refresh_tokens(
     Raises:
         401: Invalid refresh token
     """
-    payload = decode_token(token_data.refresh_token)
+    payload = await decode_token(token_data.refresh_token)
 
     if not payload or payload.get("type") != "refresh":
         logger.warning("Invalid refresh token provided")
@@ -541,7 +537,7 @@ async def refresh_tokens(
         )
 
     # Blacklist old refresh token
-    blacklist_token(token_data.refresh_token)
+    await blacklist_token(token_data.refresh_token)
 
     # Create new tokens
     access_token = create_access_token(
@@ -587,11 +583,11 @@ async def logout(
         Logout confirmation
     """
     # Blacklist access token
-    blacklist_token(token)
+    await blacklist_token(token)
 
     # Blacklist refresh token if provided
     if logout_data and logout_data.refresh_token:
-        blacklist_token(logout_data.refresh_token)
+        await blacklist_token(logout_data.refresh_token)
 
     logger.info("User logged out")
 
@@ -832,7 +828,7 @@ async def reset_password(
         Success message
     """
     # Verify token
-    payload = decode_token(request_data.token)
+    payload = await decode_token(request_data.token)
 
     if not payload or payload.get("type") != "password_reset":
         raise HTTPException(
@@ -862,7 +858,7 @@ async def reset_password(
     await db.commit()
 
     # Blacklist the used reset token
-    blacklist_token(request_data.token)
+    await blacklist_token(request_data.token)
 
     logger.info(f"Password reset completed for: {user.email}")
 

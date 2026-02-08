@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import traceback
 import uuid
-from collections.abc import Callable
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -37,6 +36,9 @@ from app.core.exceptions import (
     get_error_message,
 )
 from app.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = get_logger(__name__)
 
@@ -175,11 +177,13 @@ async def validation_exception_handler(
     errors = []
     for error in exc.errors():
         field_path = " -> ".join(str(loc) for loc in error["loc"])
-        errors.append({
-            "field": field_path,
-            "message": error["msg"],
-            "type": error["type"],
-        })
+        errors.append(
+            {
+                "field": field_path,
+                "message": error["msg"],
+                "type": error["type"],
+            }
+        )
 
     logger.warning(
         "Validation error",
@@ -210,11 +214,13 @@ async def pydantic_validation_exception_handler(
     errors = []
     for error in exc.errors():
         field_path = " -> ".join(str(loc) for loc in error["loc"])
-        errors.append({
-            "field": field_path,
-            "message": error["msg"],
-            "type": error["type"],
-        })
+        errors.append(
+            {
+                "field": field_path,
+                "message": error["msg"],
+                "type": error["type"],
+            }
+        )
 
     logger.warning(
         "Pydantic validation error",

@@ -4,19 +4,12 @@ DTC (Diagnostic Trouble Code) schemas.
 
 from __future__ import annotations
 
-import sys
-from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 # Python 3.11+ has StrEnum, provide compatibility for earlier versions
-if sys.version_info >= (3, 11):
-    from enum import StrEnum
-else:
-    class StrEnum(str, Enum):
-        """String enum for Python < 3.11 compatibility."""
-        pass
+from enum import StrEnum
 
 
 class DTCCategory(StrEnum):
@@ -64,14 +57,22 @@ class DTCCodeDetail(DTCCode):
     system: Optional[str] = Field(None, description="System/subsystem affected")
 
     symptoms: List[str] = Field(default_factory=list, description="Common symptoms in Hungarian")
-    possible_causes: List[str] = Field(default_factory=list, description="Possible causes in Hungarian")
-    diagnostic_steps: List[str] = Field(default_factory=list, description="Diagnostic steps in Hungarian")
+    possible_causes: List[str] = Field(
+        default_factory=list, description="Possible causes in Hungarian"
+    )
+    diagnostic_steps: List[str] = Field(
+        default_factory=list, description="Diagnostic steps in Hungarian"
+    )
 
     related_codes: List[str] = Field(default_factory=list, description="Related DTC codes")
-    common_vehicles: List[str] = Field(default_factory=list, description="Commonly affected vehicles")
+    common_vehicles: List[str] = Field(
+        default_factory=list, description="Commonly affected vehicles"
+    )
 
     manufacturer_code: Optional[str] = Field(None, description="Manufacturer-specific code")
-    freeze_frame_data: Optional[List[str]] = Field(None, description="Expected freeze frame parameters")
+    freeze_frame_data: Optional[List[str]] = Field(
+        None, description="Expected freeze frame parameters"
+    )
 
 
 class DTCCreate(BaseModel):

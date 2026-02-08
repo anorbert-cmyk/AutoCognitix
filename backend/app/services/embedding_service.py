@@ -31,6 +31,7 @@ from app.core.config import settings
 # Optional spacy import - not required for basic embedding functionality
 try:
     import spacy
+
     SPACY_AVAILABLE = True
 except ImportError:
     spacy = None
@@ -147,23 +148,27 @@ class HungarianEmbeddingService:
         """
         Clean up GPU memory if utilization is high.
 
-        Should be called after processing large batches.
+        Should be called after processing large batches or before OOM recovery.
         """
-        if self._device.type != "cuda":
-            return
+        if self._device.type == "cuda":
+            # Check current memory utilization
+            allocated = torch.cuda.memory_allocated()
+            total = torch.cuda.get_device_properties(0).total_memory
+            utilization = allocated / total
 
-        # Check current memory utilization
-        allocated = torch.cuda.memory_allocated()
-        total = torch.cuda.get_device_properties(0).total_memory
-        utilization = allocated / total
-
-        if utilization > self.GPU_MEMORY_THRESHOLD:
-            torch.cuda.empty_cache()
+            if utilization > self.GPU_MEMORY_THRESHOLD:
+                torch.cuda.empty_cache()
+                gc.collect()
+                logger.debug(
+                    f"GPU memory cleaned: {utilization * 100:.1f}% -> "
+                    f"{torch.cuda.memory_allocated() / total * 100:.1f}%"
+                )
+            else:
+                # Always clean cache on explicit call (for OOM recovery)
+                torch.cuda.empty_cache()
+        elif self._device.type == "mps":
+            # MPS doesn't have explicit cache clearing, but gc helps
             gc.collect()
-            logger.debug(
-                f"GPU memory cleaned: {utilization*100:.1f}% -> "
-                f"{torch.cuda.memory_allocated()/total*100:.1f}%"
-            )
 
     def _load_hubert_model(self) -> None:
         """
@@ -206,10 +211,7 @@ class HungarianEmbeddingService:
                 except Exception as e:
                     logger.debug(f"torch.compile not available: {e}")
 
-            logger.info(
-                f"huBERT model loaded: dtype={self._model.dtype}, "
-                f"device={self._device}"
-            )
+            logger.info(f"huBERT model loaded: dtype={self._model.dtype}, device={self._device}")
         except Exception as e:
             logger.error(f"Failed to load huBERT model: {e}")
             raise RuntimeError(f"Could not load huBERT model: {e}") from e
@@ -241,9 +243,7 @@ class HungarianEmbeddingService:
             raise RuntimeError(f"Could not load HuSpaCy model: {e}") from e
 
     def _mean_pooling(
-        self,
-        model_output: torch.Tensor,
-        attention_mask: torch.Tensor
+        self, model_output: torch.Tensor, attention_mask: torch.Tensor
     ) -> torch.Tensor:
         """
         Apply mean pooling to token embeddings.
@@ -259,11 +259,7 @@ class HungarianEmbeddingService:
         token_embeddings = model_output.last_hidden_state
 
         # Expand attention mask to match embedding dimension
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1)
-            .expand(token_embeddings.size())
-            .float()
-        )
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
 
         # Sum embeddings and divide by the number of valid tokens
         sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, dim=1)
@@ -330,11 +326,7 @@ class HungarianEmbeddingService:
 
         # Tokenize
         encoded = self._tokenizer(
-            text,
-            padding=True,
-            truncation=True,
-            max_length=512,
-            return_tensors="pt"
+            text, padding=True, truncation=True, max_length=512, return_tensors="pt"
         )
 
         # Move to device
@@ -420,8 +412,7 @@ class HungarianEmbeddingService:
 
         # Initialize result array
         all_embeddings: list[list[float]] = [
-            [0.0] * settings.EMBEDDING_DIMENSION
-            for _ in range(len(texts))
+            [0.0] * settings.EMBEDDING_DIMENSION for _ in range(len(texts))
         ]
 
         # Fill in cached results
@@ -457,15 +448,16 @@ class HungarianEmbeddingService:
             results: Results list to populate in-place.
             batch_size: Batch size for processing.
         """
+        # Add GPU memory cleanup before processing
+        if self._device.type in ("cuda", "mps"):
+            self._cleanup_gpu_memory()
+
         # Process in batches
         for i in range(0, len(texts_with_indices), batch_size):
-            batch = texts_with_indices[i:i + batch_size]
+            batch = texts_with_indices[i : i + batch_size]
 
             # Separate indices and texts
-            non_empty_items = [
-                (idx, text) for idx, text in batch
-                if text and text.strip()
-            ]
+            non_empty_items = [(idx, text) for idx, text in batch if text and text.strip()]
 
             if not non_empty_items:
                 continue
@@ -475,26 +467,37 @@ class HungarianEmbeddingService:
 
             # Tokenize batch
             encoded = self._tokenizer(
-                batch_texts,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors="pt"
+                batch_texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
             )
 
             # Move to device with correct dtype
-            encoded = {
-                k: v.to(self._device)
-                for k, v in encoded.items()
-            }
+            encoded = {k: v.to(self._device) for k, v in encoded.items()}
 
-            # Generate embeddings with autocast for FP16
-            with torch.no_grad():
-                if self._use_fp16 and self._device.type == "cuda":
-                    with torch.cuda.amp.autocast():
+            # Generate embeddings with autocast for FP16 and OOM recovery
+            try:
+                with torch.no_grad():
+                    if self._use_fp16 and self._device.type == "cuda":
+                        with torch.cuda.amp.autocast():
+                            model_output = self._model(**encoded)
+                    else:
                         model_output = self._model(**encoded)
-                else:
-                    model_output = self._model(**encoded)
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logger.warning(f"GPU OOM detected, reducing batch size and retrying")
+                    self._cleanup_gpu_memory()
+                    # Retry with smaller batch
+                    if batch_size > 1:
+                        logger.info(f"Retrying with batch_size={batch_size // 2}")
+                        self._embed_batch_internal(
+                            [(idx, text) for idx, text in batch],
+                            results,
+                            batch_size=batch_size // 2,
+                        )
+                        continue
+                    else:
+                        logger.error("GPU OOM with batch_size=1, cannot reduce further")
+                        raise
+                raise
 
             # Apply mean pooling
             embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
@@ -512,11 +515,7 @@ class HungarianEmbeddingService:
             logger.debug(f"Batch {i // batch_size + 1}: {len(batch_texts)} texts embedded")
 
     def get_similar_texts(
-        self,
-        query: str,
-        candidates: list[str],
-        top_k: int = 5,
-        preprocess: bool = False
+        self, query: str, candidates: list[str], top_k: int = 5, preprocess: bool = False
     ) -> list[tuple[str, float]]:
         """
         Find most similar texts to a query using cosine similarity.
@@ -630,6 +629,7 @@ class HungarianEmbeddingService:
         if use_cache and self._cache_enabled:
             try:
                 from app.db.redis_cache import get_cache_service
+
                 cache = await get_cache_service()
                 cached = await cache.get_embedding(text)
                 if cached is not None:
@@ -640,14 +640,14 @@ class HungarianEmbeddingService:
         # Run embedding in thread pool
         loop = asyncio.get_running_loop()
         embedding = await loop.run_in_executor(
-            _thread_pool,
-            lambda: self.embed_text(text, preprocess)
+            _thread_pool, lambda: self.embed_text(text, preprocess)
         )
 
         # Store in cache
         if use_cache and self._cache_enabled:
             try:
                 from app.db.redis_cache import get_cache_service
+
                 cache = await get_cache_service()
                 await cache.set_embedding(text, embedding)
             except Exception:
@@ -684,6 +684,7 @@ class HungarianEmbeddingService:
         if use_cache and self._cache_enabled:
             try:
                 from app.db.redis_cache import get_cache_service
+
                 cache = await get_cache_service()
                 cached = await cache.get_embeddings_batch(texts)
 
@@ -716,7 +717,7 @@ class HungarianEmbeddingService:
                     preprocess=preprocess,
                     batch_size=batch_size,
                     use_cache=False,  # Already handled caching
-                )
+                ),
             )
 
             # Fill in results
@@ -727,6 +728,7 @@ class HungarianEmbeddingService:
             if use_cache and self._cache_enabled:
                 try:
                     from app.db.redis_cache import get_cache_service
+
                     cache = await get_cache_service()
                     for text, emb in zip(uncached_texts, embeddings, strict=False):
                         await cache.set_embedding(text, emb)
@@ -777,9 +779,7 @@ def embed_text(text: str, preprocess: bool = False) -> list[float]:
 
 
 def embed_batch(
-    texts: list[str],
-    preprocess: bool = False,
-    batch_size: int = 32
+    texts: list[str], preprocess: bool = False, batch_size: int = 32
 ) -> list[list[float]]:
     """
     Generate embeddings for multiple texts with batch processing.
@@ -809,10 +809,7 @@ def preprocess_hungarian(text: str) -> str:
 
 
 def get_similar_texts(
-    query: str,
-    candidates: list[str],
-    top_k: int = 5,
-    preprocess: bool = False
+    query: str, candidates: list[str], top_k: int = 5, preprocess: bool = False
 ) -> list[tuple[str, float]]:
     """
     Find most similar texts to a query using cosine similarity.
@@ -832,6 +829,7 @@ def get_similar_texts(
 # =============================================================================
 # Async Convenience Functions
 # =============================================================================
+
 
 async def embed_text_async(
     text: str,
@@ -870,6 +868,4 @@ async def embed_batch_async(
     Returns:
         List[List[float]]: List of embedding vectors.
     """
-    return await get_embedding_service().embed_batch_async(
-        texts, preprocess, batch_size, use_cache
-    )
+    return await get_embedding_service().embed_batch_async(texts, preprocess, batch_size, use_cache)

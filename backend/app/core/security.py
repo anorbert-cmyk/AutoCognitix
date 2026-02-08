@@ -6,24 +6,20 @@ Provides JWT token management, password hashing, and token blacklisting.
 
 from __future__ import annotations
 
+import logging
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Set, Union
+from datetime import datetime, timedelta, timezone, UTC
+from typing import Any, Dict, Optional, Union
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Python 3.11+ has datetime.UTC, for older versions use timezone.utc
-UTC = timezone.utc
+logger = logging.getLogger(__name__)
 
 # Password hashing context with bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# In-memory token blacklist (in production, use Redis)
-# This stores JTI (JWT ID) of invalidated tokens
-_token_blacklist: Set[str] = set()
 
 
 def create_access_token(
@@ -45,9 +41,7 @@ def create_access_token(
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
-        )
+        expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode = {
         "exp": expire,
@@ -86,9 +80,7 @@ def create_refresh_token(
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(
-            days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
+        expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode = {
         "exp": expire,
@@ -153,7 +145,7 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def decode_token(token: str) -> dict[str, Any] | None:
+async def decode_token(token: str) -> dict[str, Any] | None:
     """
     Decode and verify a JWT token.
 
@@ -172,7 +164,7 @@ def decode_token(token: str) -> dict[str, Any] | None:
 
         # Check if token is blacklisted
         jti = payload.get("jti")
-        if jti and is_token_blacklisted(jti):
+        if jti and await is_token_blacklisted(jti):
             return None
 
         return payload
@@ -180,9 +172,12 @@ def decode_token(token: str) -> dict[str, Any] | None:
         return None
 
 
-def blacklist_token(token: str) -> bool:
+async def blacklist_token(token: str) -> bool:
     """
-    Add a token to the blacklist.
+    Add a token to the Redis blacklist with TTL matching token expiry.
+
+    This prevents the token from being used again while avoiding
+    storing expired tokens indefinitely.
 
     Args:
         token: The JWT token to blacklist
@@ -191,7 +186,7 @@ def blacklist_token(token: str) -> bool:
         True if successfully blacklisted, False otherwise
     """
     try:
-        # Decode without verification to get JTI even if expired
+        # Decode without verification to get JTI and expiration
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
@@ -199,17 +194,38 @@ def blacklist_token(token: str) -> bool:
             options={"verify_exp": False},
         )
         jti = payload.get("jti")
-        if jti:
-            _token_blacklist.add(jti)
-            return True
-        return False
-    except JWTError:
+        if not jti:
+            logger.warning("Token missing JTI claim - cannot blacklist")
+            return False
+
+        # Calculate TTL based on token expiration
+        exp = payload.get("exp", 0)
+        ttl = max(0, exp - int(datetime.now(UTC).timestamp()))
+
+        # Only store if token hasn't expired yet
+        if ttl > 0:
+            try:
+                from app.db.redis_cache import get_cache_service
+
+                cache = await get_cache_service()
+                await cache.set(f"blacklist:{jti}", "1", ttl=ttl)
+                logger.info(f"Token blacklisted: {jti[:8]}... (TTL: {ttl}s)")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to blacklist token in Redis: {e}")
+                return False
+        else:
+            logger.debug(f"Token already expired, skipping blacklist: {jti[:8]}...")
+            return True  # Expired tokens are effectively blacklisted
+
+    except JWTError as e:
+        logger.warning(f"Failed to decode token for blacklisting: {e}")
         return False
 
 
-def is_token_blacklisted(jti: str) -> bool:
+async def is_token_blacklisted(jti: str) -> bool:
     """
-    Check if a token JTI is blacklisted.
+    Check if a token JTI is in the Redis blacklist.
 
     Args:
         jti: The JWT ID to check
@@ -217,7 +233,17 @@ def is_token_blacklisted(jti: str) -> bool:
     Returns:
         True if blacklisted, False otherwise
     """
-    return jti in _token_blacklist
+    try:
+        from app.db.redis_cache import get_cache_service
+
+        cache = await get_cache_service()
+        result = await cache.get(f"blacklist:{jti}")
+        return result is not None
+    except Exception as e:
+        logger.error(f"Failed to check token blacklist: {e}")
+        # Fail open - if Redis is unavailable, allow the token
+        # The token will still be validated for expiration and signature
+        return False
 
 
 def validate_password_strength(password: str) -> tuple[bool, list[str]]:
@@ -250,7 +276,9 @@ def validate_password_strength(password: str) -> tuple[bool, list[str]]:
     # Check for special characters
     special_chars = set("!@#$%^&*()_+-=[]{}|;:,.<>?")
     if not any(c in special_chars for c in password):
-        errors.append("A jelszónak tartalmaznia kell legalább egy speciális karaktert (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+        errors.append(
+            "A jelszónak tartalmaznia kell legalább egy speciális karaktert (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+        )
 
     return len(errors) == 0, errors
 

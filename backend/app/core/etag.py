@@ -49,11 +49,14 @@ class ETagMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.include_paths = include_paths
-        self.exclude_paths: set[str] = set(exclude_paths or [
-            "/api/v1/metrics",
-            "/health",
-            "/api/v1/auth",
-        ])
+        self.exclude_paths: set[str] = set(
+            exclude_paths
+            or [
+                "/api/v1/metrics",
+                "/health",
+                "/api/v1/auth",
+            ]
+        )
         self.weak_etag = weak_etag
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -138,6 +141,7 @@ class ETagMiddleware(BaseHTTPMiddleware):
 
         Handles multiple ETags separated by commas and weak comparison.
         """
+
         # Normalize the ETag (remove W/ prefix for comparison if needed)
         def normalize(tag: str) -> str:
             tag = tag.strip()
