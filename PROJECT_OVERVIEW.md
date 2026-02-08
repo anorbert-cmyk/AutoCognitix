@@ -15,12 +15,15 @@
 - **Multi-Database AI Architecture**: Combines PostgreSQL, Neo4j graph database, and Qdrant vector search for comprehensive analysis
 - **RAG-Powered Intelligence**: Retrieval-Augmented Generation provides contextual, accurate diagnostic recommendations
 
-**Current Achievements:**
-- 26,000+ nodes in Neo4j diagnostic knowledge graph
-- 21,000+ semantic embeddings in Qdrant vector database
-- 3,579+ DTC codes with Hungarian translations
-- 738+ vehicle configurations from OBDb database
-- 520+ vehicle components and 320+ repair procedures mapped
+**V1 Production Target (Q2 2026):**
+- ✅ **Cloud Deployment**: Railway + Neo4j Aura + Qdrant Cloud
+- 160,000+ nodes in Neo4j diagnostic knowledge graph
+- 170,000+ semantic embeddings in Qdrant vector database (HuBERT 768-dim)
+- 11,000+ DTC codes with Hungarian translations (80%+ coverage)
+- 1,500+ vehicle configurations covering European market
+- 146,000+ NHTSA complaints indexed for pattern analysis
+- 200+ automated tests (unit + integration + E2E)
+- Full CI/CD pipeline with security scanning
 
 ---
 
@@ -34,12 +37,15 @@ Az **AutoCognitix** egy innovativ, mesterseges intelligenciaval tamogatott gepja
 - **Tobbadatbazisos AI architektura**: PostgreSQL, Neo4j graf adatbazis es Qdrant vektor kereses kombinacioja atfogo elemzeshez
 - **RAG-alapu intelligencia**: A Retrieval-Augmented Generation kontextualis, pontos diagnosztikai javaslatokat biztosit
 
-**Jelenlegi eredmenyek:**
-- 26 000+ csomoport a Neo4j diagnosztikai tudagrafban
-- 21 000+ szemantikus embedding a Qdrant vektor adatbazisban
-- 3 579+ DTC kod magyar forditassal
-- 738+ jarmu konfiguracio az OBDb adatbazisbol
-- 520+ jarmu-alkatresz es 320+ javitasi eljaras felterkepezve
+**V1 Termelesi Cel (Q2 2026):**
+- ✅ **Felho Telepites**: Railway + Neo4j Aura + Qdrant Cloud
+- 160 000+ csomopont a Neo4j diagnosztikai tudagrafban
+- 170 000+ szemantikus embedding a Qdrant vektor adatbazisban (HuBERT 768-dim)
+- 11 000+ DTC kod magyar forditassal (80%+ lefedettseg)
+- 1 500+ jarmu konfiguracio az europai piacra
+- 146 000+ NHTSA panasz indexelve mintazat-elemzeshez
+- 200+ automatizalt teszt (unit + integracio + E2E)
+- Teljes CI/CD pipeline biztonsagi szkenneléssel
 
 ---
 
@@ -68,7 +74,7 @@ AutoCognitix addresses these challenges through:
 
 1. **Hardware-Free Input**: Users manually enter DTC codes displayed on their dashboard or describe symptoms in natural language
 2. **Hungarian Language AI**: Native understanding of Hungarian automotive terminology using SZTAKI's huBERT model
-3. **Knowledge Graph Intelligence**: Neo4j-based diagnostic paths connecting 26,000+ nodes (DTCs, symptoms, components, repairs)
+3. **Knowledge Graph Intelligence**: Neo4j-based diagnostic paths connecting 160,000+ nodes (DTCs, symptoms, components, repairs, complaints)
 4. **Semantic Search**: Qdrant vector database enables finding related issues through meaning, not just keywords
 5. **Multi-Source Data Aggregation**: Integrates NHTSA recalls, complaints, OBDb specifications, and repair databases
 
@@ -77,7 +83,7 @@ Az AutoCognitix ezeket a kihivasokat a kovetkezokeppen kezeli:
 
 1. **Hardver nelkuli bevitel**: A felhasznalok manuaisan adják meg a muszerfalon megjeleno DTC kodokat vagy termeszetes nyelven leirjak a tuneteket
 2. **Magyar nyelvu AI**: A magyar gepjarmu-terminologia nativ megertese a SZTAKI huBERT modelljevel
-3. **Tudagraf intelligencia**: Neo4j-alapu diagnosztikai utvonalak, amelyek 26 000+ csomopontot kotnek ossze (DTC-k, tunetek, alkatreszek, javitasok)
+3. **Tudagraf intelligencia**: Neo4j-alapu diagnosztikai utvonalak, amelyek 160 000+ csomopontot kotnek ossze (DTC-k, tunetek, alkatreszek, javitasok, panaszok)
 4. **Szemantikus kereses**: A Qdrant vektor adatbazis lehetove teszi a kapcsolodo problemak megtalalasat jelentestartalom alapjan, nem csak kulcsszavakkal
 5. **Tobbforrasos adataggregacio**: Integralja az NHTSA visszahivasokat, panaszokat, OBDb specifikaciokat es javitasi adatbazisokat
 
@@ -133,11 +139,11 @@ AutoCognitix employs a polyglot persistence architecture where each database typ
 1. **PostgreSQL**: Handles structured data including users, diagnosis sessions, vehicle specifications, and NHTSA data. Optimized with 15+ performance indexes including GIN indexes for array operations and full-text search.
 
 2. **Neo4j**: Stores the diagnostic knowledge graph with nodes for:
-   - DTCCode (3,579 nodes)
-   - Symptom (117+ nodes)
-   - Component (520+ nodes)
-   - Repair (320+ nodes)
-   - Vehicle relationships
+   - DTCCode (11,000+ nodes)
+   - Vehicle (1,500+ nodes)
+   - Complaint (146,000+ nodes)
+   - Recall (2,100+ nodes)
+   - Symptom, Component, Repair relationships
 
 3. **Qdrant**: Vector database storing 768-dimensional huBERT embeddings for:
    - DTC code descriptions (Hungarian/English)
@@ -157,11 +163,11 @@ Az AutoCognitix poliglott perzisztencia architekturathasznál, ahol minden adatb
 1. **PostgreSQL**: Strukturalt adatok kezelese, beleertve a felhasznalokat, diagnozis munkameneteket, jarmu specifikaciokat es NHTSA adatokat. 15+ teljesitmeny indexszel optimalizalva, beleertve GIN indexeket tombuműveletekhez es teljes szoveges kereséshez.
 
 2. **Neo4j**: A diagnosztikai tudagraf tarolasa csomopontokkal:
-   - DTCCode (3 579 csomopont)
-   - Symptom (117+ csomopont)
-   - Component (520+ csomopont)
-   - Repair (320+ csomopont)
-   - Jarmu kapcsolatok
+   - DTCCode (11 000+ csomopont)
+   - Vehicle (1 500+ csomopont)
+   - Complaint (146 000+ csomopont)
+   - Recall (2 100+ csomopont)
+   - Tunet, Alkatresz, Javitas kapcsolatok
 
 3. **Qdrant**: Vektor adatbazis 768 dimenzios huBERT embeddingekkel:
    - DTC kod leirasok (magyar/angol)
@@ -244,7 +250,7 @@ A rendszer kezeli a magyar gepjarmuipari terminológiat, beleertve:
 | **NHTSA API** | Recalls, complaints, TSBs | 50,000+ records | Live API |
 | **obd-trouble-codes** | Generic DTC codes | 11,000+ codes | Imported |
 | **Klavkarr** | Extended DTC database | 11,000+ codes | Imported |
-| **Custom translations** | Hungarian descriptions | 3,579+ codes | Translated |
+| **Custom translations** | Hungarian descriptions | 11,000+ codes | Translated |
 
 ### AI Pipeline / AI Csovezetek
 
@@ -342,7 +348,7 @@ Structured Response (Hungarian/English)
 | Hardware Required | None | Yes (50-500 EUR) | Yes |
 | Hungarian Language | Native | None | None |
 | AI-Powered Analysis | Yes | No | Limited |
-| Knowledge Graph | 26K+ nodes | No | No |
+| Knowledge Graph | 160K+ nodes | No | No |
 | Repair Recommendations | Detailed | Basic | Limited |
 | NHTSA Integration | Yes | No | Rare |
 | Cost Model | Subscription | One-time + updates | Subscription |
@@ -365,10 +371,12 @@ Structured Response (Hungarian/English)
 - [x] Hungarian NLP pipeline with huBERT
 - [x] Basic DTC lookup and search
 - [x] NHTSA API integration
-- [x] 3,579+ DTC codes with Hungarian translations
-- [x] Knowledge graph with 26,000+ nodes
-- [x] Vector embeddings for 21,000+ entries
+- [x] 11,000+ DTC codes with Hungarian translations
+- [x] Knowledge graph with 160,000+ nodes
+- [x] Vector embeddings for 170,000+ entries
 - [x] Railway cloud deployment
+- [x] Full test suite (200+ tests)
+- [x] CI/CD with security scanning
 
 ### Phase 2: Enhancement (In Progress / Folyamatban)
 **Q2 2026**
@@ -414,25 +422,28 @@ Structured Response (Hungarian/English)
 | API Availability | 99.5% | 99.9% |
 | Cache Hit Rate | 85% | 95% |
 
-### Database Statistics / Adatbazis Statisztikak
+### Database Statistics (V1 Target) / Adatbazis Statisztikak (V1 Cel)
 
-| Database | Metric | Value |
-|----------|--------|-------|
+| Database | Metric | V1 Target Value |
+|----------|--------|-----------------|
 | PostgreSQL | Tables | 15+ |
 | PostgreSQL | Indexes | 25+ |
-| Neo4j | Nodes | 26,000+ |
-| Neo4j | Relationships | 8,000+ |
-| Qdrant | Vectors | 21,000+ |
-| Qdrant | Dimension | 768 |
-| Redis | Cache Keys | 10,000+ avg |
+| Neo4j Aura | Total Nodes | 160,000+ |
+| Neo4j Aura | Vehicles | 1,500+ |
+| Neo4j Aura | DTC Codes | 11,000+ |
+| Neo4j Aura | Complaints | 146,000+ |
+| Neo4j Aura | Recalls | 2,100+ |
+| Qdrant Cloud | Vectors | 170,000+ |
+| Qdrant Cloud | Dimension | 768 (HuBERT) |
+| Redis | Cache Keys | 50,000+ avg |
 
 ### Code Quality / Kod minoseg
 
-- **Test Coverage**: Unit tests, integration tests, E2E tests
-- **CI/CD Pipeline**: GitHub Actions with automated deployment
+- **Test Coverage**: 200+ tests (unit, integration, E2E)
+- **CI/CD Pipeline**: GitHub Actions with automated deployment to Railway
 - **Security Scanning**: CodeQL, Bandit, npm audit, Trivy
-- **Code Quality**: Ruff linting, MyPy type checking
-- **Documentation**: API docs (OpenAPI), user manuals (HU/EN)
+- **Code Quality**: Ruff linting, MyPy type checking, 90%+ coverage target
+- **Documentation**: API docs (OpenAPI/Swagger), user manuals (HU/EN)
 
 ---
 
@@ -495,6 +506,7 @@ Structured Response (Hungarian/English)
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1*
 *Last Updated: 2026-02-08*
+*Target Release: V1 Production (Q2 2026)*
 *Language: Bilingual (English/Hungarian)*
