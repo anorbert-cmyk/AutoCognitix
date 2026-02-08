@@ -9,10 +9,10 @@ Provides AI-powered vehicle diagnosis using:
 - Streaming SSE support for real-time AI output
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
+from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,12 +48,10 @@ from app.services.diagnosis_service import (
     DTCValidationError,
     VINDecodeError,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.db.postgres.models import User
     from sqlalchemy.ext.asyncio import AsyncSession
-    from datetime import datetime
 
 router = APIRouter()
 logger = get_logger(__name__)
