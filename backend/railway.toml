@@ -1,6 +1,6 @@
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "Dockerfile.prod"
 
 [deploy]
 # startCommand removed - using Dockerfile CMD with shell form for proper $PORT expansion
