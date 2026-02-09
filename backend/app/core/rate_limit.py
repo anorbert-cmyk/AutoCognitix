@@ -5,8 +5,6 @@ Uses in-memory storage (for single instance) or Redis (for distributed).
 Implements sliding window rate limiting.
 """
 
-from __future__ import annotations
-
 import logging
 import time
 from collections import defaultdict

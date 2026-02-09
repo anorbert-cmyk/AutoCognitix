@@ -8,11 +8,10 @@ This module provides:
 - Error logging with context
 """
 
-from __future__ import annotations
-
 import traceback
 import uuid
-from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -36,9 +35,6 @@ from app.core.exceptions import (
     get_error_message,
 )
 from app.core.logging import get_logger
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = get_logger(__name__)
 

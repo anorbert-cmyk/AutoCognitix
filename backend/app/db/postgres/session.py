@@ -9,9 +9,6 @@ Optimized for performance with:
 - Comprehensive error handling with Hungarian error messages
 """
 
-from __future__ import annotations
-
-
 from sqlalchemy.exc import (
     DBAPIError,
     IntegrityError,
@@ -29,10 +26,7 @@ from app.core.exceptions import (
     PostgresException,
 )
 from app.core.logging import get_logger
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 logger = get_logger(__name__)
 

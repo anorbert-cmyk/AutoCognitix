@@ -2,8 +2,6 @@
 Neo4j graph database models using Neomodel.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 from neomodel import (

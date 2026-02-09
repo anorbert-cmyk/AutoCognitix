@@ -9,8 +9,6 @@ Provides endpoints to:
 - Get recalls and complaints from NHTSA
 """
 
-from __future__ import annotations
-
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status

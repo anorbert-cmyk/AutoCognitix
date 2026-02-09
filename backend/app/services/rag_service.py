@@ -12,19 +12,18 @@ This module provides a complete Hungarian vehicle diagnostic RAG pipeline:
 Author: AutoCognitix Team
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple
 
 # Python 3.9 compatible string enum
 from enum import Enum
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.neo4j_models import get_diagnostic_path
@@ -53,9 +52,6 @@ from app.services.llm_provider import (
     get_llm_provider,
     is_llm_available,
 )
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -375,9 +371,9 @@ class RAGService:
     - Async processing with caching
     """
 
-    _instance: Optional[RAGService] = None
+    _instance: Optional["RAGService"] = None
 
-    def __new__(cls) -> RAGService:
+    def __new__(cls) -> "RAGService":
         """Singleton pattern to reuse connections."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)

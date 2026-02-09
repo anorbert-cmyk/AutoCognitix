@@ -12,12 +12,11 @@ This module provides the main diagnosis service that orchestrates:
 Author: AutoCognitix Team
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime
 from uuid import UUID, uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.diagnosis import (
     DiagnosisHistoryItem,
@@ -31,6 +30,7 @@ from app.api.v1.schemas.diagnosis import (
 )
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
+from app.db.postgres.models import DTCCode
 from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
 from app.services.embedding_service import preprocess_hungarian
 from app.services.nhtsa_service import (
@@ -41,11 +41,6 @@ from app.services.nhtsa_service import (
     VINDecodeResult,
     get_nhtsa_service,
 )
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.db.postgres.models import DTCCode
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -120,7 +115,7 @@ class DiagnosisService:
             self._diagnosis_repository = DiagnosisSessionRepository(self.db)
         return self._diagnosis_repository
 
-    async def __aenter__(self) -> DiagnosisService:
+    async def __aenter__(self) -> "DiagnosisService":
         """Async context manager entry."""
         return self
 

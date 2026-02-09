@@ -14,12 +14,11 @@ Performance optimizations:
 - Response compression via middleware
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.dtc import (
     DTCBulkImport,
@@ -30,14 +29,11 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.log_sanitizer import sanitize_log
+from app.db.postgres.models import DTCCode as DTCCodeModel
 from app.db.postgres.repositories import DTCCodeRepository
 from app.db.postgres.session import get_db
 from app.db.qdrant_client import qdrant_client
 from app.services.embedding_service import get_embedding_service
-
-if TYPE_CHECKING:
-    from app.db.postgres.models import DTCCode as DTCCodeModel
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

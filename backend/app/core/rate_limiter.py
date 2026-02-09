@@ -5,22 +5,18 @@ Provides Redis-based distributed rate limiting with fallback to in-memory limiti
 Supports per-IP and per-user limits with configurable windows.
 """
 
-from __future__ import annotations
-
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 

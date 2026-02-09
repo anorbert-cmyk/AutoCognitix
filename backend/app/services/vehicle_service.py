@@ -9,8 +9,6 @@ Provides async methods to query vehicle data from Neo4j:
 - Get complaints and recalls for a vehicle
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 

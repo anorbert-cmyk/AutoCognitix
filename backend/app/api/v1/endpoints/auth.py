@@ -5,14 +5,13 @@ Provides user registration, login, token refresh, logout, profile management,
 and password reset endpoints. All tokens are JWTs with configurable expiration times.
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.auth import (
     ForgotPasswordRequest,
@@ -37,12 +36,9 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from app.db.postgres.models import User
 from app.db.postgres.repositories import UserRepository
 from app.db.postgres.session import get_db
-
-if TYPE_CHECKING:
-    from app.db.postgres.models import User
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

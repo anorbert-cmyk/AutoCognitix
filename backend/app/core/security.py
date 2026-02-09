@@ -4,8 +4,6 @@ Security utilities for authentication and authorization.
 Provides JWT token management, password hashing, and token blacklisting.
 """
 
-from __future__ import annotations
-
 import logging
 import secrets
 from datetime import datetime, timedelta, UTC

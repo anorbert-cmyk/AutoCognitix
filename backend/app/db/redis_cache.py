@@ -13,22 +13,18 @@ Cache Strategies:
 - LRU eviction: Redis handles memory limits
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, TypeVar, TYPE_CHECKING
+from typing import Any, Optional, TypeVar
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 
 from app.core.config import settings
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +103,10 @@ class RedisCacheService:
     - Monitoring and statistics
     """
 
-    _instance: Optional[RedisCacheService] = None
+    _instance: Optional["RedisCacheService"] = None
     _pool: ConnectionPool | None = None
 
-    def __new__(cls) -> RedisCacheService:
+    def __new__(cls) -> "RedisCacheService":
         """Singleton pattern for shared connection pool."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)

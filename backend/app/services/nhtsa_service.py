@@ -13,8 +13,6 @@ Features:
 - Optional Redis caching
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
@@ -695,7 +693,7 @@ class NHTSAService:
 
         logger.info("NHTSA service closed")
 
-    async def __aenter__(self) -> NHTSAService:
+    async def __aenter__(self) -> "NHTSAService":
         """Async context manager entry."""
         return self
 

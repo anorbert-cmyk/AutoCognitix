@@ -8,12 +8,11 @@ Provides:
 - Logging of retry attempts
 """
 
-from __future__ import annotations
-
 import asyncio
 import random
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, TypeVar, TYPE_CHECKING
+from typing import Any, TypeVar
 
 from app.core.exceptions import (
     LLMException,
@@ -22,9 +21,6 @@ from app.core.exceptions import (
     NHTSARateLimitException,
 )
 from app.core.logging import get_logger
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = get_logger(__name__)
 
@@ -426,7 +422,7 @@ class RetryContext:
 
         await asyncio.sleep(delay)
 
-    async def __aenter__(self) -> RetryContext:
+    async def __aenter__(self) -> "RetryContext":
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:

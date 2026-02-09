@@ -12,8 +12,6 @@ Provides:
 - Log aggregation compatibility (ELK, Loki)
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import sys
@@ -24,16 +22,14 @@ from collections.abc import Callable
 from contextvars import ContextVar
 from datetime import datetime, UTC
 from functools import wraps
-from typing import Any, Optional, TypeVar, TYPE_CHECKING
+from typing import Any, Optional, TypeVar
 
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.core.config import settings
-
-if TYPE_CHECKING:
-    from starlette.responses import Response
-    from starlette.requests import Request
 
 # Context variables for request correlation and distributed tracing
 request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
@@ -492,7 +488,7 @@ class PerformanceLogger:
         self.extra_fields = extra_fields
         self.start_time: float | None = None
 
-    def __enter__(self) -> PerformanceLogger:
+    def __enter__(self) -> "PerformanceLogger":
         self.start_time = time.time()
         return self
 
@@ -845,7 +841,7 @@ class SpanContext:
         self.span_id: str | None = None
         self.logger = get_logger("tracing")
 
-    def __enter__(self) -> SpanContext:
+    def __enter__(self) -> "SpanContext":
         self.start_time = time.time()
         self.old_span_id = span_id_var.get()
         self.old_parent_span_id = parent_span_id_var.get()

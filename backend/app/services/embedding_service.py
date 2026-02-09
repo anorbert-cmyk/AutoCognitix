@@ -13,8 +13,6 @@ Performance Optimizations:
 - Async-compatible embedding generation
 """
 
-from __future__ import annotations
-
 import asyncio
 import gc
 import logging
@@ -78,7 +76,7 @@ class HungarianEmbeddingService:
     - Redis cache integration for repeated texts
     """
 
-    _instance: Optional[HungarianEmbeddingService] = None
+    _instance: Optional["HungarianEmbeddingService"] = None
     _lock: threading.Lock = threading.Lock()
 
     # Optimal batch sizes by device type
@@ -89,7 +87,7 @@ class HungarianEmbeddingService:
     # Memory threshold for GPU cleanup (bytes)
     GPU_MEMORY_THRESHOLD = 0.8  # 80% utilization triggers cleanup
 
-    def __new__(cls) -> HungarianEmbeddingService:
+    def __new__(cls) -> "HungarianEmbeddingService":
         """Thread-safe singleton pattern to avoid loading model multiple times."""
         if cls._instance is None:
             with cls._lock:

@@ -7,8 +7,6 @@ carriage returns, or other control characters.
 Security Issue: CWE-117 (Improper Output Neutralization for Logs)
 """
 
-from __future__ import annotations
-
 import re
 from typing import Any
 

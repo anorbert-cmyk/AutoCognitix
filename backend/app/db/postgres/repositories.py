@@ -12,18 +12,14 @@ Performance Optimizations:
 - Full-text search using PostgreSQL GIN indexes
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Any, Generic, TypeVar, TYPE_CHECKING
+from typing import Any, Generic, TypeVar
+from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from uuid import UUID
 
 # Generic type for models
 ModelType = TypeVar("ModelType", bound=Base)

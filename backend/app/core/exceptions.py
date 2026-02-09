@@ -8,8 +8,6 @@ This module defines a hierarchy of exceptions with:
 - Error codes for client-side handling
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import HTTPException, status
