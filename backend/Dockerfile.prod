@@ -82,13 +82,12 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check with proper timeout and retries
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+# No Docker HEALTHCHECK - Railway handles health checks via railway.toml (healthcheckPath = "/health")
 
 # Production command with Gunicorn + Uvicorn workers
+# Using exec to make gunicorn PID 1 for proper signal handling
 # Shell form for $PORT expansion (Railway injects PORT env var)
-CMD gunicorn app.main:app \
+CMD exec gunicorn app.main:app \
      --bind "0.0.0.0:${PORT:-8000}" \
      --workers 2 \
      --worker-class uvicorn.workers.UvicornWorker \
