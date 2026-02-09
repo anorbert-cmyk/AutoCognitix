@@ -64,6 +64,9 @@ COPY --chown=appuser:appgroup app ./app
 COPY --chown=appuser:appgroup alembic ./alembic
 COPY --chown=appuser:appgroup alembic.ini .
 
+# Copy seed data for database initialization
+COPY --chown=appuser:appgroup data/dtc_codes_seed.json ./data/dtc_codes_seed.json
+
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /app/tmp && \
     chown -R appuser:appgroup /app

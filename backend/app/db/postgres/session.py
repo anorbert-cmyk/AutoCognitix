@@ -22,7 +22,6 @@ from sqlalchemy.exc import (
     TimeoutError as SQLAlchemyTimeoutError,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -47,8 +46,8 @@ logger = get_logger(__name__)
 # - pool_timeout: Wait time before raising TimeoutError
 # - pool_pre_ping: Test connections before use (detect stale connections)
 
-POOL_SIZE = int((settings.DEBUG and 5) or 10)  # Larger pool in production
-MAX_OVERFLOW = int((settings.DEBUG and 10) or 20)  # Allow more overflow in production
+POOL_SIZE = int((settings.DEBUG and 5) or 5)  # Conservative for Railway (2 workers x 5 = 10)
+MAX_OVERFLOW = int((settings.DEBUG and 10) or 10)  # Max 15 per worker, 30 total
 POOL_RECYCLE = 1800  # Recycle connections every 30 minutes
 POOL_TIMEOUT = 30  # 30 second timeout for acquiring connection
 
@@ -73,17 +72,18 @@ connect_args = {
     },
 }
 
-# Create async engine with optimized settings
-# Note: NullPool is used for async engines as QueuePool is not compatible with asyncio
-# For production with connection pooling, consider using AsyncAdaptedQueuePool or
-# external connection pooling solutions like PgBouncer
+# Create async engine with connection pooling
+# SQLAlchemy 2.0 async engines support AsyncAdaptedQueuePool by default
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True,
-    # Connection pooling - NullPool for async compatibility
-    # (QueuePool cannot be used with asyncio engines)
-    poolclass=NullPool,
+    # Connection pooling settings
+    pool_size=POOL_SIZE,
+    max_overflow=MAX_OVERFLOW,
+    pool_recycle=POOL_RECYCLE,
+    pool_timeout=POOL_TIMEOUT,
+    pool_pre_ping=True,
     # asyncpg specific settings
     connect_args=connect_args,
     # Execution options
@@ -92,9 +92,7 @@ engine = create_async_engine(
     },
 )
 
-logger.info(
-    "Database engine initialized with NullPool (no connection pooling for async compatibility)"
-)
+logger.info(f"Database engine initialized with pool_size={POOL_SIZE}, max_overflow={MAX_OVERFLOW}")
 
 # Create async session factory with optimized settings
 async_session_maker = async_sessionmaker(
