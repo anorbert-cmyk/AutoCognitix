@@ -63,6 +63,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY --chown=appuser:appgroup app ./app
 COPY --chown=appuser:appgroup alembic ./alembic
 COPY --chown=appuser:appgroup alembic.ini .
+# Seed data for DTC codes (loaded at startup if DB is empty)
+COPY --chown=appuser:appgroup data/dtc_codes_seed.json ./data/dtc_codes_seed.json
 
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /app/tmp && \
@@ -84,10 +86,10 @@ EXPOSE 8000
 
 # No Docker HEALTHCHECK - Railway handles health checks via railway.toml (healthcheckPath = "/health")
 
-# Production command with Gunicorn + Uvicorn workers
+# Run Alembic migrations then start Gunicorn
 # Using exec to make gunicorn PID 1 for proper signal handling
 # Shell form for $PORT expansion (Railway injects PORT env var)
-CMD exec gunicorn app.main:app \
+CMD alembic upgrade head && exec gunicorn app.main:app \
      --bind "0.0.0.0:${PORT:-8000}" \
      --workers 2 \
      --worker-class uvicorn.workers.UvicornWorker \

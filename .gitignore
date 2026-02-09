@@ -199,6 +199,7 @@ data/processed/
 !data/**/.gitkeep
 !data/dtc_codes/*.json
 !data/parts_mapping.json
+!backend/data/dtc_codes_seed.json
 !frontend/package.json
 !frontend/package-lock.json
 !frontend/tsconfig.json

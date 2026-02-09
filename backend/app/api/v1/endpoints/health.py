@@ -270,7 +270,9 @@ async def check_qdrant_health() -> ServiceHealth:
             try:
                 info = client.get_collection(collection.name)
                 collection_info[collection.name] = {
-                    "vectors_count": getattr(info, "indexed_vectors_count", getattr(info, "vectors_count", 0)),
+                    "vectors_count": getattr(
+                        info, "indexed_vectors_count", getattr(info, "vectors_count", 0)
+                    ),
                     "points_count": info.points_count,
                     "status": str(info.status),
                 }
