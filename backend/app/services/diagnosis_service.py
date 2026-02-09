@@ -556,9 +556,13 @@ class DiagnosisService:
                         if repair.parts
                         else [],
                         "estimated_time_minutes": repair.estimated_time_minutes,
-                        "tools_needed": repair.tools_needed if hasattr(repair, 'tools_needed') else [],
-                        "expert_tips": repair.expert_tips if hasattr(repair, 'expert_tips') else [],
-                        "root_cause_explanation": repair.root_cause_explanation if hasattr(repair, 'root_cause_explanation') else None,
+                        "tools_needed": repair.tools_needed
+                        if hasattr(repair, "tools_needed")
+                        else [],
+                        "expert_tips": repair.expert_tips if hasattr(repair, "expert_tips") else [],
+                        "root_cause_explanation": repair.root_cause_explanation
+                        if hasattr(repair, "root_cause_explanation")
+                        else None,
                     }
                     for repair in result.repair_recommendations
                 ],
@@ -577,7 +581,9 @@ class DiagnosisService:
                 "processing_time_ms": result.processing_time_ms,
                 "model_used": result.model_used,
                 "used_fallback": result.used_fallback,
-                "root_cause_analysis": result.root_cause_analysis if hasattr(result, 'root_cause_analysis') else "",
+                "root_cause_analysis": result.root_cause_analysis
+                if hasattr(result, "root_cause_analysis")
+                else "",
             }
 
         except ImportError:

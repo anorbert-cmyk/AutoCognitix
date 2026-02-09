@@ -82,9 +82,7 @@ class VehicleService:
             params = {"limit": limit, "offset": offset}
             count_params = {}
 
-        results, _ = await asyncio.to_thread(
-            neomodel_db.cypher_query, query, params
-        )
+        results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
         count_results, _ = await asyncio.to_thread(
             neomodel_db.cypher_query, count_query, count_params
         )
@@ -93,11 +91,13 @@ class VehicleService:
         makes = []
         for row in results:
             make_name = row[0]
-            makes.append({
-                "id": make_name.lower().replace(" ", "_").replace("-", "_"),
-                "name": make_name,
-                "country": self._get_country_for_make(make_name),
-            })
+            makes.append(
+                {
+                    "id": make_name.lower().replace(" ", "_").replace("-", "_"),
+                    "name": make_name,
+                    "country": self._get_country_for_make(make_name),
+                }
+            )
 
         return makes, total
 
@@ -123,8 +123,7 @@ class VehicleService:
 
             total = count_result.scalar() or 0
             makes = [
-                {"id": m.id, "name": m.name, "country": m.country}
-                for m in result.scalars().all()
+                {"id": m.id, "name": m.name, "country": m.country} for m in result.scalars().all()
             ]
 
         return makes, total
@@ -197,9 +196,7 @@ class VehicleService:
             params = {"make": make, "limit": limit, "offset": offset}
             count_params = {"make": make}
 
-        results, _ = await asyncio.to_thread(
-            neomodel_db.cypher_query, query, params
-        )
+        results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
         count_results, _ = await asyncio.to_thread(
             neomodel_db.cypher_query, count_query, count_params
         )
@@ -217,14 +214,16 @@ class VehicleService:
                 elif bt:
                     body_types.append(bt)
 
-            models.append({
-                "id": model_name.lower().replace(" ", "_").replace("-", "_"),
-                "name": model_name,
-                "make_id": make_id,
-                "year_start": year_start,
-                "year_end": year_end,
-                "body_types": list(set(body_types)),
-            })
+            models.append(
+                {
+                    "id": model_name.lower().replace(" ", "_").replace("-", "_"),
+                    "name": model_name,
+                    "make_id": make_id,
+                    "year_start": year_start,
+                    "year_end": year_end,
+                    "body_types": list(set(body_types)),
+                }
+            )
 
         return models, total
 
@@ -292,9 +291,7 @@ class VehicleService:
         params = {"make": make, "model": model}
 
         try:
-            results, _ = await asyncio.to_thread(
-                neomodel_db.cypher_query, query, params
-            )
+            results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
         except Exception:
             results = []
 
@@ -314,8 +311,7 @@ class VehicleService:
                 async with async_session_maker() as session:
                     make_id = make.lower().replace(" ", "_").replace("-", "_")
                     stmt = select(VehicleModelDB).where(
-                        (VehicleModelDB.make_id == make_id)
-                        & (VehicleModelDB.name.ilike(model))
+                        (VehicleModelDB.make_id == make_id) & (VehicleModelDB.name.ilike(model))
                     )
                     result = await session.execute(stmt)
                     for m in result.scalars().all():
@@ -338,9 +334,7 @@ class VehicleService:
         """
         params = {"vehicle_id": vehicle_id}
 
-        results, _ = await asyncio.to_thread(
-            neomodel_db.cypher_query, query, params
-        )
+        results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
 
         if not results:
             return None
@@ -376,9 +370,7 @@ class VehicleService:
             """
             params = {"make": make, "model": model}
 
-        results, _ = await asyncio.to_thread(
-            neomodel_db.cypher_query, query, params
-        )
+        results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
 
         if not results:
             return None
@@ -424,9 +416,7 @@ class VehicleService:
             """
             params = {"make": make, "model": model}
 
-        results, _ = await asyncio.to_thread(
-            neomodel_db.cypher_query, query, params
-        )
+        results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
 
         return [
             {
@@ -446,12 +436,24 @@ class VehicleService:
             return {
                 "id": node.get("uid") if hasattr(node, "get") else getattr(node, "uid", None),
                 "make": node.get("make") if hasattr(node, "get") else getattr(node, "make", None),
-                "model": node.get("model") if hasattr(node, "get") else getattr(node, "model", None),
-                "year_start": node.get("year_start") if hasattr(node, "get") else getattr(node, "year_start", None),
-                "year_end": node.get("year_end") if hasattr(node, "get") else getattr(node, "year_end", None),
-                "platform": node.get("platform") if hasattr(node, "get") else getattr(node, "platform", None),
-                "engine_codes": node.get("engine_codes") if hasattr(node, "get") else getattr(node, "engine_codes", []),
-                "body_types": node.get("body_types") if hasattr(node, "get") else getattr(node, "body_types", []),
+                "model": node.get("model")
+                if hasattr(node, "get")
+                else getattr(node, "model", None),
+                "year_start": node.get("year_start")
+                if hasattr(node, "get")
+                else getattr(node, "year_start", None),
+                "year_end": node.get("year_end")
+                if hasattr(node, "get")
+                else getattr(node, "year_end", None),
+                "platform": node.get("platform")
+                if hasattr(node, "get")
+                else getattr(node, "platform", None),
+                "engine_codes": node.get("engine_codes")
+                if hasattr(node, "get")
+                else getattr(node, "engine_codes", []),
+                "body_types": node.get("body_types")
+                if hasattr(node, "get")
+                else getattr(node, "body_types", []),
             }
         elif isinstance(node, dict):
             return {
@@ -470,32 +472,74 @@ class VehicleService:
     def _get_country_for_make(make: str) -> str | None:
         """Get country of origin for a vehicle make."""
         make_countries = {
-            "volkswagen": "Germany", "audi": "Germany", "bmw": "Germany",
-            "mercedes-benz": "Germany", "mercedes": "Germany", "opel": "Germany",
-            "porsche": "Germany", "mini": "Germany",
-            "toyota": "Japan", "honda": "Japan", "nissan": "Japan",
-            "mazda": "Japan", "suzuki": "Japan", "subaru": "Japan",
-            "mitsubishi": "Japan", "lexus": "Japan", "infiniti": "Japan",
-            "acura": "Japan", "daihatsu": "Japan", "isuzu": "Japan",
-            "hyundai": "South Korea", "kia": "South Korea",
-            "genesis": "South Korea", "ssangyong": "South Korea",
-            "ford": "USA", "chevrolet": "USA", "gmc": "USA",
-            "dodge": "USA", "jeep": "USA", "chrysler": "USA",
-            "ram": "USA", "buick": "USA", "cadillac": "USA",
-            "lincoln": "USA", "tesla": "USA",
-            "renault": "France", "peugeot": "France", "citroen": "France",
-            "citroën": "France", "dacia": "France", "alpine": "France",
-            "fiat": "Italy", "alfa romeo": "Italy", "alfa": "Italy",
-            "ferrari": "Italy", "lamborghini": "Italy", "maserati": "Italy",
+            "volkswagen": "Germany",
+            "audi": "Germany",
+            "bmw": "Germany",
+            "mercedes-benz": "Germany",
+            "mercedes": "Germany",
+            "opel": "Germany",
+            "porsche": "Germany",
+            "mini": "Germany",
+            "toyota": "Japan",
+            "honda": "Japan",
+            "nissan": "Japan",
+            "mazda": "Japan",
+            "suzuki": "Japan",
+            "subaru": "Japan",
+            "mitsubishi": "Japan",
+            "lexus": "Japan",
+            "infiniti": "Japan",
+            "acura": "Japan",
+            "daihatsu": "Japan",
+            "isuzu": "Japan",
+            "hyundai": "South Korea",
+            "kia": "South Korea",
+            "genesis": "South Korea",
+            "ssangyong": "South Korea",
+            "ford": "USA",
+            "chevrolet": "USA",
+            "gmc": "USA",
+            "dodge": "USA",
+            "jeep": "USA",
+            "chrysler": "USA",
+            "ram": "USA",
+            "buick": "USA",
+            "cadillac": "USA",
+            "lincoln": "USA",
+            "tesla": "USA",
+            "renault": "France",
+            "peugeot": "France",
+            "citroen": "France",
+            "citroën": "France",
+            "dacia": "France",
+            "alpine": "France",
+            "fiat": "Italy",
+            "alfa romeo": "Italy",
+            "alfa": "Italy",
+            "ferrari": "Italy",
+            "lamborghini": "Italy",
+            "maserati": "Italy",
             "lancia": "Italy",
-            "jaguar": "UK", "land rover": "UK", "bentley": "UK",
-            "rolls-royce": "UK", "aston martin": "UK", "lotus": "UK",
-            "mclaren": "UK", "mg": "UK",
-            "skoda": "Czech Republic", "škoda": "Czech Republic",
-            "seat": "Spain", "cupra": "Spain",
-            "volvo": "Sweden", "saab": "Sweden",
-            "byd": "China", "geely": "China", "great wall": "China",
-            "nio": "China", "xpeng": "China", "li auto": "China",
+            "jaguar": "UK",
+            "land rover": "UK",
+            "bentley": "UK",
+            "rolls-royce": "UK",
+            "aston martin": "UK",
+            "lotus": "UK",
+            "mclaren": "UK",
+            "mg": "UK",
+            "skoda": "Czech Republic",
+            "škoda": "Czech Republic",
+            "seat": "Spain",
+            "cupra": "Spain",
+            "volvo": "Sweden",
+            "saab": "Sweden",
+            "byd": "China",
+            "geely": "China",
+            "great wall": "China",
+            "nio": "China",
+            "xpeng": "China",
+            "li auto": "China",
         }
         return make_countries.get(make.lower())
 

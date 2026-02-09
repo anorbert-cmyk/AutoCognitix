@@ -66,7 +66,7 @@ class PriceSource(BaseModel):
     def validate_price_range(cls, v: int, info) -> int:
         """Ensure max price is not less than min price."""
         if "price_min" in info.data and v < info.data["price_min"]:
-            return info.data["price_min"]
+            return int(info.data["price_min"])
         return v
 
 
@@ -125,7 +125,7 @@ class PartInfo(BaseModel):
     def validate_price_range(cls, v: int, info) -> int:
         """Ensure max price is not less than min price."""
         if "price_range_min" in info.data and v < info.data["price_range_min"]:
-            return info.data["price_range_min"]
+            return int(info.data["price_range_min"])
         return v
 
     @field_validator("quality_rating")
@@ -205,7 +205,7 @@ class RepairCostEstimate(BaseModel):
     def validate_parts_cost(cls, v: int, info) -> int:
         """Ensure max parts cost is not less than min."""
         if "parts_cost_min" in info.data and v < info.data["parts_cost_min"]:
-            return info.data["parts_cost_min"]
+            return int(info.data["parts_cost_min"])
         return v
 
     @field_validator("labor_cost_max")
@@ -213,7 +213,7 @@ class RepairCostEstimate(BaseModel):
     def validate_labor_cost(cls, v: int, info) -> int:
         """Ensure max labor cost is not less than min."""
         if "labor_cost_min" in info.data and v < info.data["labor_cost_min"]:
-            return info.data["labor_cost_min"]
+            return int(info.data["labor_cost_min"])
         return v
 
     @field_validator("total_cost_max")
@@ -221,7 +221,7 @@ class RepairCostEstimate(BaseModel):
     def validate_total_cost(cls, v: int, info) -> int:
         """Ensure max total cost is not less than min."""
         if "total_cost_min" in info.data and v < info.data["total_cost_min"]:
-            return info.data["total_cost_min"]
+            return int(info.data["total_cost_min"])
         return v
 
     @field_validator("confidence")

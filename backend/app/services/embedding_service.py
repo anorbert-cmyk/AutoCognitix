@@ -78,6 +78,7 @@ class HungarianEmbeddingService:
 
     _instance: Optional["HungarianEmbeddingService"] = None
     _lock: threading.Lock = threading.Lock()
+    _initialized: bool = False
 
     # Optimal batch sizes by device type
     BATCH_SIZE_GPU = 64
@@ -218,6 +219,7 @@ class HungarianEmbeddingService:
                 settings.HUBERT_MODEL,
                 torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
             )
+            assert self._model is not None
             self._model.to(self._device)
             self._model.eval()
 

@@ -347,7 +347,7 @@ class EmailService:
     @property
     def is_demo_mode(self) -> bool:
         """Check if running in demo mode."""
-        return self._demo_mode
+        return bool(self._demo_mode)
 
 
 # =============================================================================

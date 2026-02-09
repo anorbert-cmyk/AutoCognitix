@@ -105,6 +105,7 @@ class RedisCacheService:
 
     _instance: Optional["RedisCacheService"] = None
     _pool: ConnectionPool | None = None
+    _initialized: bool = False
 
     def __new__(cls) -> "RedisCacheService":
         """Singleton pattern for shared connection pool."""
@@ -224,6 +225,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit():
             return None
 
+        assert self._client is not None
         try:
             value = await self._client.get(key)
             if value:
@@ -256,6 +258,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit():
             return False
 
+        assert self._client is not None
         try:
             serialized = json.dumps(value, default=str)
             await self._client.setex(key, ttl, serialized)
@@ -270,6 +273,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit():
             return False
 
+        assert self._client is not None
         try:
             await self._client.delete(key)
             return True
@@ -291,6 +295,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit():
             return 0
 
+        assert self._client is not None
         try:
             keys = []
             async for key in self._client.scan_iter(match=pattern):
@@ -309,6 +314,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit():
             return False
 
+        assert self._client is not None
         try:
             return await self._client.exists(key) > 0
         except Exception as e:
@@ -332,6 +338,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit() or not keys:
             return [None] * len(keys)
 
+        assert self._client is not None
         try:
             values = await self._client.mget(keys)
             return [json.loads(v) if v else None for v in values]
@@ -358,6 +365,7 @@ class RedisCacheService:
         if not self._connected or not await self._check_circuit() or not mapping:
             return False
 
+        assert self._client is not None
         try:
             # Use pipeline for atomic batch operation
             async with self._client.pipeline() as pipe:

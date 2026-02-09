@@ -1113,7 +1113,9 @@ class RAGService:
             symptoms=symptoms,
             vehicle_info=vehicle,
             diagnosis_summary=diagnosis.summary,
-            root_cause_analysis=diagnosis.root_cause_analysis if hasattr(diagnosis, 'root_cause_analysis') and diagnosis.root_cause_analysis else "\n".join(
+            root_cause_analysis=diagnosis.root_cause_analysis
+            if hasattr(diagnosis, "root_cause_analysis") and diagnosis.root_cause_analysis
+            else "\n".join(
                 f"- {cause.get('title', '')}: {cause.get('description', '')}"
                 for cause in diagnosis.probable_causes[:3]
             ),

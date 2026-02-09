@@ -314,7 +314,8 @@ class PartsPriceCache:
         redis = await self._get_redis()
         if redis:
             try:
-                return await redis.get(key)
+                result = await redis.get(key)
+                return str(result) if result is not None else None
             except Exception as e:
                 logger.warning(f"Redis get hiba: {e}")
 
@@ -322,7 +323,7 @@ class PartsPriceCache:
         if key in self._in_memory_cache:
             value, expiry = self._in_memory_cache[key]
             if expiry > datetime.now().timestamp():
-                return value
+                return str(value) if value is not None else None
             del self._in_memory_cache[key]
 
         return None
@@ -411,7 +412,8 @@ class PartsPriceService:
         cached = await self._cache.get(cache_key)
         if cached:
             logger.debug(f"Cache hit: {part_key}")
-            return json.loads(cached)
+            result: Dict[str, Any] = json.loads(cached)
+            return result
 
         # Get from static data
         part_data = STATIC_PARTS_PRICES.get(part_key.lower())
@@ -475,7 +477,8 @@ class PartsPriceService:
         cached = await self._cache.get(cache_key)
         if cached:
             logger.debug(f"Cache hit DTC alkatreszek: {dtc_upper}")
-            return json.loads(cached)
+            result: List[Dict[str, Any]] = json.loads(cached)
+            return result
 
         # Get parts from mapping
         part_keys = DTC_PARTS_MAPPING.get(dtc_upper, [])

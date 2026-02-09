@@ -10,7 +10,7 @@ Author: AutoCognitix Team
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 # =============================================================================
 # System Prompts
@@ -453,7 +453,7 @@ class DiagnosisPromptContext:
     engine_code: str | None = None
     mileage_km: int | None = None
     vin: str | None = None
-    dtc_codes: list[str] = None
+    dtc_codes: Optional[list[str]] = None
     symptoms: str = ""
     additional_context: str | None = None
     dtc_context: str = ""
@@ -503,10 +503,10 @@ class ParsedDiagnosisResponse:
     """Parsed diagnosis response from LLM."""
 
     summary: str = ""
-    probable_causes: list[dict[str, Any]] = None
-    diagnostic_steps: list[str] = None
-    recommended_repairs: list[dict[str, Any]] = None
-    safety_warnings: list[str] = None
+    probable_causes: Optional[list[dict[str, Any]]] = None
+    diagnostic_steps: Optional[list[str]] = None
+    recommended_repairs: Optional[list[dict[str, Any]]] = None
+    safety_warnings: Optional[list[str]] = None
     additional_notes: str = ""
     root_cause_analysis: str = ""
     confidence_score: float = 0.5
@@ -734,7 +734,7 @@ _DEFAULT_TOOLS_AND_TIPS = {
 }
 
 
-def _get_dtc_tools_and_tips(dtc_prefix: str) -> dict[str, list]:
+def _get_dtc_tools_and_tips(dtc_prefix: str) -> dict[str, Any]:
     """
     Get default tools and expert tips based on DTC code prefix.
 
