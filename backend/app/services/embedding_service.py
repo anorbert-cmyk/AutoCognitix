@@ -23,10 +23,25 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import numpy as np
-import torch
-from transformers import AutoModel, AutoTokenizer
 
 from app.core.config import settings
+
+# Lazy imports for torch and transformers - not available in production
+# (embeddings are pre-computed and stored in Qdrant Cloud)
+try:
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    AutoModel = None  # type: ignore[assignment,misc]
+    AutoTokenizer = None  # type: ignore[assignment,misc]
+    TORCH_AVAILABLE = False
+    logging.warning(
+        "torch/transformers not available - embedding generation disabled. "
+        "Pre-computed embeddings from Qdrant Cloud will be used."
+    )
 
 # Optional spacy import - not required for basic embedding functionality
 try:
@@ -89,20 +104,29 @@ class HungarianEmbeddingService:
             return
 
         self._initialized = True
-        self._device = self._detect_device()
-        self._tokenizer: AutoTokenizer | None = None
-        self._model: AutoModel | None = None
+        self._tokenizer = None
+        self._model = None
         self._nlp = None  # Optional spacy.Language
-        self._use_fp16 = self._device.type == "cuda"  # FP16 only on CUDA
-        self._optimal_batch_size = self._get_optimal_batch_size()
         self._cache_enabled = True
 
-        logger.info(
-            f"HungarianEmbeddingService initialized: device={self._device}, "
-            f"fp16={self._use_fp16}, batch_size={self._optimal_batch_size}"
-        )
+        if TORCH_AVAILABLE:
+            self._device = self._detect_device()
+            self._use_fp16 = self._device.type == "cuda"  # FP16 only on CUDA
+            self._optimal_batch_size = self._get_optimal_batch_size()
+            logger.info(
+                f"HungarianEmbeddingService initialized: device={self._device}, "
+                f"fp16={self._use_fp16}, batch_size={self._optimal_batch_size}"
+            )
+        else:
+            self._device = None
+            self._use_fp16 = False
+            self._optimal_batch_size = 16
+            logger.warning(
+                "HungarianEmbeddingService initialized WITHOUT torch - "
+                "embedding generation disabled, using pre-computed vectors only"
+            )
 
-    def _detect_device(self) -> torch.device:
+    def _detect_device(self):
         """
         Automatically detect and return the best available device.
 
@@ -243,8 +267,8 @@ class HungarianEmbeddingService:
             raise RuntimeError(f"Could not load HuSpaCy model: {e}") from e
 
     def _mean_pooling(
-        self, model_output: torch.Tensor, attention_mask: torch.Tensor
-    ) -> torch.Tensor:
+        self, model_output, attention_mask
+    ):
         """
         Apply mean pooling to token embeddings.
 
@@ -315,6 +339,10 @@ class HungarianEmbeddingService:
         Returns:
             List[float]: 768-dimensional embedding vector.
         """
+        if not TORCH_AVAILABLE:
+            logger.warning("torch not available - returning zero vector")
+            return [0.0] * settings.EMBEDDING_DIMENSION
+
         self._load_hubert_model()
 
         if preprocess:
@@ -370,6 +398,10 @@ class HungarianEmbeddingService:
         Returns:
             List[List[float]]: List of 768-dimensional embedding vectors.
         """
+        if not TORCH_AVAILABLE:
+            logger.warning("torch not available - returning zero vectors")
+            return [[0.0] * settings.EMBEDDING_DIMENSION for _ in texts]
+
         self._load_hubert_model()
 
         if not texts:
@@ -559,7 +591,7 @@ class HungarianEmbeddingService:
         return similarities[:top_k]
 
     @property
-    def device(self) -> torch.device:
+    def device(self):
         """Get the current device being used."""
         return self._device
 
@@ -579,6 +611,10 @@ class HungarianEmbeddingService:
 
         Call this at application startup to avoid cold start latency.
         """
+        if not TORCH_AVAILABLE:
+            logger.warning("Skipping warmup - torch not available")
+            return
+
         logger.info("Warming up HungarianEmbeddingService...")
         self._load_hubert_model()
 
