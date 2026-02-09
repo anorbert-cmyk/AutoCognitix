@@ -190,9 +190,9 @@ def retry_async(
     """
     retry_config = config or DEFAULT_CONFIG
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> T:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception: Exception | None = None
 
             for attempt in range(retry_config.max_attempts):
@@ -258,6 +258,7 @@ def retry_async(
             # Should never reach here, but just in case
             if last_exception:
                 raise last_exception
+            raise RuntimeError("Retry loop completed without result or exception")
 
         return wrapper
 
@@ -284,9 +285,9 @@ def retry_sync(
 
     retry_config = config or DEFAULT_CONFIG
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception: Exception | None = None
 
             for attempt in range(retry_config.max_attempts):
@@ -352,6 +353,7 @@ def retry_sync(
             # Should never reach here, but just in case
             if last_exception:
                 raise last_exception
+            raise RuntimeError("Retry loop completed without result or exception")
 
         return wrapper
 

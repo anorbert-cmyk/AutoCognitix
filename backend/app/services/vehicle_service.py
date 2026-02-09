@@ -262,7 +262,7 @@ class VehicleService:
             count_result = await session.execute(count_stmt)
 
             total = count_result.scalar() or 0
-            models = [
+            models: list[dict[str, Any]] = [
                 {
                     "id": m.id,
                     "name": m.name,
@@ -295,7 +295,7 @@ class VehicleService:
         except Exception:
             results = []
 
-        years = set()
+        years: set[int] = set()
         current_year = 2026
 
         for row in results:

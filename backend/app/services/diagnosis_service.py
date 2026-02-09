@@ -415,22 +415,32 @@ class DiagnosisService:
             recalls_task = nhtsa.get_recalls(make, model, year)
             complaints_task = nhtsa.get_complaints(make, model, year)
 
-            recalls, complaints = await asyncio.gather(
+            results = await asyncio.gather(
                 recalls_task,
                 complaints_task,
                 return_exceptions=True,
             )
 
-            # Handle exceptions gracefully
-            if isinstance(recalls, Exception):
-                logger.warning(f"Failed to fetch recalls: {sanitize_log(str(recalls))}")
-                recalls = []
+            # Handle exceptions gracefully - narrow types from gather
+            recalls_result = results[0]
+            complaints_result = results[1]
 
-            if isinstance(complaints, Exception):
-                logger.warning(f"Failed to fetch complaints: {sanitize_log(str(complaints))}")
-                complaints = []
+            final_recalls: list[Recall] = []
+            final_complaints: list[Complaint] = []
 
-            return recalls, complaints
+            if isinstance(recalls_result, BaseException):
+                logger.warning(f"Failed to fetch recalls: {sanitize_log(str(recalls_result))}")
+            else:
+                final_recalls = recalls_result
+
+            if isinstance(complaints_result, BaseException):
+                logger.warning(
+                    f"Failed to fetch complaints: {sanitize_log(str(complaints_result))}"
+                )
+            else:
+                final_complaints = complaints_result
+
+            return final_recalls, final_complaints
 
         except Exception as e:
             logger.error(f"NHTSA data fetch error: {sanitize_log(str(e))}")
@@ -1124,15 +1134,21 @@ class DiagnosisService:
             logger.error(f"Failed to save diagnosis session: {sanitize_log(str(e))}", exc_info=True)
             # Don't raise - diagnosis should still be returned even if save fails
 
-    async def get_diagnosis_by_id(self, diagnosis_id: UUID) -> DiagnosisResponse | None:
+    async def get_diagnosis_by_id(
+        self, diagnosis_id: UUID, user_id: Optional[UUID] = None
+    ) -> DiagnosisResponse | None:
         """
         Retrieve a diagnosis by its ID.
 
         Args:
             diagnosis_id: UUID of the diagnosis to retrieve.
+            user_id: Optional UUID of the requesting user for ownership check.
 
         Returns:
             DiagnosisResponse if found, None otherwise.
+
+        Raises:
+            DiagnosisServiceError: If user doesn't own the diagnosis (IDOR protection).
         """
         try:
             session = await self.diagnosis_repository.get(diagnosis_id)
@@ -1141,11 +1157,19 @@ class DiagnosisService:
                 logger.debug(f"Diagnosis {diagnosis_id} not found")
                 return None
 
+            # IDOR protection: verify ownership at service layer
+            if user_id and session.user_id and str(session.user_id) != str(user_id):
+                logger.warning(
+                    f"IDOR attempt: user {user_id} tried to access diagnosis {diagnosis_id}"
+                )
+                return None  # Return None (same as not found) to prevent info leakage
+
             # Reconstruct response from stored data
             result = session.diagnosis_result
 
+            session_id = UUID(str(session.id)) if not isinstance(session.id, UUID) else session.id
             return DiagnosisResponse(
-                id=session.id,
+                id=session_id,
                 vehicle_make=session.vehicle_make,
                 vehicle_model=session.vehicle_model,
                 vehicle_year=session.vehicle_year,
@@ -1167,6 +1191,9 @@ class DiagnosisService:
                 if result.get("total_cost_estimate")
                 else None,
                 root_cause_analysis=result.get("root_cause_analysis"),
+                processing_time_ms=result.get("processing_time_ms"),
+                model_used=result.get("model_used"),
+                used_fallback=result.get("used_fallback", False),
                 created_at=session.created_at,
             )
 
@@ -1203,11 +1230,12 @@ class DiagnosisService:
 
             return [
                 DiagnosisHistoryItem(
-                    id=session.id,
+                    id=UUID(str(session.id)) if not isinstance(session.id, UUID) else session.id,
                     vehicle_make=session.vehicle_make,
                     vehicle_model=session.vehicle_model,
                     vehicle_year=session.vehicle_year,
                     dtc_codes=session.dtc_codes,
+                    symptoms_text=session.symptoms_text,
                     confidence_score=session.confidence_score,
                     created_at=session.created_at,
                 )

@@ -361,7 +361,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         # Skip excluded endpoints
         if endpoint in self.EXCLUDED_ENDPOINTS:
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         # Track request with context manager
         with track_request(method, endpoint) as ctx:
@@ -372,23 +373,23 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                     ctx["request_size"] = int(content_length)
 
             try:
-                response = await call_next(request)
-                ctx["status_code"] = response.status_code
+                resp: Response = await call_next(request)
+                ctx["status_code"] = resp.status_code
 
                 # Get response size
-                response_length = response.headers.get("Content-Length")
+                response_length = resp.headers.get("Content-Length")
                 if response_length:
                     with suppress(ValueError):
                         ctx["response_size"] = int(response_length)
 
                 # Track errors (4xx and 5xx)
-                if response.status_code >= 400:
-                    if response.status_code >= 500:
+                if resp.status_code >= 400:
+                    if resp.status_code >= 500:
                         ctx["error_type"] = "server_error"
                     else:
                         ctx["error_type"] = "client_error"
 
-                return response
+                return resp
 
             except Exception as e:
                 # Track unhandled exceptions

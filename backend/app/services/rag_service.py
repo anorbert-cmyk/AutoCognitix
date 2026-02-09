@@ -17,7 +17,7 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 # Python 3.9 compatible string enum
 from enum import Enum
@@ -435,7 +435,7 @@ class RAGService:
         # Check cache
         cached = self._cache.get("qdrant", collection, query, filters)
         if cached is not None:
-            return cached
+            return cast("List[RetrievedItem]", cached)
 
         # Generate embedding for query
         query_embedding = embed_text(query, preprocess=True)
@@ -488,7 +488,7 @@ class RAGService:
             Tuple of (RetrievedItem list, combined graph data dict).
         """
         items = []
-        combined_data = {
+        combined_data: Dict[str, Any] = {
             "components": [],
             "repairs": [],
             "symptoms": [],
@@ -633,13 +633,16 @@ class RAGService:
                         )
                     )
                 if vehicle_make:
-                    conditions.append(KnownIssue.applicable_makes.any(vehicle_make))
+                    conditions.append(
+                        KnownIssue.applicable_makes.any(vehicle_make)  # type: ignore[arg-type]
+                    )
 
                 if conditions:
                     issue_stmt = issue_stmt.where(or_(*conditions)).limit(top_k)
-                    result = await self._db_session.execute(issue_stmt)
-                    issue_records = result.scalars().all()
+                    issue_result = await self._db_session.execute(issue_stmt)
+                    issue_records = issue_result.scalars().all()
 
+                    issue: KnownIssue
                     for issue in issue_records:
                         items.append(
                             RetrievedItem(
@@ -725,13 +728,20 @@ class RAGService:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Process results
-        qdrant_dtc_items = results[0] if not isinstance(results[0], Exception) else []
-        qdrant_symptom_items = results[1] if not isinstance(results[1], Exception) else []
-        neo4j_result = results[2] if not isinstance(results[2], Exception) else ([], {})
-        postgres_items = results[3] if not isinstance(results[3], Exception) else []
+        # Process results - narrow types from gather with return_exceptions=True
+        qdrant_dtc_items: List[RetrievedItem] = results[0] if isinstance(results[0], list) else []
+        qdrant_symptom_items: List[RetrievedItem] = (
+            results[1] if isinstance(results[1], list) else []
+        )
+        neo4j_result = results[2] if not isinstance(results[2], BaseException) else ([], {})
+        postgres_items: List[RetrievedItem] = results[3] if isinstance(results[3], list) else []
 
-        neo4j_items, graph_data = neo4j_result if isinstance(neo4j_result, tuple) else ([], {})
+        neo4j_items: List[RetrievedItem]
+        graph_data: Dict[str, Any]
+        if isinstance(neo4j_result, tuple):
+            neo4j_items, graph_data = neo4j_result
+        else:
+            neo4j_items, graph_data = [], {}
 
         # Store raw items
         context.dtc_items = qdrant_dtc_items
@@ -818,7 +828,7 @@ class RAGService:
             Tuple of (ConfidenceLevel, score between 0.0 and 1.0).
         """
         score = 0.0
-        factors = 0
+        factors: float = 0.0
 
         # Factor 1: DTC context quality (0-0.3)
         if context.dtc_items:
@@ -1067,7 +1077,7 @@ class RAGService:
 
         # Build repair recommendations
         repair_recommendations = []
-        for repair in diagnosis.recommended_repairs:
+        for repair in diagnosis.recommended_repairs or []:
             repair_recommendations.append(
                 RepairRecommendation(
                     name=repair.get("title", ""),
@@ -1117,14 +1127,14 @@ class RAGService:
             if hasattr(diagnosis, "root_cause_analysis") and diagnosis.root_cause_analysis
             else "\n".join(
                 f"- {cause.get('title', '')}: {cause.get('description', '')}"
-                for cause in diagnosis.probable_causes[:3]
+                for cause in (diagnosis.probable_causes or [])[:3]
             ),
             confidence=confidence_level,
             confidence_score=final_confidence,
-            probable_causes=diagnosis.probable_causes,
+            probable_causes=diagnosis.probable_causes or [],
             repair_recommendations=repair_recommendations,
-            safety_warnings=diagnosis.safety_warnings,
-            diagnostic_steps=diagnosis.diagnostic_steps,
+            safety_warnings=diagnosis.safety_warnings or [],
+            diagnostic_steps=diagnosis.diagnostic_steps or [],
             similar_cases=[item.content for item in context.symptom_items[:5]],
             related_dtc_info=[item.content for item in context.dtc_items[:10]],
             sources=sources,

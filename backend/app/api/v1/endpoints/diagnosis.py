@@ -12,6 +12,7 @@ Provides AI-powered vehicle diagnosis using:
 import asyncio
 import json
 from datetime import datetime
+from typing import Any, Dict, Union
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -54,7 +55,7 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 # OpenAPI response examples
-ANALYZE_RESPONSES = {
+ANALYZE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     201: {
         "description": "Diagnosis completed successfully",
         "content": {
@@ -128,7 +129,7 @@ ANALYZE_RESPONSES = {
     },
 }
 
-QUICK_ANALYZE_RESPONSES = {
+QUICK_ANALYZE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Quick analysis completed",
         "content": {
@@ -292,7 +293,11 @@ async def get_diagnosis(
     """
     try:
         async with DiagnosisService(db) as service:
-            result = await service.get_diagnosis_by_id(diagnosis_id)
+            # Ownership check happens in service layer (IDOR protection)
+            result = await service.get_diagnosis_by_id(
+                diagnosis_id,
+                user_id=UUID(str(current_user.id)),
+            )
 
             if result is None:
                 # Generic message - don't reveal if diagnosis exists or not
@@ -300,13 +305,6 @@ async def get_diagnosis(
                     message="Diagnozis nem talalhato",
                     resource_type="diagnosis",
                     resource_id=str(diagnosis_id),
-                )
-
-            # Check ownership - user can only access their own diagnoses
-            if result.user_id and str(result.user_id) != str(current_user.id):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Nincs jogosultsaga ehhez a diagnozishoz",
                 )
 
             return result
@@ -401,7 +399,7 @@ async def get_diagnosis_history(
 
         history_items = [
             DiagnosisHistoryItem(
-                id=item.id,
+                id=UUID(str(item.id)),
                 vehicle_make=item.vehicle_make,
                 vehicle_model=item.vehicle_model,
                 vehicle_year=item.vehicle_year,
@@ -663,7 +661,7 @@ async def quick_analyze(
 # =============================================================================
 
 
-STREAMING_RESPONSES = {
+STREAMING_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Streaming diagnosis response (Server-Sent Events)",
         "content": {

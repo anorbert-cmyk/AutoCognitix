@@ -721,7 +721,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         # Skip excluded endpoints
         if endpoint in self.EXCLUDED_ENDPOINTS:
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         method = request.method
 
@@ -738,14 +739,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
 
         try:
-            response = await call_next(request)
+            resp: Response = await call_next(request)
 
             # Calculate duration
             duration = time.time() - start_time
 
             # Get response size
             response_size = 0
-            content_length = response.headers.get("Content-Length")
+            content_length = resp.headers.get("Content-Length")
             if content_length:
                 with suppress(ValueError):
                     response_size = int(content_length)
@@ -754,13 +755,13 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             track_request_complete(
                 method=method,
                 endpoint=endpoint,
-                status_code=response.status_code,
+                status_code=resp.status_code,
                 duration=duration,
                 request_size=request_size,
                 response_size=response_size,
             )
 
-            return response
+            return resp
 
         except Exception as e:
             duration = time.time() - start_time

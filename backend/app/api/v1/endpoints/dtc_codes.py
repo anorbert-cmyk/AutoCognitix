@@ -15,7 +15,7 @@ Performance optimizations:
 """
 
 import logging
-from typing import Any
+from typing import Any, Dict, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # OpenAPI Response Examples
 # =============================================================================
 
-SEARCH_RESPONSES = {
+SEARCH_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "DTC codes matching search criteria",
         "content": {
@@ -73,7 +73,7 @@ SEARCH_RESPONSES = {
     }
 }
 
-DTC_DETAIL_RESPONSES = {
+DTC_DETAIL_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Detailed DTC code information",
         "content": {
@@ -126,7 +126,7 @@ DTC_DETAIL_RESPONSES = {
     },
 }
 
-RELATED_CODES_RESPONSES = {
+RELATED_CODES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Related DTC codes",
         "content": {
@@ -151,7 +151,7 @@ RELATED_CODES_RESPONSES = {
     },
 }
 
-CATEGORIES_RESPONSES = {
+CATEGORIES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "List of DTC categories",
         "content": {
@@ -177,7 +177,7 @@ CATEGORIES_RESPONSES = {
     }
 }
 
-CREATE_DTC_RESPONSES = {
+CREATE_DTC_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     201: {
         "description": "DTC code created successfully",
         "content": {
@@ -198,7 +198,7 @@ CREATE_DTC_RESPONSES = {
     },
 }
 
-BULK_IMPORT_RESPONSES = {
+BULK_IMPORT_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     201: {
         "description": "Bulk import completed",
         "content": {
@@ -233,7 +233,7 @@ async def _cache_dtc_detail(code: str, detail_dict: dict) -> None:
         await cache.set_dtc_code(code, detail_dict)
 
 
-async def _get_cached_dtc_detail(code: str) -> dict | None:
+async def _get_cached_dtc_detail(code: str) -> Any:
     """Get cached DTC detail from Redis."""
     cache = await _get_cache_service()
     if cache:
@@ -257,7 +257,7 @@ async def _get_cached_search_results(
     query: str,
     category: str | None = None,
     limit: int = 20,
-) -> list[dict] | None:
+) -> Any:
     """Get cached search results from Redis."""
     cache = await _get_cache_service()
     if cache:
@@ -332,6 +332,7 @@ def _dtc_model_to_detail(
         related_codes=dtc.related_codes or [],
         common_vehicles=[],  # Not stored in PostgreSQL
         manufacturer_code=dtc.manufacturer_code,
+        freeze_frame_data=None,
     )
 
     # Enrich with Neo4j graph data if available
@@ -487,11 +488,11 @@ async def search_dtc_codes(
 
                 if code and code not in existing_codes:
                     # Fetch full details from PostgreSQL
-                    dtc = await repository.get_by_code(code)
-                    if dtc:
+                    semantic_dtc = await repository.get_by_code(code)
+                    if semantic_dtc:
                         results.append(
                             _dtc_model_to_search_result(
-                                dtc, relevance_score=result.get("score", 0.5)
+                                semantic_dtc, relevance_score=result.get("score", 0.5)
                             )
                         )
                         existing_codes.add(code)

@@ -357,10 +357,10 @@ def setup_exception_handlers(app: FastAPI) -> None:
     app.add_middleware(RequestContextMiddleware)
 
     # Register custom exception handlers
-    app.add_exception_handler(AutoCognitixException, autocognitix_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(ValidationError, pydantic_validation_exception_handler)
-    app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
+    app.add_exception_handler(AutoCognitixException, autocognitix_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(ValidationError, pydantic_validation_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)  # type: ignore[arg-type]
 
     # Generic handler for unhandled exceptions (must be last)
     app.add_exception_handler(Exception, generic_exception_handler)
@@ -436,7 +436,7 @@ def setup_neo4j_exception_handler(app: FastAPI) -> None:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        app.add_exception_handler(Neo4jError, neo4j_exception_handler)
+        app.add_exception_handler(Neo4jError, neo4j_exception_handler)  # type: ignore[arg-type]
         logger.info("Neo4j exception handler registered")
 
     except ImportError:
@@ -538,7 +538,7 @@ def setup_httpx_exception_handler(app: FastAPI) -> None:
                 status_code=status_code,
             )
 
-        app.add_exception_handler(httpx.HTTPError, httpx_exception_handler)
+        app.add_exception_handler(httpx.HTTPError, httpx_exception_handler)  # type: ignore[arg-type]
         logger.info("HTTPX exception handler registered")
 
     except ImportError:

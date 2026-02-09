@@ -341,7 +341,7 @@ def rate_limit(
 
     def decorator(func: Callable) -> Callable:
         # Store rate limit info on the function for documentation
-        func._rate_limit = {
+        func._rate_limit = {  # type: ignore[attr-defined]
             "requests": requests,
             "window_seconds": window_seconds,
         }

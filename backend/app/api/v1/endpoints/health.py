@@ -184,13 +184,15 @@ async def check_neo4j_health() -> ServiceHealth:
             for label in ["DTCCode", "Symptom", "Component", "Repair"]:
                 try:
                     count_result = session.run(f"MATCH (n:{label}) RETURN COUNT(n) AS count")
-                    node_counts[label] = count_result.single()["count"]
+                    record = count_result.single()
+                    node_counts[label] = record["count"] if record else 0
                 except Exception:
                     node_counts[label] = 0
 
             # Get relationship count
             rel_result = session.run("MATCH ()-[r]->() RETURN COUNT(r) AS count")
-            rel_count = rel_result.single()["count"]
+            rel_record = rel_result.single()
+            rel_count = rel_record["count"] if rel_record else 0
 
         driver.close()
         latency = (time.time() - start_time) * 1000

@@ -13,13 +13,16 @@ Performance Optimizations:
 """
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql.elements import ColumnElement
 
 # Generic type for models
 ModelType = TypeVar("ModelType", bound=Base)
@@ -49,7 +52,7 @@ class BaseRepository(Generic[ModelType]):
 
     async def get(self, id: str | int | UUID) -> ModelType | None:
         """Get a single record by ID."""
-        result = await self.db.execute(select(self.model).where(self.model.id == id))
+        result = await self.db.execute(select(self.model).where(self.model.id == id))  # type: ignore[attr-defined]
         return result.scalar_one_or_none()
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> list[ModelType]:
@@ -388,7 +391,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    not DiagnosisSession.is_deleted,
+                    DiagnosisSession.is_deleted.is_(False),
                 )
             )
             .order_by(DiagnosisSession.created_at.desc())
@@ -429,9 +432,9 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             Tuple of (items, total_count)
         """
         # Build base query
-        conditions = [
+        conditions: list[ColumnElement[bool]] = [
             DiagnosisSession.user_id == user_id,
-            not DiagnosisSession.is_deleted,
+            DiagnosisSession.is_deleted.is_(False),
         ]
 
         if vehicle_make:
@@ -519,7 +522,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         ).where(
             and_(
                 DiagnosisSession.user_id == user_id,
-                not DiagnosisSession.is_deleted,
+                DiagnosisSession.is_deleted.is_(False),
             )
         )
         stats_result = await self.db.execute(stats_query)
@@ -535,7 +538,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    not DiagnosisSession.is_deleted,
+                    DiagnosisSession.is_deleted.is_(False),
                 )
             )
             .group_by(DiagnosisSession.vehicle_make, DiagnosisSession.vehicle_model)
@@ -557,7 +560,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             .where(
                 and_(
                     DiagnosisSession.user_id == user_id,
-                    not DiagnosisSession.is_deleted,
+                    DiagnosisSession.is_deleted.is_(False),
                     DiagnosisSession.created_at >= func.now() - text("interval '12 months'"),
                 )
             )
@@ -592,7 +595,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             List of {code, count} dictionaries
         """
         # Use unnest to expand the dtc_codes array and count occurrences
-        conditions = [not DiagnosisSession.is_deleted]
+        conditions: list[ColumnElement[bool]] = [DiagnosisSession.is_deleted.is_(False)]
         if user_id:
             conditions.append(DiagnosisSession.user_id == user_id)
 

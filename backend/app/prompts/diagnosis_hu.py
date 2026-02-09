@@ -773,6 +773,11 @@ def generate_rule_based_diagnosis(
     """
     result = ParsedDiagnosisResponse()
 
+    # __post_init__ guarantees these are initialized to [] (not None)
+    assert result.probable_causes is not None
+    assert result.recommended_repairs is not None
+    assert result.safety_warnings is not None
+
     # Build summary from DTC codes
     if dtc_codes:
         categories = {d.get("category", "unknown") for d in dtc_codes}

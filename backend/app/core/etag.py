@@ -64,12 +64,14 @@ class ETagMiddleware(BaseHTTPMiddleware):
 
         # Only process GET/HEAD requests
         if request.method not in ("GET", "HEAD"):
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
 
         # Check if path should be processed
         path = request.url.path
         if not self._should_process_path(path):
-            return await call_next(request)
+            response = await call_next(request)
+            return response
 
         # Get the response
         response = await call_next(request)
@@ -82,7 +84,7 @@ class ETagMiddleware(BaseHTTPMiddleware):
         if not hasattr(response, "body"):
             # Need to read the response body for non-streaming responses
             body = b""
-            async for chunk in response.body_iterator:
+            async for chunk in response.body_iterator:  # type: ignore[attr-defined]
                 body += chunk
 
             # Generate ETag from body content
@@ -196,7 +198,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Add Cache-Control headers based on path."""
-        response = await call_next(request)
+        response: Response = await call_next(request)
 
         # Only add cache headers to successful GET/HEAD responses
         if (

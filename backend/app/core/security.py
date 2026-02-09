@@ -14,6 +14,9 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
+# jose.jwt.encode/decode return Any, so we cast to proper types
+# passlib CryptContext.verify/hash also return Any
+
 logger = logging.getLogger(__name__)
 
 # Password hashing context with bcrypt
@@ -52,7 +55,7 @@ def create_access_token(
     if additional_claims:
         to_encode.update(additional_claims)
 
-    encoded_jwt = jwt.encode(
+    encoded_jwt: str = jwt.encode(
         to_encode,
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
@@ -88,7 +91,7 @@ def create_refresh_token(
         "jti": secrets.token_urlsafe(16),  # JWT ID for blacklisting
     }
 
-    encoded_jwt = jwt.encode(
+    encoded_jwt: str = jwt.encode(
         to_encode,
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
@@ -124,7 +127,7 @@ def create_password_reset_token(
         "jti": secrets.token_urlsafe(16),
     }
 
-    encoded_jwt = jwt.encode(
+    encoded_jwt: str = jwt.encode(
         to_encode,
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
@@ -135,15 +138,17 @@ def create_password_reset_token(
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    result: bool = pwd_context.verify(plain_password, hashed_password)
+    return result
 
 
 def get_password_hash(password: str) -> str:
     """Hash a password for storage."""
-    return pwd_context.hash(password)
+    hashed: str = pwd_context.hash(password)
+    return hashed
 
 
-async def decode_token(token: str) -> dict[str, Any] | None:
+async def decode_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Decode and verify a JWT token.
 
@@ -154,7 +159,7 @@ async def decode_token(token: str) -> dict[str, Any] | None:
         The decoded token payload or None if invalid
     """
     try:
-        payload = jwt.decode(
+        payload: Dict[str, Any] = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],

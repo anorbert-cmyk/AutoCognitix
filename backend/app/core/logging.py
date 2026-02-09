@@ -202,7 +202,7 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
 
     def _extract_stack_frames(self, tb, limit: int = 10) -> list[dict[str, Any]]:
         """Extract structured stack frame information."""
-        frames = []
+        frames: list[dict[str, Any]] = []
         if tb is None:
             return frames
 
@@ -319,7 +319,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             )
 
         try:
-            response = await call_next(request)
+            response: Response = await call_next(request)
 
             # Calculate request duration
             duration_ms = (time.time() - start_time) * 1000
@@ -599,6 +599,7 @@ def setup_logging() -> None:
     # Create console handler
     console_handler = logging.StreamHandler(sys.stdout)
 
+    formatter: logging.Formatter
     if settings.LOG_FORMAT == "json":
         # JSON format for production
         formatter = StructuredJsonFormatter("%(timestamp)s %(level)s %(name)s %(message)s")

@@ -6,7 +6,7 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 """
 
 import logging
-from typing import Any
+from typing import Any, Dict, Union, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,6 +25,7 @@ from app.api.v1.schemas.auth import (
     UserCreate,
     UserPasswordUpdate,
     UserResponse,
+    UserRole,
     UserUpdate,
 )
 from app.core.security import (
@@ -159,7 +160,7 @@ def require_role(*roles: str):
 # OpenAPI Response Examples
 # =============================================================================
 
-REGISTER_RESPONSES: dict[int, dict[str, Any]] = {
+REGISTER_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     201: {
         "description": "Felhasználó sikeresen regisztrálva",
         "content": {
@@ -198,7 +199,7 @@ REGISTER_RESPONSES: dict[int, dict[str, Any]] = {
     },
 }
 
-LOGIN_RESPONSES: dict[int, dict[str, Any]] = {
+LOGIN_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Sikeres bejelentkezés",
         "content": {
@@ -227,7 +228,7 @@ LOGIN_RESPONSES: dict[int, dict[str, Any]] = {
     },
 }
 
-REFRESH_RESPONSES: dict[int, dict[str, Any]] = {
+REFRESH_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Tokenek sikeresen frissítve",
         "content": {
@@ -246,7 +247,7 @@ REFRESH_RESPONSES: dict[int, dict[str, Any]] = {
     },
 }
 
-ME_RESPONSES: dict[int, dict[str, Any]] = {
+ME_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Aktuális felhasználó adatai",
         "content": {
@@ -347,7 +348,7 @@ async def register(
         email=user.email,
         full_name=user.full_name,
         is_active=user.is_active,
-        role=user.role,
+        role=cast("UserRole", user.role),
         created_at=user.created_at.isoformat() if user.created_at else None,
     )
 
@@ -620,7 +621,7 @@ async def get_me(
         email=current_user.email,
         full_name=current_user.full_name,
         is_active=current_user.is_active,
-        role=current_user.role,
+        role=cast("UserRole", current_user.role),
         created_at=current_user.created_at.isoformat() if current_user.created_at else None,
     )
 
@@ -683,7 +684,7 @@ async def update_me(
                 email=user.email,
                 full_name=user.full_name,
                 is_active=user.is_active,
-                role=user.role,
+                role=cast("UserRole", user.role),
                 created_at=user.created_at.isoformat() if user.created_at else None,
             )
 
@@ -692,7 +693,7 @@ async def update_me(
         email=current_user.email,
         full_name=current_user.full_name,
         is_active=current_user.is_active,
-        role=current_user.role,
+        role=cast("UserRole", current_user.role),
         created_at=current_user.created_at.isoformat() if current_user.created_at else None,
     )
 

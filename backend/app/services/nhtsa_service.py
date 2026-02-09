@@ -17,7 +17,7 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import httpx
 from pydantic import BaseModel, Field
@@ -203,7 +203,8 @@ class RedisCache(CacheBackend):
     async def get(self, key: str) -> Optional[str]:
         try:
             redis = await self._get_redis()
-            return await redis.get(key)
+            result = await redis.get(key)
+            return str(result) if result is not None else None
         except Exception as e:
             logger.warning(f"Redis get failed: {e}")
             return None
@@ -384,7 +385,7 @@ class NHTSAService:
                 )
 
             response.raise_for_status()
-            return response.json()
+            return cast("Dict[str, Any]", response.json())
 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error from NHTSA: {e.response.status_code} - {e}")

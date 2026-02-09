@@ -9,6 +9,8 @@ Optimized for performance with:
 - Comprehensive error handling with Hungarian error messages
 """
 
+from typing import Any
+
 from sqlalchemy.exc import (
     DBAPIError,
     IntegrityError,
@@ -232,14 +234,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # =============================================================================
 
 
-async def get_pool_status() -> dict:
+async def get_pool_status() -> dict[str, Any]:
     """
     Get current connection pool status.
 
     Returns:
         Dictionary with pool statistics for monitoring.
     """
-    pool = engine.pool
+    pool: Any = engine.pool
     return {
         "pool_size": pool.size(),
         "checked_in": pool.checkedin(),
@@ -277,7 +279,7 @@ async def check_database_connection() -> bool:
         return False
 
 
-async def get_database_info() -> dict:
+async def get_database_info() -> dict[str, Any]:
     """
     Get database connection information for health checks.
 
@@ -291,7 +293,7 @@ async def get_database_info() -> dict:
             result = await session.execute(text("SELECT version()"))
             version = result.scalar()
 
-            pool = engine.pool
+            pool: Any = engine.pool
             return {
                 "status": "connected",
                 "version": version,

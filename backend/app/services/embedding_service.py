@@ -351,6 +351,8 @@ class HungarianEmbeddingService:
             return [0.0] * settings.EMBEDDING_DIMENSION
 
         # Tokenize
+        assert self._tokenizer is not None, "Tokenizer not loaded"
+        assert self._model is not None, "Model not loaded"
         encoded = self._tokenizer(
             text, padding=True, truncation=True, max_length=512, return_tensors="pt"
         )
@@ -496,6 +498,8 @@ class HungarianEmbeddingService:
             batch_texts = [item[1] for item in non_empty_items]
 
             # Tokenize batch
+            assert self._tokenizer is not None, "Tokenizer not loaded"
+            assert self._model is not None, "Model not loaded"
             encoded = self._tokenizer(
                 batch_texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
             )

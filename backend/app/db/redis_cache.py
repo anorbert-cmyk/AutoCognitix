@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
@@ -27,9 +27,6 @@ from redis.asyncio.connection import ConnectionPool
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Type variable for generic cache decorator
-T = TypeVar("T")
 
 # =============================================================================
 # Cache TTL Configuration (in seconds)
@@ -157,7 +154,7 @@ class RedisCacheService:
             self._client = redis.Redis(connection_pool=RedisCacheService._pool)
 
             # Test connection
-            await self._client.ping()
+            await self._client.ping()  # type: ignore[misc]
             self._connected = True
             self._circuit_open = False
             self._failure_count = 0
@@ -302,7 +299,8 @@ class RedisCacheService:
                 keys.append(key)
 
             if keys:
-                return await self._client.delete(*keys)
+                result: int = await self._client.delete(*keys)
+                return result
             return 0
         except Exception as e:
             logger.warning(f"Redis DELETE PATTERN error for {pattern}: {e}")
@@ -316,7 +314,8 @@ class RedisCacheService:
 
         assert self._client is not None
         try:
-            return await self._client.exists(key) > 0
+            count: int = await self._client.exists(key)
+            return count > 0
         except Exception as e:
             logger.warning(f"Redis EXISTS error for {key}: {e}")
             return False
@@ -541,6 +540,7 @@ class RedisCacheService:
 
         key = f"{CachePrefix.RATE_LIMIT}{identifier}"
 
+        assert self._client is not None
         try:
             async with self._client.pipeline() as pipe:
                 pipe.incr(key)
@@ -566,6 +566,7 @@ class RedisCacheService:
         if not self._connected:
             return {"status": "disconnected"}
 
+        assert self._client is not None
         try:
             info = await self._client.info()
             return {
@@ -583,12 +584,12 @@ class RedisCacheService:
 
     def _calculate_hit_rate(self, info: dict) -> float:
         """Calculate cache hit rate percentage."""
-        hits = info.get("keyspace_hits", 0)
-        misses = info.get("keyspace_misses", 0)
+        hits: int = info.get("keyspace_hits", 0)
+        misses: int = info.get("keyspace_misses", 0)
         total = hits + misses
         if total == 0:
             return 0.0
-        return round((hits / total) * 100, 2)
+        return float(round((hits / total) * 100, 2))
 
 
 # =============================================================================
@@ -620,7 +621,7 @@ def cached(
     prefix: str,
     ttl: int = CacheTTL.API_RESPONSE,
     key_builder: Callable[..., str] | None = None,
-):
+) -> Callable[..., Any]:
     """
     Decorator for caching function results.
 
@@ -635,9 +636,9 @@ def cached(
             ...
     """
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(*args, **kwargs) -> T:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Build cache key
             if key_builder:
                 key = f"{prefix}{key_builder(*args, **kwargs)}"

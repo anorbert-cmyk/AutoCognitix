@@ -9,7 +9,7 @@ Provides endpoints to:
 - Get recalls and complaints from NHTSA
 """
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 # OpenAPI Response Examples
 # =============================================================================
 
-VIN_DECODE_RESPONSES = {
+VIN_DECODE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "VIN successfully decoded",
         "content": {
@@ -92,7 +92,7 @@ VIN_DECODE_RESPONSES = {
     },
 }
 
-MAKES_RESPONSES = {
+MAKES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "List of vehicle makes with pagination",
         "content": {
@@ -118,7 +118,7 @@ MAKES_RESPONSES = {
     }
 }
 
-MODELS_RESPONSES = {
+MODELS_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "List of vehicle models for the specified make",
         "content": {
@@ -158,7 +158,7 @@ MODELS_RESPONSES = {
     },
 }
 
-YEARS_RESPONSES = {
+YEARS_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Available vehicle years",
         "content": {
@@ -181,7 +181,7 @@ YEARS_RESPONSES = {
     },
 }
 
-RECALLS_RESPONSES = {
+RECALLS_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "List of recalls for the specified vehicle",
         "content": {
@@ -213,7 +213,7 @@ RECALLS_RESPONSES = {
     },
 }
 
-COMPLAINTS_RESPONSES = {
+COMPLAINTS_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "List of complaints for the specified vehicle",
         "content": {
@@ -248,7 +248,7 @@ COMPLAINTS_RESPONSES = {
     },
 }
 
-COMMON_ISSUES_RESPONSES = {
+COMMON_ISSUES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     200: {
         "description": "Common issues for the specified vehicle",
         "content": {
