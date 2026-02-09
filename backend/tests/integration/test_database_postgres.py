@@ -146,11 +146,13 @@ class TestDTCCodeRepository:
         repo = DTCCodeRepository(db_session)
 
         # Create a code to delete
-        dtc = await repo.create({
-            "code": "P9998",
-            "description_en": "Test code to delete",
-            "category": "powertrain",
-        })
+        dtc = await repo.create(
+            {
+                "code": "P9998",
+                "description_en": "Test code to delete",
+                "category": "powertrain",
+            }
+        )
 
         # Delete it
         result = await repo.delete(dtc.id)
@@ -297,15 +299,17 @@ class TestDiagnosisSessionRepository:
         repo = DiagnosisSessionRepository(db_session)
 
         # Create a session first
-        session = await repo.create({
-            "vehicle_make": "Volkswagen",
-            "vehicle_model": "Golf",
-            "vehicle_year": 2018,
-            "dtc_codes": ["P0101"],
-            "symptoms_text": "Motor nehezen indul",
-            "diagnosis_result": {},
-            "confidence_score": 0.75,
-        })
+        session = await repo.create(
+            {
+                "vehicle_make": "Volkswagen",
+                "vehicle_model": "Golf",
+                "vehicle_year": 2018,
+                "dtc_codes": ["P0101"],
+                "symptoms_text": "Motor nehezen indul",
+                "diagnosis_result": {},
+                "confidence_score": 0.75,
+            }
+        )
 
         # Get it by ID
         retrieved = await repo.get(session.id)
@@ -323,16 +327,18 @@ class TestDiagnosisSessionRepository:
 
         # Create some sessions for the user
         for i in range(3):
-            await repo.create({
-                "user_id": user.id,
-                "vehicle_make": "Volkswagen",
-                "vehicle_model": "Golf",
-                "vehicle_year": 2018 + i,
-                "dtc_codes": [f"P010{i}"],
-                "symptoms_text": f"Problem {i}",
-                "diagnosis_result": {},
-                "confidence_score": 0.75,
-            })
+            await repo.create(
+                {
+                    "user_id": user.id,
+                    "vehicle_make": "Volkswagen",
+                    "vehicle_model": "Golf",
+                    "vehicle_year": 2018 + i,
+                    "dtc_codes": [f"P010{i}"],
+                    "symptoms_text": f"Problem {i}",
+                    "diagnosis_result": {},
+                    "confidence_score": 0.75,
+                }
+            )
 
         # Get history
         history = await repo.get_user_history(user.id)
@@ -349,16 +355,18 @@ class TestDiagnosisSessionRepository:
 
         # Create sessions
         for i in range(5):
-            await repo.create({
-                "user_id": user.id,
-                "vehicle_make": "Volkswagen",
-                "vehicle_model": "Golf",
-                "vehicle_year": 2018,
-                "dtc_codes": ["P0101"],
-                "symptoms_text": f"Problem {i}",
-                "diagnosis_result": {},
-                "confidence_score": 0.75,
-            })
+            await repo.create(
+                {
+                    "user_id": user.id,
+                    "vehicle_make": "Volkswagen",
+                    "vehicle_model": "Golf",
+                    "vehicle_year": 2018,
+                    "dtc_codes": ["P0101"],
+                    "symptoms_text": f"Problem {i}",
+                    "diagnosis_result": {},
+                    "confidence_score": 0.75,
+                }
+            )
 
         # Get with pagination
         page1 = await repo.get_user_history(user.id, skip=0, limit=2)
@@ -377,16 +385,18 @@ class TestDiagnosisSessionRepository:
 
         # Create sessions
         for i in range(3):
-            await repo.create({
-                "user_id": user.id,
-                "vehicle_make": "Volkswagen",
-                "vehicle_model": "Golf",
-                "vehicle_year": 2018,
-                "dtc_codes": ["P0101"],
-                "symptoms_text": f"Problem {i}",
-                "diagnosis_result": {},
-                "confidence_score": 0.75,
-            })
+            await repo.create(
+                {
+                    "user_id": user.id,
+                    "vehicle_make": "Volkswagen",
+                    "vehicle_model": "Golf",
+                    "vehicle_year": 2018,
+                    "dtc_codes": ["P0101"],
+                    "symptoms_text": f"Problem {i}",
+                    "diagnosis_result": {},
+                    "confidence_score": 0.75,
+                }
+            )
 
         history = await repo.get_user_history(user.id)
 
@@ -403,11 +413,13 @@ class TestVehicleMakeRepository:
         """Test creating a vehicle make."""
         repo = VehicleMakeRepository(db_session)
 
-        make = await repo.create({
-            "id": "tesla",
-            "name": "Tesla",
-            "country": "USA",
-        })
+        make = await repo.create(
+            {
+                "id": "tesla",
+                "name": "Tesla",
+                "country": "USA",
+            }
+        )
 
         assert make.id == "tesla"
         assert make.name == "Tesla"
@@ -442,13 +454,15 @@ class TestVehicleModelRepository:
         """Test creating a vehicle model."""
         repo = VehicleModelRepository(db_session)
 
-        model = await repo.create({
-            "id": "golf-8",
-            "name": "Golf 8",
-            "make_id": "volkswagen",
-            "year_start": 2020,
-            "body_types": ["Hatchback", "Wagon"],
-        })
+        model = await repo.create(
+            {
+                "id": "golf-8",
+                "name": "Golf 8",
+                "make_id": "volkswagen",
+                "year_start": 2020,
+                "body_types": ["Hatchback", "Wagon"],
+            }
+        )
 
         assert model.id == "golf-8"
         assert model.make_id == "volkswagen"
@@ -459,18 +473,22 @@ class TestVehicleModelRepository:
         # First create some models
         repo = VehicleModelRepository(db_session)
 
-        await repo.create({
-            "id": "golf",
-            "name": "Golf",
-            "make_id": "volkswagen",
-            "year_start": 1974,
-        })
-        await repo.create({
-            "id": "passat",
-            "name": "Passat",
-            "make_id": "volkswagen",
-            "year_start": 1973,
-        })
+        await repo.create(
+            {
+                "id": "golf",
+                "name": "Golf",
+                "make_id": "volkswagen",
+                "year_start": 1974,
+            }
+        )
+        await repo.create(
+            {
+                "id": "passat",
+                "name": "Passat",
+                "make_id": "volkswagen",
+                "year_start": 1973,
+            }
+        )
 
         # Get models for VW
         models = await repo.get_by_make("volkswagen")
@@ -486,19 +504,23 @@ class TestVehicleModelRepository:
         repo = VehicleModelRepository(db_session)
 
         # Create models with different year ranges
-        await repo.create({
-            "id": "id3",
-            "name": "ID.3",
-            "make_id": "volkswagen",
-            "year_start": 2020,
-        })
-        await repo.create({
-            "id": "beetle-old",
-            "name": "Beetle Classic",
-            "make_id": "volkswagen",
-            "year_start": 1938,
-            "year_end": 2003,
-        })
+        await repo.create(
+            {
+                "id": "id3",
+                "name": "ID.3",
+                "make_id": "volkswagen",
+                "year_start": 2020,
+            }
+        )
+        await repo.create(
+            {
+                "id": "beetle-old",
+                "name": "Beetle Classic",
+                "make_id": "volkswagen",
+                "year_start": 1938,
+                "year_end": 2003,
+            }
+        )
 
         # Get models available in 2021
         models = await repo.get_by_make("volkswagen", year=2021)
@@ -517,19 +539,23 @@ class TestDatabaseTransactions:
         repo = DTCCodeRepository(db_session)
 
         # Create a valid code
-        await repo.create({
-            "code": "P0400",
-            "description_en": "Test code",
-            "category": "powertrain",
-        })
+        await repo.create(
+            {
+                "code": "P0400",
+                "description_en": "Test code",
+                "category": "powertrain",
+            }
+        )
 
         # Try to create duplicate (should fail)
         try:
-            await repo.create({
-                "code": "P0400",  # Duplicate
-                "description_en": "Duplicate test code",
-                "category": "powertrain",
-            })
+            await repo.create(
+                {
+                    "code": "P0400",  # Duplicate
+                    "description_en": "Duplicate test code",
+                    "category": "powertrain",
+                }
+            )
         except Exception:
             pass
 
@@ -548,11 +574,13 @@ class TestDatabaseConstraints:
 
         # P0101 already exists in seeded data
         with pytest.raises(Exception):
-            await repo.create({
-                "code": "P0101",  # Duplicate
-                "description_en": "Duplicate code",
-                "category": "powertrain",
-            })
+            await repo.create(
+                {
+                    "code": "P0101",  # Duplicate
+                    "description_en": "Duplicate code",
+                    "category": "powertrain",
+                }
+            )
 
     @pytest.mark.asyncio
     async def test_unique_user_email(self, db_session, seeded_db):
@@ -561,10 +589,12 @@ class TestDatabaseConstraints:
 
         # test@example.com already exists in seeded data
         with pytest.raises(Exception):
-            await repo.create({
-                "email": "test@example.com",  # Duplicate
-                "hashed_password": "hash",
-            })
+            await repo.create(
+                {
+                    "email": "test@example.com",  # Duplicate
+                    "hashed_password": "hash",
+                }
+            )
 
     @pytest.mark.asyncio
     async def test_required_fields(self, db_session):
@@ -573,8 +603,10 @@ class TestDatabaseConstraints:
 
         # Missing required description_en
         with pytest.raises(Exception):
-            await repo.create({
-                "code": "P0500",
-                "category": "powertrain",
-                # Missing description_en
-            })
+            await repo.create(
+                {
+                    "code": "P0500",
+                    "category": "powertrain",
+                    # Missing description_en
+                }
+            )

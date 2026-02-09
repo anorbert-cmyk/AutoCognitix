@@ -42,6 +42,7 @@ def app():
 
     # Import and include routers
     from app.api.v1.endpoints.dtc_codes import router as dtc_router
+
     test_app.include_router(dtc_router, prefix="/api/v1/dtc", tags=["DTC"])
 
     # Add health check
@@ -115,10 +116,7 @@ class TestDTCSearchEndpoint:
 
     def test_search_with_category_filter(self, client):
         """Test search with category filter."""
-        response = client.get(
-            "/api/v1/dtc/search",
-            params={"q": "P", "category": "powertrain"}
-        )
+        response = client.get("/api/v1/dtc/search", params={"q": "P", "category": "powertrain"})
 
         assert response.status_code == 200
         data = response.json()
@@ -129,10 +127,7 @@ class TestDTCSearchEndpoint:
 
     def test_search_with_limit(self, client):
         """Test search with result limit."""
-        response = client.get(
-            "/api/v1/dtc/search",
-            params={"q": "P", "limit": 5}
-        )
+        response = client.get("/api/v1/dtc/search", params={"q": "P", "limit": 5})
 
         assert response.status_code == 200
         data = response.json()
@@ -319,8 +314,7 @@ class TestInputValidation:
     def test_invalid_category_rejected(self, client):
         """Test that invalid category is rejected."""
         response = client.get(
-            "/api/v1/dtc/search",
-            params={"q": "P", "category": "invalid_category"}
+            "/api/v1/dtc/search", params={"q": "P", "category": "invalid_category"}
         )
 
         assert response.status_code == 422

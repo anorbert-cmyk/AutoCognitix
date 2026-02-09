@@ -71,14 +71,31 @@ class TestPostgreSQLDataIntegrity:
     async def test_dtc_code_format_constraint(self, async_client, seeded_db):
         """Test that DTC code format is validated."""
         invalid_dtcs = [
-            {"code": "INVALID", "description_en": "Test", "category": "powertrain", "severity": "medium"},
-            {"code": "X1234", "description_en": "Test", "category": "powertrain", "severity": "medium"},
-            {"code": "P12", "description_en": "Test", "category": "powertrain", "severity": "medium"},
+            {
+                "code": "INVALID",
+                "description_en": "Test",
+                "category": "powertrain",
+                "severity": "medium",
+            },
+            {
+                "code": "X1234",
+                "description_en": "Test",
+                "category": "powertrain",
+                "severity": "medium",
+            },
+            {
+                "code": "P12",
+                "description_en": "Test",
+                "category": "powertrain",
+                "severity": "medium",
+            },
         ]
 
         for dtc in invalid_dtcs:
             response = await async_client.post("/api/v1/dtc/", json=dtc)
-            assert response.status_code in [400, 422], f"Invalid code {dtc['code']} should be rejected"
+            assert response.status_code in [400, 422], (
+                f"Invalid code {dtc['code']} should be rejected"
+            )
 
     @pytest.mark.asyncio
     async def test_dtc_category_enum_constraint(self, async_client, seeded_db):
@@ -176,6 +193,7 @@ class TestDataTypeConsistency:
 
         # Verify UUID format
         import uuid
+
         try:
             uuid.UUID(data["id"])
         except ValueError:
@@ -195,6 +213,7 @@ class TestDataTypeConsistency:
 
         if data.get("created_at"):
             from datetime import datetime
+
             try:
                 # Try parsing ISO format
                 datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
@@ -211,10 +230,13 @@ class TestDataTypeConsistency:
         diagnosis_request_data,
     ):
         """Test that confidence scores are always between 0 and 1."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -375,9 +397,13 @@ class TestQdrantVectorSearchAccuracy:
         mock_qdrant_client,
     ):
         """Test that semantic search returns relevant results."""
-        with patch("app.services.embedding_service.get_embedding_service", return_value=mock_embedding_service), \
-             patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client):
-
+        with (
+            patch(
+                "app.services.embedding_service.get_embedding_service",
+                return_value=mock_embedding_service,
+            ),
+            patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client),
+        ):
             response = await async_client.get(
                 "/api/v1/dtc/search",
                 params={"q": "motor rezeg", "use_semantic": True},
@@ -711,10 +737,13 @@ class TestReferentialIntegrity:
             "symptoms": "A motor nehezen indul es egyenetlenul jar.",
         }
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post("/api/v1/diagnosis/analyze", json=request_data)
 
             if response.status_code == 201:
@@ -824,10 +853,13 @@ class TestDataIsolation:
             "symptoms": "A motor nehezen indul es egyenetlenul jar.",
         }
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             create_response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -845,7 +877,10 @@ class TestDataIsolation:
                 await async_client.post("/api/v1/auth/register", json=user2)
                 login2 = await async_client.post(
                     "/api/v1/auth/login",
-                    data={"username": "user2isolation@example.com", "password": "SecurePassword123!"},
+                    data={
+                        "username": "user2isolation@example.com",
+                        "password": "SecurePassword123!",
+                    },
                 )
                 tokens2 = login2.json()
                 headers2 = {"Authorization": f"Bearer {tokens2['access_token']}"}
@@ -885,6 +920,7 @@ class TestDataVersioning:
 
         # Small delay to ensure timestamp difference
         import asyncio
+
         await asyncio.sleep(0.1)
 
         # Update profile
@@ -917,10 +953,7 @@ class TestConcurrentDataAccess:
         }
 
         # Try to create same DTC concurrently
-        tasks = [
-            async_client.post("/api/v1/dtc/", json=dtc_data)
-            for _ in range(3)
-        ]
+        tasks = [async_client.post("/api/v1/dtc/", json=dtc_data) for _ in range(3)]
 
         responses = await asyncio.gather(*tasks)
 
@@ -937,10 +970,7 @@ class TestConcurrentDataAccess:
         import asyncio
 
         # Run multiple concurrent searches
-        tasks = [
-            async_client.get("/api/v1/dtc/search", params={"q": "P0101"})
-            for _ in range(5)
-        ]
+        tasks = [async_client.get("/api/v1/dtc/search", params={"q": "P0101"}) for _ in range(5)]
 
         responses = await asyncio.gather(*tasks)
 

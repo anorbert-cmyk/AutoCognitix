@@ -90,6 +90,8 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "SIM103",   # Return negated condition
     "RUF006",   # Asyncio task reference
 ]
+# Models need runtime imports for SQLAlchemy/Pydantic (not TYPE_CHECKING)
+"app/db/postgres/models.py" = ["TCH003"]
 # Init files can have unused imports
 "__init__.py" = ["F401"]
 # Migration files have their own conventions

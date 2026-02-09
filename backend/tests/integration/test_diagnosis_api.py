@@ -32,10 +32,13 @@ class TestDiagnosisAnalyzeEndpoint:
         diagnosis_request_data,
     ):
         """Test that analyze returns 201 CREATED with valid request."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -53,10 +56,13 @@ class TestDiagnosisAnalyzeEndpoint:
         diagnosis_request_data,
     ):
         """Test that analyze returns correct response structure."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -378,10 +384,13 @@ class TestDiagnosisServiceIntegration:
         diagnosis_request_data,
     ):
         """Test that diagnosis fetches NHTSA recalls and complaints."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -406,10 +415,11 @@ class TestDiagnosisServiceIntegration:
         failing_nhtsa.get_recalls.return_value = []
         failing_nhtsa.get_complaints.return_value = []
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=failing_nhtsa), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=failing_nhtsa), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=failing_nhtsa),
+            patch("app.services.diagnosis_service.get_nhtsa_service", return_value=failing_nhtsa),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             # Remove VIN to avoid VIN decode
             request_data = diagnosis_request_data.copy()
             del request_data["vin"]
@@ -445,10 +455,11 @@ class TestDiagnosisServiceIntegration:
         mock_nhtsa.get_recalls.return_value = []
         mock_nhtsa.get_complaints.return_value = []
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa),
+            patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -471,10 +482,13 @@ class TestDiagnosisResponseFormat:
         diagnosis_request_data,
     ):
         """Test that response contains probable causes with confidence scores."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -500,10 +514,13 @@ class TestDiagnosisResponseFormat:
         diagnosis_request_data,
     ):
         """Test that response contains repair recommendations."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -528,10 +545,13 @@ class TestDiagnosisResponseFormat:
         diagnosis_request_data,
     ):
         """Test that response contains overall confidence score."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -552,10 +572,13 @@ class TestDiagnosisResponseFormat:
         diagnosis_request_data,
     ):
         """Test that response echoes input vehicle information."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,

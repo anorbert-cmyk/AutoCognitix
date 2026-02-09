@@ -31,8 +31,9 @@ class MockSettings:
 @pytest.fixture
 def mock_torch():
     """Mock torch module."""
-    with patch.dict(sys.modules, {'torch': MagicMock()}):
+    with patch.dict(sys.modules, {"torch": MagicMock()}):
         import torch
+
         torch.cuda.is_available.return_value = False
         torch.backends.mps.is_available.return_value = False
         torch.device.return_value = MagicMock()
@@ -42,7 +43,7 @@ def mock_torch():
 @pytest.fixture
 def mock_transformers():
     """Mock transformers module."""
-    with patch.dict(sys.modules, {'transformers': MagicMock()}):
+    with patch.dict(sys.modules, {"transformers": MagicMock()}):
         yield
 
 
@@ -73,6 +74,7 @@ class TestEmptyTextHandling:
 
     def test_empty_string_returns_zero_vector(self):
         """Test that empty string returns zero vector."""
+
         def embed_empty_text(text: str) -> List[float]:
             if not text or not text.strip():
                 return [0.0] * MockSettings.EMBEDDING_DIMENSION
@@ -83,6 +85,7 @@ class TestEmptyTextHandling:
 
     def test_whitespace_string_returns_zero_vector(self):
         """Test that whitespace-only string returns zero vector."""
+
         def embed_text(text: str) -> List[float]:
             if not text or not text.strip():
                 return [0.0] * MockSettings.EMBEDDING_DIMENSION
@@ -93,6 +96,7 @@ class TestEmptyTextHandling:
 
     def test_none_returns_zero_vector(self):
         """Test that None input returns zero vector."""
+
         def embed_text(text: str) -> List[float]:
             if not text or not text.strip():
                 return [0.0] * MockSettings.EMBEDDING_DIMENSION
@@ -103,6 +107,7 @@ class TestEmptyTextHandling:
 
     def test_valid_text_returns_nonzero_vector(self):
         """Test that valid text returns non-zero vector."""
+
         def embed_text(text: str) -> List[float]:
             if not text or not text.strip():
                 return [0.0] * MockSettings.EMBEDDING_DIMENSION
@@ -117,6 +122,7 @@ class TestBatchProcessing:
 
     def test_empty_batch_returns_empty_list(self):
         """Test that empty batch returns empty list."""
+
         def embed_batch(texts: List[str]) -> List[List[float]]:
             if not texts:
                 return []
@@ -169,7 +175,7 @@ class TestBatchProcessing:
             # Process in batches but return all results
             all_results = []
             for i in range(0, len(texts), batch_size):
-                batch = texts[i:i + batch_size]
+                batch = texts[i : i + batch_size]
                 all_results.extend([[0.1] * 768 for _ in batch])
             return all_results
 
@@ -234,11 +240,8 @@ class TestSimilarityCalculation:
 
     def test_get_similar_texts_returns_sorted_results(self):
         """Test that similar texts are returned sorted by similarity."""
-        def get_similar_texts(
-            query: str,
-            candidates: List[str],
-            top_k: int = 5
-        ) -> List[tuple]:
+
+        def get_similar_texts(query: str, candidates: List[str], top_k: int = 5) -> List[tuple]:
             # Simulate similarity scores
             scores = [(c, 1.0 / (i + 1)) for i, c in enumerate(candidates)]
             scores.sort(key=lambda x: x[1], reverse=True)
@@ -254,11 +257,8 @@ class TestSimilarityCalculation:
 
     def test_get_similar_texts_empty_candidates(self):
         """Test similarity search with empty candidates."""
-        def get_similar_texts(
-            query: str,
-            candidates: List[str],
-            top_k: int = 5
-        ) -> List[tuple]:
+
+        def get_similar_texts(query: str, candidates: List[str], top_k: int = 5) -> List[tuple]:
             if not candidates:
                 return []
             return [(c, 0.5) for c in candidates[:top_k]]
@@ -272,6 +272,7 @@ class TestServiceSingleton:
 
     def test_singleton_returns_same_instance(self):
         """Test that singleton returns the same instance."""
+
         class SingletonService:
             _instance = None
 
@@ -309,6 +310,7 @@ class TestDeviceDetection:
 
     def test_cpu_fallback(self):
         """Test CPU fallback when no GPU available."""
+
         def detect_device():
             # Simulate no CUDA and no MPS
             cuda_available = False
@@ -326,6 +328,7 @@ class TestDeviceDetection:
 
     def test_cuda_detection(self):
         """Test CUDA detection when available."""
+
         def detect_device(cuda_available: bool, mps_available: bool):
             if cuda_available:
                 return "cuda"
@@ -339,6 +342,7 @@ class TestDeviceDetection:
 
     def test_mps_detection(self):
         """Test MPS (Apple Silicon) detection."""
+
         def detect_device(cuda_available: bool, mps_available: bool):
             if cuda_available:
                 return "cuda"
@@ -356,6 +360,7 @@ class TestHungarianPreprocessing:
 
     def test_preprocess_empty_text(self):
         """Test preprocessing of empty text."""
+
         def preprocess_hungarian(text: str) -> str:
             if not text or not text.strip():
                 return ""
@@ -367,6 +372,7 @@ class TestHungarianPreprocessing:
 
     def test_preprocess_strips_whitespace(self):
         """Test that preprocessing strips whitespace."""
+
         def preprocess_hungarian(text: str) -> str:
             if not text:
                 return ""
@@ -377,6 +383,7 @@ class TestHungarianPreprocessing:
 
     def test_preprocess_returns_text_without_spacy(self):
         """Test preprocessing fallback without spacy."""
+
         def preprocess_hungarian(text: str, spacy_available: bool = False) -> str:
             if not text or not text.strip():
                 return ""
@@ -394,6 +401,7 @@ class TestEmbeddingServiceIntegration:
 
     def test_warmup_loads_models(self):
         """Test that warmup loads all models."""
+
         class MockEmbeddingService:
             def __init__(self):
                 self._model_loaded = False
@@ -415,6 +423,7 @@ class TestEmbeddingServiceIntegration:
 
     def test_embedding_dimension_property(self):
         """Test embedding dimension property."""
+
         class MockEmbeddingService:
             @property
             def embedding_dimension(self):
@@ -425,6 +434,7 @@ class TestEmbeddingServiceIntegration:
 
     def test_device_property(self):
         """Test device property returns current device."""
+
         class MockEmbeddingService:
             def __init__(self):
                 self._device = "cpu"

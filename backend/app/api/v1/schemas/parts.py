@@ -16,6 +16,7 @@ class PartCategory(str, Enum):
 
     Part categories for organizing automotive components.
     """
+
     SENSORS = "sensors"
     FILTERS = "filters"
     IGNITION = "ignition"
@@ -36,10 +37,11 @@ class LaborDifficulty(str, Enum):
 
     Labor difficulty levels for repair cost estimation.
     """
-    EASY = "easy"           # Egyszerű - bárki meg tudja csinálni
-    MEDIUM = "medium"       # Közepes - alapvető szerszámok kellenek
-    HARD = "hard"           # Nehéz - tapasztalat szükséges
-    EXPERT = "expert"       # Szakértői - szerviz vagy specialista
+
+    EASY = "easy"  # Egyszerű - bárki meg tudja csinálni
+    MEDIUM = "medium"  # Közepes - alapvető szerszámok kellenek
+    HARD = "hard"  # Nehéz - tapasztalat szükséges
+    EXPERT = "expert"  # Szakértői - szerviz vagy specialista
 
 
 class PriceSource(BaseModel):
@@ -48,7 +50,10 @@ class PriceSource(BaseModel):
 
     Represents a source for part pricing (webshop, dealer, etc.).
     """
-    name: str = Field(..., min_length=1, max_length=100, description="Forrás neve (pl. 'AutoDoc', 'EuroAuto')")
+
+    name: str = Field(
+        ..., min_length=1, max_length=100, description="Forrás neve (pl. 'AutoDoc', 'EuroAuto')"
+    )
     price_min: int = Field(..., ge=0, description="Minimális ár a forrásnál")
     price_max: int = Field(..., ge=0, description="Maximális ár a forrásnál")
     currency: str = Field("HUF", max_length=3, description="Pénznem (ISO 4217)")
@@ -71,7 +76,13 @@ class PartInfo(BaseModel):
 
     Detailed information about an automotive part including pricing and compatibility.
     """
-    id: str = Field(..., min_length=1, max_length=50, description="Egyedi alkatrész azonosító (pl. 'maf_sensor')")
+
+    id: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="Egyedi alkatrész azonosító (pl. 'maf_sensor')",
+    )
     name: str = Field(..., min_length=1, max_length=200, description="Alkatrész neve magyarul")
     name_en: Optional[str] = Field(None, max_length=200, description="Alkatrész neve angolul")
     category: PartCategory = Field(..., description="Alkatrész kategória")
@@ -81,7 +92,9 @@ class PartInfo(BaseModel):
     oem_number: Optional[str] = Field(None, max_length=50, description="Gyári (OEM) cikkszám")
 
     # Leírás
-    description: Optional[str] = Field(None, max_length=1000, description="Részletes leírás magyarul")
+    description: Optional[str] = Field(
+        None, max_length=1000, description="Részletes leírás magyarul"
+    )
 
     # Árazás
     price_range_min: int = Field(..., ge=0, description="Minimális ár (HUF)")
@@ -93,13 +106,19 @@ class PartInfo(BaseModel):
 
     # Minőség
     is_oem: bool = Field(False, description="OEM (gyári) alkatrész-e")
-    quality_rating: Optional[float] = Field(None, ge=0, le=5, description="Minőségi értékelés (0-5)")
+    quality_rating: Optional[float] = Field(
+        None, ge=0, le=5, description="Minőségi értékelés (0-5)"
+    )
 
     # Kompatibilitás
-    compatibility_notes: Optional[str] = Field(None, max_length=500, description="Kompatibilitási megjegyzések")
+    compatibility_notes: Optional[str] = Field(
+        None, max_length=500, description="Kompatibilitási megjegyzések"
+    )
 
     # Beszerelés
-    labor_hours: Optional[float] = Field(None, ge=0, le=100, description="Becsült beszerelési idő órában")
+    labor_hours: Optional[float] = Field(
+        None, ge=0, le=100, description="Becsült beszerelési idő órában"
+    )
 
     @field_validator("price_range_max")
     @classmethod
@@ -133,7 +152,7 @@ class PartInfo(BaseModel):
                 "is_oem": False,
                 "quality_rating": 4.2,
                 "compatibility_notes": "Volkswagen/Audi 1.8T, 2.0 motorokhoz",
-                "labor_hours": 0.5
+                "labor_hours": 0.5,
             }
         }
 
@@ -144,8 +163,11 @@ class RepairCostEstimate(BaseModel):
 
     Comprehensive repair cost estimate including parts and labor.
     """
+
     dtc_code: str = Field(..., min_length=1, max_length=10, description="DTC hibakód")
-    repair_name: str = Field(..., min_length=1, max_length=200, description="Javítás megnevezése magyarul")
+    repair_name: str = Field(
+        ..., min_length=1, max_length=200, description="Javítás megnevezése magyarul"
+    )
 
     # Alkatrész költségek
     parts_cost_min: int = Field(..., ge=0, description="Alkatrészek minimális költsége (HUF)")
@@ -175,7 +197,7 @@ class RepairCostEstimate(BaseModel):
     disclaimer: str = Field(
         "A költségbecslés tájékoztató jellegű. A tényleges árak a szerviz és az alkatrész minőségétől függően változhatnak.",
         max_length=500,
-        description="Jogi nyilatkozat"
+        description="Jogi nyilatkozat",
     )
 
     @field_validator("parts_cost_max")
@@ -225,7 +247,7 @@ class RepairCostEstimate(BaseModel):
                 "confidence": 0.75,
                 "parts": [],
                 "notes": "A MAF szenzor cseréje általában megoldja a P0171 hibakódot. Ellenőrizze a légszűrőt is.",
-                "disclaimer": "A költségbecslés tájékoztató jellegű. A tényleges árak a szerviz és az alkatrész minőségétől függően változhatnak."
+                "disclaimer": "A költségbecslés tájékoztató jellegű. A tényleges árak a szerviz és az alkatrész minőségétől függően változhatnak.",
             }
         }
 
@@ -236,6 +258,7 @@ class PartsSearchRequest(BaseModel):
 
     Request for searching parts compatible with a specific vehicle.
     """
+
     vehicle_make: str = Field(..., min_length=1, max_length=100, description="Gyártó")
     vehicle_model: str = Field(..., min_length=1, max_length=100, description="Modell")
     vehicle_year: int = Field(..., ge=1900, le=2030, description="Évjárat")
@@ -251,7 +274,7 @@ class PartsSearchRequest(BaseModel):
                 "vehicle_year": 2018,
                 "dtc_code": "P0171",
                 "part_category": "sensors",
-                "search_term": "MAF"
+                "search_term": "MAF",
             }
         }
 
@@ -262,15 +285,12 @@ class PartsSearchResponse(BaseModel):
 
     Response containing matching parts and repair cost estimate.
     """
+
     parts: List[PartInfo] = Field(..., description="Találatok listája")
     total_count: int = Field(..., ge=0, description="Összes találat száma")
-    cost_estimate: Optional[RepairCostEstimate] = Field(None, description="Javítási költség becslés ha DTC kód megadva")
+    cost_estimate: Optional[RepairCostEstimate] = Field(
+        None, description="Javítási költség becslés ha DTC kód megadva"
+    )
 
     class Config:
-        json_schema_extra = {
-            "example": {
-                "parts": [],
-                "total_count": 5,
-                "cost_estimate": None
-            }
-        }
+        json_schema_extra = {"example": {"parts": [], "total_count": 5, "cost_estimate": None}}

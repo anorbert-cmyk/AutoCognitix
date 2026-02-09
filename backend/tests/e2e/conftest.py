@@ -101,9 +101,24 @@ def sample_dtc_codes():
             category="powertrain",
             severity="medium",
             is_generic=True,
-            symptoms=["Rough idle", "Poor acceleration", "Check engine light", "Increased fuel consumption"],
-            possible_causes=["Dirty MAF sensor", "Air leak in intake", "Faulty MAF sensor", "Vacuum leak"],
-            diagnostic_steps=["Check for vacuum leaks", "Clean MAF sensor", "Test MAF signal", "Inspect air filter"],
+            symptoms=[
+                "Rough idle",
+                "Poor acceleration",
+                "Check engine light",
+                "Increased fuel consumption",
+            ],
+            possible_causes=[
+                "Dirty MAF sensor",
+                "Air leak in intake",
+                "Faulty MAF sensor",
+                "Vacuum leak",
+            ],
+            diagnostic_steps=[
+                "Check for vacuum leaks",
+                "Clean MAF sensor",
+                "Test MAF signal",
+                "Inspect air filter",
+            ],
             related_codes=["P0100", "P0102", "P0103", "P0104"],
         ),
         DTCCode(
@@ -115,8 +130,18 @@ def sample_dtc_codes():
             severity="medium",
             is_generic=True,
             symptoms=["Poor fuel economy", "Hesitation", "Rough idle", "Engine misfires"],
-            possible_causes=["Vacuum leak", "Faulty fuel injector", "Low fuel pressure", "Clogged fuel filter"],
-            diagnostic_steps=["Check fuel pressure", "Inspect vacuum lines", "Check injectors", "Test O2 sensors"],
+            possible_causes=[
+                "Vacuum leak",
+                "Faulty fuel injector",
+                "Low fuel pressure",
+                "Clogged fuel filter",
+            ],
+            diagnostic_steps=[
+                "Check fuel pressure",
+                "Inspect vacuum lines",
+                "Check injectors",
+                "Test O2 sensors",
+            ],
             related_codes=["P0172", "P0174", "P0175"],
         ),
         DTCCode(
@@ -127,9 +152,24 @@ def sample_dtc_codes():
             category="powertrain",
             severity="high",
             is_generic=True,
-            symptoms=["Engine shaking", "Loss of power", "Check engine light flashing", "Poor fuel economy"],
-            possible_causes=["Bad spark plugs", "Faulty ignition coils", "Fuel delivery issues", "Compression problems"],
-            diagnostic_steps=["Check spark plugs", "Test ignition coils", "Check fuel injectors", "Perform compression test"],
+            symptoms=[
+                "Engine shaking",
+                "Loss of power",
+                "Check engine light flashing",
+                "Poor fuel economy",
+            ],
+            possible_causes=[
+                "Bad spark plugs",
+                "Faulty ignition coils",
+                "Fuel delivery issues",
+                "Compression problems",
+            ],
+            diagnostic_steps=[
+                "Check spark plugs",
+                "Test ignition coils",
+                "Check fuel injectors",
+                "Perform compression test",
+            ],
             related_codes=["P0301", "P0302", "P0303", "P0304"],
         ),
         # Body codes
@@ -142,8 +182,18 @@ def sample_dtc_codes():
             severity="high",
             is_generic=True,
             symptoms=["Airbag warning light", "SRS system fault", "Airbag may not deploy"],
-            possible_causes=["Faulty sensor", "Wiring issue", "Connector corrosion", "Impact sensor damage"],
-            diagnostic_steps=["Scan SRS system", "Check sensor wiring", "Inspect connectors", "Test sensor resistance"],
+            possible_causes=[
+                "Faulty sensor",
+                "Wiring issue",
+                "Connector corrosion",
+                "Impact sensor damage",
+            ],
+            diagnostic_steps=[
+                "Scan SRS system",
+                "Check sensor wiring",
+                "Inspect connectors",
+                "Test sensor resistance",
+            ],
             related_codes=["B1235", "B1236", "B1237"],
         ),
         DTCCode(
@@ -155,8 +205,17 @@ def sample_dtc_codes():
             severity="critical",
             is_generic=True,
             symptoms=["Airbag warning light", "Driver airbag fault"],
-            possible_causes=["Faulty airbag module", "Wiring harness damage", "Clock spring failure"],
-            diagnostic_steps=["Check clock spring", "Inspect wiring", "Test airbag module", "Clear codes and retest"],
+            possible_causes=[
+                "Faulty airbag module",
+                "Wiring harness damage",
+                "Clock spring failure",
+            ],
+            diagnostic_steps=[
+                "Check clock spring",
+                "Inspect wiring",
+                "Test airbag module",
+                "Clear codes and retest",
+            ],
             related_codes=["B0013", "B0014"],
         ),
         # Chassis codes
@@ -169,8 +228,18 @@ def sample_dtc_codes():
             severity="medium",
             is_generic=True,
             symptoms=["ABS warning light", "Traction control disabled", "Stability control fault"],
-            possible_causes=["Faulty wheel speed sensor", "Damaged wiring", "Debris on sensor", "Wheel bearing damage"],
-            diagnostic_steps=["Check sensor resistance", "Inspect wiring", "Clean sensor", "Test sensor output"],
+            possible_causes=[
+                "Faulty wheel speed sensor",
+                "Damaged wiring",
+                "Debris on sensor",
+                "Wheel bearing damage",
+            ],
+            diagnostic_steps=[
+                "Check sensor resistance",
+                "Inspect wiring",
+                "Clean sensor",
+                "Test sensor output",
+            ],
             related_codes=["C0036", "C0037", "C0038"],
         ),
         DTCCode(
@@ -195,9 +264,24 @@ def sample_dtc_codes():
             category="network",
             severity="high",
             is_generic=True,
-            symptoms=["No start condition", "Multiple warning lights", "Engine runs rough", "Limp mode"],
-            possible_causes=["Faulty ECM", "CAN bus issue", "Power supply problem", "Ground connection issue"],
-            diagnostic_steps=["Check ECM power", "Test CAN bus", "Verify ground connections", "Check fuses"],
+            symptoms=[
+                "No start condition",
+                "Multiple warning lights",
+                "Engine runs rough",
+                "Limp mode",
+            ],
+            possible_causes=[
+                "Faulty ECM",
+                "CAN bus issue",
+                "Power supply problem",
+                "Ground connection issue",
+            ],
+            diagnostic_steps=[
+                "Check ECM power",
+                "Test CAN bus",
+                "Verify ground connections",
+                "Check fuses",
+            ],
             related_codes=["U0101", "U0102", "U0103"],
         ),
         DTCCode(
@@ -412,7 +496,9 @@ def mock_embedding_service():
         return [random.uniform(-0.1, 0.1) for _ in range(768)]
 
     mock_service.embed_text.side_effect = lambda text, preprocess=True: generate_embedding()
-    mock_service.embed_batch.side_effect = lambda texts, preprocess=True: [generate_embedding() for _ in texts]
+    mock_service.embed_batch.side_effect = lambda texts, preprocess=True: [
+        generate_embedding() for _ in texts
+    ]
     mock_service.preprocess_hungarian.return_value = "preprocessed text"
     mock_service.embedding_dimension = 768
     mock_service.is_model_loaded = True
@@ -519,8 +605,16 @@ def mock_neo4j_client():
                 {"name": "Air Filter", "system": "Intake", "failure_mode": "Clogged"},
             ],
             "repairs": [
-                {"name": "Clean MAF Sensor", "difficulty": "beginner", "description": "Use MAF cleaner spray"},
-                {"name": "Replace MAF Sensor", "difficulty": "intermediate", "description": "Install new sensor"},
+                {
+                    "name": "Clean MAF Sensor",
+                    "difficulty": "beginner",
+                    "description": "Use MAF cleaner spray",
+                },
+                {
+                    "name": "Replace MAF Sensor",
+                    "difficulty": "intermediate",
+                    "description": "Install new sensor",
+                },
             ],
         }
     ]
@@ -742,12 +836,12 @@ def valid_vins():
 def invalid_vins():
     """List of invalid VIN numbers for testing."""
     return [
-        "INVALID",           # Too short
-        "WVWZZZ3CZWE12345O", # Contains invalid character O
-        "WVWZZZ3CZWE12345I", # Contains invalid character I
-        "WVWZZZ3CZWE12345Q", # Contains invalid character Q
-        "WVWZZZ3CZWE",       # Too short
-        "WVWZZZ3CZWE123456789", # Too long
+        "INVALID",  # Too short
+        "WVWZZZ3CZWE12345O",  # Contains invalid character O
+        "WVWZZZ3CZWE12345I",  # Contains invalid character I
+        "WVWZZZ3CZWE12345Q",  # Contains invalid character Q
+        "WVWZZZ3CZWE",  # Too short
+        "WVWZZZ3CZWE123456789",  # Too long
         "0000000000000000",  # All zeros
     ]
 
@@ -756,10 +850,20 @@ def invalid_vins():
 def valid_dtc_codes():
     """Valid DTC codes for testing."""
     return [
-        "P0101", "P0171", "P0300", "P0420", "P0442",
-        "B1234", "B0012", "B1500",
-        "C0035", "C0051", "C0200",
-        "U0100", "U0121", "U0140",
+        "P0101",
+        "P0171",
+        "P0300",
+        "P0420",
+        "P0442",
+        "B1234",
+        "B0012",
+        "B1500",
+        "C0035",
+        "C0051",
+        "C0200",
+        "U0100",
+        "U0121",
+        "U0140",
     ]
 
 
@@ -767,13 +871,13 @@ def valid_dtc_codes():
 def invalid_dtc_codes():
     """Invalid DTC codes for testing."""
     return [
-        "X1234",     # Invalid prefix
-        "P123",      # Too short
-        "P01234",    # Too long for generic
-        "PABCD",     # Non-numeric suffix
-        "P0OO1",     # Contains letters instead of numbers
-        "",          # Empty
-        "12345",     # No prefix
+        "X1234",  # Invalid prefix
+        "P123",  # Too short
+        "P01234",  # Too long for generic
+        "PABCD",  # Non-numeric suffix
+        "P0OO1",  # Contains letters instead of numbers
+        "",  # Empty
+        "12345",  # No prefix
     ]
 
 
@@ -801,6 +905,7 @@ def create_auth_header(token: str) -> Dict[str, str]:
 def assert_valid_uuid(uuid_string: str) -> bool:
     """Assert that a string is a valid UUID."""
     import uuid
+
     try:
         uuid.UUID(uuid_string)
         return True
@@ -811,9 +916,16 @@ def assert_valid_uuid(uuid_string: str) -> bool:
 def assert_diagnosis_response_structure(data: Dict[str, Any]) -> None:
     """Assert that diagnosis response has correct structure."""
     required_fields = [
-        "id", "vehicle_make", "vehicle_model", "vehicle_year",
-        "dtc_codes", "symptoms", "probable_causes",
-        "recommended_repairs", "confidence_score", "created_at"
+        "id",
+        "vehicle_make",
+        "vehicle_model",
+        "vehicle_year",
+        "dtc_codes",
+        "symptoms",
+        "probable_causes",
+        "recommended_repairs",
+        "confidence_score",
+        "created_at",
     ]
     for field in required_fields:
         assert field in data, f"Missing required field: {field}"
@@ -826,8 +938,14 @@ def assert_diagnosis_response_structure(data: Dict[str, Any]) -> None:
 def assert_dtc_detail_structure(data: Dict[str, Any]) -> None:
     """Assert that DTC detail response has correct structure."""
     required_fields = [
-        "code", "description_en", "category", "is_generic",
-        "severity", "symptoms", "possible_causes", "diagnostic_steps"
+        "code",
+        "description_en",
+        "category",
+        "is_generic",
+        "severity",
+        "symptoms",
+        "possible_causes",
+        "diagnostic_steps",
     ]
     for field in required_fields:
         assert field in data, f"Missing required field: {field}"
@@ -872,7 +990,11 @@ def sample_manufacturer_dtc_codes():
             manufacturer_code="VAG",
             symptoms=["Rough idle", "Loss of power", "Check engine light"],
             possible_causes=["Stuck IMRC valve", "Vacuum leak", "Control solenoid failure"],
-            diagnostic_steps=["Test IMRC actuator", "Check vacuum lines", "Verify solenoid operation"],
+            diagnostic_steps=[
+                "Test IMRC actuator",
+                "Check vacuum lines",
+                "Verify solenoid operation",
+            ],
             related_codes=["P2005", "P2006", "P2007"],
         ),
         DTCCode(

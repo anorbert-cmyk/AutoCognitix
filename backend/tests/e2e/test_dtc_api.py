@@ -220,9 +220,13 @@ class TestSemanticSearch:
         mock_qdrant_client,
     ):
         """Test that semantic search is enabled by default."""
-        with patch("app.services.embedding_service.get_embedding_service", return_value=mock_embedding_service), \
-             patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client):
-
+        with (
+            patch(
+                "app.services.embedding_service.get_embedding_service",
+                return_value=mock_embedding_service,
+            ),
+            patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client),
+        ):
             response = await async_client.get(
                 "/api/v1/dtc/search",
                 params={"q": "motor rezeg", "use_semantic": True},
@@ -249,9 +253,13 @@ class TestSemanticSearch:
         mock_qdrant_client,
     ):
         """Test that semantic search handles Hungarian text."""
-        with patch("app.services.embedding_service.get_embedding_service", return_value=mock_embedding_service), \
-             patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client):
-
+        with (
+            patch(
+                "app.services.embedding_service.get_embedding_service",
+                return_value=mock_embedding_service,
+            ),
+            patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client),
+        ):
             response = await async_client.get(
                 "/api/v1/dtc/search",
                 params={"q": "A motor nehezen indul hidegben", "use_semantic": True},
@@ -309,7 +317,11 @@ class TestDTCSearchResultStructure:
 
         if len(data) > 1:
             # Check relevance scores are in descending order (where not None)
-            scores = [item.get("relevance_score") for item in data if item.get("relevance_score") is not None]
+            scores = [
+                item.get("relevance_score")
+                for item in data
+                if item.get("relevance_score") is not None
+            ]
             if len(scores) > 1:
                 for i in range(len(scores) - 1):
                     assert scores[i] >= scores[i + 1]
@@ -334,8 +346,14 @@ class TestDTCCodeDetailEndpoint:
         data = response.json()
 
         required_fields = [
-            "code", "description_en", "category", "is_generic",
-            "severity", "symptoms", "possible_causes", "diagnostic_steps"
+            "code",
+            "description_en",
+            "category",
+            "is_generic",
+            "severity",
+            "symptoms",
+            "possible_causes",
+            "diagnostic_steps",
         ]
         for field in required_fields:
             assert field in data, f"Missing required field: {field}"
@@ -839,13 +857,15 @@ class TestDTCUpdateEndpoint:
 
         # Update via bulk with overwrite
         update_data = {
-            "codes": [{
-                "code": "P6001",
-                "description_en": "Updated Description",
-                "description_hu": "Frissitett leiras",
-                "category": "powertrain",
-                "severity": "high",  # Changed
-            }],
+            "codes": [
+                {
+                    "code": "P6001",
+                    "description_en": "Updated Description",
+                    "description_hu": "Frissitett leiras",
+                    "category": "powertrain",
+                    "severity": "high",  # Changed
+                }
+            ],
             "overwrite_existing": True,
         }
 

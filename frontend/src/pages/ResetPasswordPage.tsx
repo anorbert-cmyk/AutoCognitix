@@ -14,6 +14,7 @@ const PASSWORD_REQUIREMENTS = [
   { id: 'uppercase', label: 'Legalabb egy nagybetu', test: (p: string) => /[A-Z]/.test(p) },
   { id: 'lowercase', label: 'Legalabb egy kisbetu', test: (p: string) => /[a-z]/.test(p) },
   { id: 'number', label: 'Legalabb egy szam', test: (p: string) => /\d/.test(p) },
+  // eslint-disable-next-line no-useless-escape
   { id: 'special', label: 'Legalabb egy specialis karakter', test: (p: string) => /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(p) },
 ]
 

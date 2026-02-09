@@ -28,10 +28,13 @@ class TestE2EDiagnosisFlow:
         diagnosis_request_data,
     ):
         """Test complete diagnosis from request to response."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             # Step 1: Submit diagnosis request
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
@@ -66,10 +69,13 @@ class TestE2EDiagnosisFlow:
         request_data = diagnosis_request_data.copy()
         del request_data["vin"]
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -91,10 +97,13 @@ class TestE2EDiagnosisFlow:
         request_data = diagnosis_request_data.copy()
         request_data["dtc_codes"] = ["P0101", "P0171", "B1234", "C0035", "U0100"]
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -127,10 +136,13 @@ class TestE2EDiagnosisFlow:
         """
         request_data["additional_context"] = "A jarmuvel napi 50 km-t teszek meg varosban."
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -212,7 +224,9 @@ class TestE2EVehicleDataFlow:
         mock_nhtsa_service,
     ):
         """Test complete vehicle lookup flow."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             # Step 1: Get available makes
             makes_response = await async_client.get("/api/v1/vehicles/makes")
             assert makes_response.status_code == 200
@@ -236,7 +250,9 @@ class TestE2EVehicleDataFlow:
         mock_nhtsa_service,
     ):
         """Test VIN decode followed by recalls lookup."""
-        with patch("app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service):
+        with patch(
+            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
+        ):
             # Step 1: Decode VIN
             vin_response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
@@ -282,10 +298,13 @@ class TestE2EErrorScenarios:
             "symptoms": "Motor nehezen indul hidegben",
         }
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -337,10 +356,11 @@ class TestE2EErrorScenarios:
         request_data = diagnosis_request_data.copy()
         del request_data["vin"]
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=failing_nhtsa), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=failing_nhtsa), \
-             patch("app.services.rag_service.diagnose", new=failing_rag.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=failing_nhtsa),
+            patch("app.services.diagnosis_service.get_nhtsa_service", return_value=failing_nhtsa),
+            patch("app.services.rag_service.diagnose", new=failing_rag.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,
@@ -371,10 +391,7 @@ class TestE2EDataIntegrity:
 
         # Data should be consistent
         if search_data:
-            search_result = next(
-                (item for item in search_data if item["code"] == "P0101"),
-                None
-            )
+            search_result = next((item for item in search_data if item["code"] == "P0101"), None)
             if search_result:
                 assert search_result["code"] == detail_data["code"]
                 assert search_result["category"] == detail_data["category"]
@@ -389,10 +406,13 @@ class TestE2EDataIntegrity:
         diagnosis_request_data,
     ):
         """Test that diagnosis preserves original input data."""
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=diagnosis_request_data,
@@ -453,10 +473,13 @@ class TestE2EHungarianLanguage:
             "symptoms": "A motor nehezen indul hidegben. Az alapjarat egyenetlen, a jarmu reszkest. A fogyasztas jelentosen megnott.",
         }
 
-        with patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service), \
-             patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose):
-
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
             response = await async_client.post(
                 "/api/v1/diagnosis/analyze",
                 json=request_data,

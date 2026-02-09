@@ -17,12 +17,10 @@ env:
 jobs:
   # ============================================
   # Backend Linting with Ruff (fast, modern linter)
-  # Non-blocking during early development
   # ============================================
   backend-lint:
     name: Backend Lint (Ruff)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -38,17 +36,14 @@ jobs:
         run: |
           cd backend
           ruff check app tests --output-format=github
-        continue-on-error: true
 
       - name: Run Ruff formatter check
         run: |
           cd backend
           ruff format --check app tests
-        continue-on-error: true
 
   # ============================================
   # Backend Type Checking with MyPy
-  # Non-blocking during early development
   # ============================================
   backend-type-check:
     name: Backend Type Check (MyPy)
@@ -80,16 +75,13 @@ jobs:
         run: |
           cd backend
           mypy app --ignore-missing-imports --show-error-codes --pretty
-        continue-on-error: true
 
   # ============================================
   # Backend Unit Tests with pytest
-  # Non-blocking during early development
   # ============================================
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
-    continue-on-error: true
     services:
       postgres:
         image: postgres:16
@@ -141,7 +133,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/autocognitix_test
           REDIS_URL: redis://localhost:6379/0
-          JWT_SECRET_KEY: test-secret-key-for-ci
+          JWT_SECRET_KEY: test-secret-key-for-ci-minimum-32-characters-long!!
           NEO4J_URI: ""
           NEO4J_USER: ""
           NEO4J_PASSWORD: ""
@@ -156,7 +148,7 @@ jobs:
             --cov=app \
             --cov-report=xml \
             --cov-report=term-missing \
-            --cov-fail-under=0 || true
+            --cov-fail-under=70
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -200,12 +192,10 @@ jobs:
 
   # ============================================
   # Frontend Linting with ESLint
-  # Non-blocking during early development
   # ============================================
   frontend-lint:
     name: Frontend Lint (ESLint)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -225,7 +215,6 @@ jobs:
         run: |
           cd frontend
           npm run lint
-        continue-on-error: true
 
   # ============================================
   # Frontend Type Check and Build
@@ -269,12 +258,10 @@ jobs:
 
   # ============================================
   # Frontend Tests with Vitest
-  # Non-blocking during early development
   # ============================================
   frontend-test:
     name: Frontend Tests (Vitest)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -293,8 +280,7 @@ jobs:
       - name: Run tests
         run: |
           cd frontend
-          npm run test -- --run --reporter=verbose || true
-        continue-on-error: true
+          npx vitest run --reporter=verbose
 
   # ============================================
   # Frontend Security Audit
@@ -362,8 +348,7 @@ jobs:
 
   # ============================================
   # All checks passed gate
-  # During early development: only frontend-build and docker-build are required
-  # Other checks are informational and don't block deployment
+  # Sprint 7: All quality checks are blocking (except security scans)
   # ============================================
   ci-success:
     name: CI Success
@@ -384,32 +369,34 @@ jobs:
         run: |
           echo "## CI Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Required Checks (blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "### Required Checks" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Lint (Ruff) | ${{ needs.backend-lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Tests (pytest) | ${{ needs.backend-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Lint (ESLint) | ${{ needs.frontend-lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Frontend Build | ${{ needs.frontend-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Tests (Vitest) | ${{ needs.frontend-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Optional Checks (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "### Informational Checks" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Lint | ${{ needs.backend-lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Type Check | ${{ needs.backend-type-check.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Tests | ${{ needs.backend-test.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Security | ${{ needs.backend-security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Lint | ${{ needs.frontend-lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Tests | ${{ needs.frontend-test.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Security | ${{ needs.frontend-security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "_Note: During early development, only build checks are blocking._" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Type Check (MyPy) | ${{ needs.backend-type-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Security (Bandit) | ${{ needs.backend-security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Security (npm audit) | ${{ needs.frontend-security.result }} |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Check required jobs (builds only)
+      - name: Check required jobs
         run: |
-          # During early development, only build steps are required
-          # Tests and linting are informational only
-          if [ "${{ needs.frontend-build.result }}" != "success" ] || \
+          # Sprint 7: Quality checks are now blocking
+          # Only MyPy, Bandit and npm audit remain informational
+          if [ "${{ needs.backend-lint.result }}" != "success" ] || \
+             [ "${{ needs.backend-test.result }}" != "success" ] || \
+             [ "${{ needs.frontend-lint.result }}" != "success" ] || \
+             [ "${{ needs.frontend-build.result }}" != "success" ] || \
+             [ "${{ needs.frontend-test.result }}" != "success" ] || \
              [ "${{ needs.docker-build.result }}" != "success" ]; then
-            echo "Required build jobs failed!"
+            echo "One or more required CI checks failed!"
             exit 1
           fi
-          echo "Required CI checks passed! (Optional checks may have warnings)"
+          echo "All required CI checks passed!"

@@ -195,8 +195,7 @@ class EmailService:
         api_key = getattr(settings, "RESEND_API_KEY", None)
         if not api_key:
             logger.warning(
-                "RESEND_API_KEY nincs beallitva, email kuldes nem lehetseges. "
-                "Demo mod aktivalasa."
+                "RESEND_API_KEY nincs beallitva, email kuldes nem lehetseges. Demo mod aktivalasa."
             )
             self._demo_mode = True
             return

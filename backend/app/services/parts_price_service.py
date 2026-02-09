@@ -274,6 +274,7 @@ DTC_PARTS_MAPPING: Dict[str, List[str]] = {
 # Cache Helper
 # =============================================================================
 
+
 class PartsPriceCache:
     """Redis cache helper for parts prices with in-memory fallback."""
 
@@ -289,6 +290,7 @@ class PartsPriceCache:
         if self._redis is None:
             try:
                 import redis.asyncio as aioredis
+
                 redis_url = getattr(settings, "REDIS_URL", None)
                 if redis_url:
                     self._redis = await aioredis.from_url(redis_url)
@@ -352,6 +354,7 @@ class PartsPriceCache:
 # =============================================================================
 # Parts Price Service
 # =============================================================================
+
 
 class PartsPriceService:
     """
@@ -631,9 +634,7 @@ class PartsPriceService:
 
         return "A diagnosztika alapjan szukseges javitasi munkalatok."
 
-    def _calculate_confidence(
-        self, parts: List[Dict[str, Any]], dtc_code: Optional[str]
-    ) -> float:
+    def _calculate_confidence(self, parts: List[Dict[str, Any]], dtc_code: Optional[str]) -> float:
         """Calculate estimate confidence."""
         if not parts:
             return 0.3
@@ -654,9 +655,7 @@ class PartsPriceService:
 
         return min(base_confidence, 0.95)
 
-    def _generate_notes(
-        self, parts: List[Dict[str, Any]], vehicle_make: Optional[str]
-    ) -> str:
+    def _generate_notes(self, parts: List[Dict[str, Any]], vehicle_make: Optional[str]) -> str:
         """Generate notes for the estimate."""
         notes = []
 
@@ -675,7 +674,9 @@ class PartsPriceService:
 
         # Catalytic converter warning
         if any("catalytic" in p.get("name_en", "").lower() for p in parts):
-            notes.append("A katalizator csere jelentos koltseg, fontolja meg a felujitott opciokat.")
+            notes.append(
+                "A katalizator csere jelentos koltseg, fontolja meg a felujitott opciokat."
+            )
 
         # Multiple parts
         if len(parts) > 2:

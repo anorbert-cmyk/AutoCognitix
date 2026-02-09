@@ -64,7 +64,7 @@ def parse_translations_fallback(
     for code, _ in descriptions:
         # Use specific pattern to avoid ReDoS
         # Match code followed by separator and text until newline or next code
-        pattern = rf'{re.escape(code)}\s*[:\-]\s*([^\n]+)'
+        pattern = rf"{re.escape(code)}\s*[:\-]\s*([^\n]+)"
         match = re.search(pattern, content, re.IGNORECASE)
 
         if match:
@@ -119,8 +119,8 @@ def fix_common_translation_issues(text: str) -> str:
     text = " ".join(text.split())
 
     # Fix double punctuation
-    text = re.sub(r'\.{2,}', '.', text)
-    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    text = re.sub(r"\.{2,}", ".", text)
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
 
     return text.strip()
 
@@ -137,9 +137,9 @@ class TestJSONExtraction:
 
     def test_extract_json_with_surrounding_text(self):
         """Test extraction of JSON with surrounding text."""
-        content = '''Here is the translation:
+        content = """Here is the translation:
         {"P0101": "Levegotomeg-mero hiba", "P0171": "Rendszer tul sovany"}
-        I hope this helps!'''
+        I hope this helps!"""
 
         result = extract_json_from_response(content)
 
@@ -148,11 +148,11 @@ class TestJSONExtraction:
 
     def test_extract_json_multiple_codes(self):
         """Test extraction of JSON with multiple codes."""
-        content = '''{
+        content = """{
             "P0101": "Levegotomeg-mero aramkor tartomany hiba",
             "P0171": "Rendszer tul sovany (Bank 1)",
             "P0300": "Tobbszoros hengerbedurranas eszlelve"
-        }'''
+        }"""
 
         result = extract_json_from_response(content)
 
@@ -225,8 +225,8 @@ P0171 - Rendszer tul sovany"""
 
     def test_parse_with_quotes(self):
         """Test parsing with quoted translations."""
-        content = '''P0101: "Levegotomeg-mero hiba"
-P0171: 'Rendszer tul sovany' '''
+        content = """P0101: "Levegotomeg-mero hiba"
+P0171: 'Rendszer tul sovany' """
 
         descriptions = [("P0101", "desc1"), ("P0171", "desc2")]
         result = parse_translations_fallback(content, descriptions)
@@ -342,7 +342,7 @@ class TestTranslationFixes:
         """Test removal of extra quotes."""
         assert fix_common_translation_issues('"Hiba"') == "Hiba"
         assert fix_common_translation_issues("'Hiba'") == "Hiba"
-        assert fix_common_translation_issues('"\'Hiba\'"') == "Hiba"
+        assert fix_common_translation_issues("\"'Hiba'\"") == "Hiba"
 
     def test_fix_escaped_quotes(self):
         """Test handling of escaped quotes."""
@@ -385,12 +385,12 @@ class TestIntegrationScenarios:
     def test_full_parsing_pipeline(self):
         """Test complete parsing pipeline from raw response."""
         # Simulate LLM response
-        raw_response = '''Ime a forditasok:
+        raw_response = """Ime a forditasok:
         {
             "P0101": "Levegotomeg-mero aramkor tartomany/teljesitmeny hiba",
             "P0171": "Rendszer tul sovany (Bank 1)"
         }
-        Remelem, ez segit!'''
+        Remelem, ez segit!"""
 
         # Try JSON extraction first
         result = extract_json_from_response(raw_response)
@@ -410,9 +410,9 @@ class TestIntegrationScenarios:
     def test_fallback_when_json_fails(self):
         """Test fallback parsing when JSON extraction fails."""
         # Response without valid JSON
-        raw_response = '''A forditasok:
+        raw_response = """A forditasok:
         P0101: Levegotomeg-mero hiba
-        P0171: Rendszer tul sovany'''
+        P0171: Rendszer tul sovany"""
 
         # JSON extraction should fail
         result = extract_json_from_response(raw_response)
@@ -427,10 +427,10 @@ class TestIntegrationScenarios:
     def test_mixed_format_response(self):
         """Test handling response with mixed formats."""
         # Some codes in JSON-like format, some not
-        raw_response = '''
+        raw_response = """
         "P0101": "Levegotomeg-mero hiba"
         P0171 - Rendszer tul sovany
-        P0300: Hengerbedurranas'''
+        P0300: Hengerbedurranas"""
 
         # This won't parse as valid JSON
         json_result = extract_json_from_response(raw_response)

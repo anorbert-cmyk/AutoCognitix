@@ -20,8 +20,10 @@ class TestRAGContextRetrieval:
     @pytest.mark.asyncio
     async def test_get_context_returns_list(self, mock_qdrant_client):
         """Test that get_context returns a list of results."""
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import get_rag_service
@@ -41,8 +43,10 @@ class TestRAGContextRetrieval:
             {"id": "2", "score": 0.8, "payload": {}},
         ]
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import get_rag_service
@@ -65,8 +69,10 @@ class TestRAGContextRetrieval:
 
         mock_qdrant_client.search = count_searches
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import get_rag_service
@@ -86,21 +92,25 @@ class TestRAGDTCContext:
     @pytest.mark.asyncio
     async def test_get_dtc_context_for_valid_code(self, mock_qdrant_client, mock_neo4j_client):
         """Test getting context for a valid DTC code."""
-        mock_qdrant_client.search_dtc = AsyncMock(return_value=[
-            {
-                "score": 0.9,
-                "payload": {
-                    "code": "P0101",
-                    "description_hu": "Levegotomeg-mero hiba",
-                    "severity": "medium",
-                    "category": "powertrain",
-                },
-            }
-        ])
+        mock_qdrant_client.search_dtc = AsyncMock(
+            return_value=[
+                {
+                    "score": 0.9,
+                    "payload": {
+                        "code": "P0101",
+                        "description_hu": "Levegotomeg-mero hiba",
+                        "severity": "medium",
+                        "category": "powertrain",
+                    },
+                }
+            ]
+        )
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed, \
-             patch("app.services.rag_service.get_diagnostic_path") as mock_graph:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+            patch("app.services.rag_service.get_diagnostic_path") as mock_graph,
+        ):
             mock_embed.return_value = [0.0] * 768
             mock_graph.return_value = None
 
@@ -116,9 +126,11 @@ class TestRAGDTCContext:
     @pytest.mark.asyncio
     async def test_get_dtc_context_includes_graph_data(self, mock_qdrant_client, mock_neo4j_client):
         """Test that DTC context includes Neo4j graph data."""
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed, \
-             patch("app.services.rag_service.get_diagnostic_path") as mock_graph:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+            patch("app.services.rag_service.get_diagnostic_path") as mock_graph,
+        ):
             mock_embed.return_value = [0.0] * 768
             mock_graph.return_value = {
                 "dtc": {"code": "P0101", "description": "MAF Issue"},
@@ -145,18 +157,22 @@ class TestRAGSymptomContext:
     @pytest.mark.asyncio
     async def test_get_symptom_context(self, mock_qdrant_client):
         """Test getting context for symptom description."""
-        mock_qdrant_client.search_similar_symptoms = AsyncMock(return_value=[
-            {
-                "score": 0.85,
-                "payload": {
-                    "description": "Motor nehezen indul",
-                    "related_dtc": ["P0101"],
-                },
-            }
-        ])
+        mock_qdrant_client.search_similar_symptoms = AsyncMock(
+            return_value=[
+                {
+                    "score": 0.85,
+                    "payload": {
+                        "description": "Motor nehezen indul",
+                        "related_dtc": ["P0101"],
+                    },
+                }
+            ]
+        )
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import RAGService
@@ -164,28 +180,30 @@ class TestRAGSymptomContext:
             service = RAGService()
             service._qdrant = mock_qdrant_client
 
-            context = await service._get_symptom_context(
-                "A motor nehezen indul hidegben"
-            )
+            context = await service._get_symptom_context("A motor nehezen indul hidegben")
 
             assert isinstance(context, list)
 
     @pytest.mark.asyncio
     async def test_get_symptom_context_with_vehicle_filter(self, mock_qdrant_client):
         """Test symptom context with vehicle make filter."""
-        mock_qdrant_client.search_similar_symptoms = AsyncMock(return_value=[
-            {
-                "score": 0.88,
-                "payload": {
-                    "description": "VW Golf MAF problem",
-                    "vehicle_make": "Volkswagen",
-                    "related_dtc": ["P0101"],
-                },
-            }
-        ])
+        mock_qdrant_client.search_similar_symptoms = AsyncMock(
+            return_value=[
+                {
+                    "score": 0.88,
+                    "payload": {
+                        "description": "VW Golf MAF problem",
+                        "vehicle_make": "Volkswagen",
+                        "related_dtc": ["P0101"],
+                    },
+                }
+            ]
+        )
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import RAGService
@@ -389,9 +407,7 @@ class TestRAGContextFormatting:
                     "category": "powertrain",
                 }
             ],
-            symptom_context=[
-                {"description": "Motor nehezen indul", "score": 0.85}
-            ],
+            symptom_context=[{"description": "Motor nehezen indul", "score": 0.85}],
             graph_context={
                 "components": [{"name": "MAF Sensor", "system": "Engine"}],
                 "repairs": [
@@ -427,8 +443,10 @@ class TestRAGErrorHandling:
         """Test handling of Qdrant errors."""
         mock_qdrant_client.search.side_effect = Exception("Qdrant unavailable")
 
-        with patch("app.services.rag_service.qdrant_client", mock_qdrant_client), \
-             patch("app.services.rag_service.embed_text") as mock_embed:
+        with (
+            patch("app.services.rag_service.qdrant_client", mock_qdrant_client),
+            patch("app.services.rag_service.embed_text") as mock_embed,
+        ):
             mock_embed.return_value = [0.0] * 768
 
             from app.services.rag_service import RAGService

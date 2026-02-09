@@ -433,10 +433,7 @@ class TestDTCDataIntegrity:
         search_data = search_response.json()
 
         if search_data:
-            search_result = next(
-                (item for item in search_data if item["code"] == "P0101"),
-                None
-            )
+            search_result = next((item for item in search_data if item["code"] == "P0101"), None)
 
             if search_result:
                 # Get detail for same code

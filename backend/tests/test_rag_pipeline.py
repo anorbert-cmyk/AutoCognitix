@@ -78,12 +78,15 @@ SAMPLE_VEHICLE_INFO = {
     "vin": "WVWZZZ3CZWE123456",
 }
 
-SAMPLE_SYMPTOMS = "A motor nehezen indul hidegben, egyenetlenul jar alapjaraton, es a fogyasztas megnott."
+SAMPLE_SYMPTOMS = (
+    "A motor nehezen indul hidegben, egyenetlenul jar alapjaraton, es a fogyasztas megnott."
+)
 
 
 # =============================================================================
 # Prompt Template Tests
 # =============================================================================
+
 
 class TestPromptTemplates:
     """Tests for Hungarian prompt templates."""
@@ -200,6 +203,7 @@ class TestPromptTemplates:
 # Response Parsing Tests
 # =============================================================================
 
+
 class TestResponseParsing:
     """Tests for LLM response parsing."""
 
@@ -278,6 +282,7 @@ class TestResponseParsing:
 # LLM Provider Tests
 # =============================================================================
 
+
 class TestLLMProvider:
     """Tests for LLM provider abstraction."""
 
@@ -318,6 +323,7 @@ class TestLLMProvider:
 # =============================================================================
 # Hybrid Ranking Tests
 # =============================================================================
+
 
 class TestHybridRanking:
     """Tests for hybrid ranking (RRF)."""
@@ -369,6 +375,7 @@ class TestHybridRanking:
 # =============================================================================
 # Rule-Based Diagnosis Tests
 # =============================================================================
+
 
 class TestRuleBasedDiagnosis:
     """Tests for rule-based diagnosis fallback."""
@@ -431,6 +438,7 @@ class TestRuleBasedDiagnosis:
 # Confidence Scoring Tests
 # =============================================================================
 
+
 class TestConfidenceScoring:
     """Tests for confidence calculation."""
 
@@ -440,13 +448,21 @@ class TestConfidenceScoring:
 
         context = RAGContext(
             dtc_items=[
-                RetrievedItem(content={"code": "P0171"}, source=RetrievalSource.QDRANT_DTC, score=0.9),
+                RetrievedItem(
+                    content={"code": "P0171"}, source=RetrievalSource.QDRANT_DTC, score=0.9
+                ),
             ],
             symptom_items=[
-                RetrievedItem(content={"description": "Test"}, source=RetrievalSource.QDRANT_SYMPTOM, score=0.85),
+                RetrievedItem(
+                    content={"description": "Test"},
+                    source=RetrievalSource.QDRANT_SYMPTOM,
+                    score=0.85,
+                ),
             ],
             text_items=[
-                RetrievedItem(content={"code": "P0171"}, source=RetrievalSource.POSTGRES_TEXT, score=1.0),
+                RetrievedItem(
+                    content={"code": "P0171"}, source=RetrievalSource.POSTGRES_TEXT, score=1.0
+                ),
             ],
             graph_data={
                 "components": [{"name": "MAF"}],
@@ -454,8 +470,12 @@ class TestConfidenceScoring:
                 "symptoms": [{"name": "Rough idle"}],
             },
             recall_items=[
-                RetrievedItem(content={"component": "Test"}, source=RetrievalSource.NHTSA, score=0.9,
-                             metadata={"type": "recall"}),
+                RetrievedItem(
+                    content={"component": "Test"},
+                    source=RetrievalSource.NHTSA,
+                    score=0.9,
+                    metadata={"type": "recall"},
+                ),
             ],
         )
 
@@ -478,6 +498,7 @@ class TestConfidenceScoring:
 # =============================================================================
 # Integration Test (requires running services)
 # =============================================================================
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration

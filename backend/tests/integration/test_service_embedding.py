@@ -122,9 +122,7 @@ class TestHungarianPreprocessing:
         """Test that preprocessing removes Hungarian stopwords."""
         mock_embedding_service.preprocess_hungarian.return_value = "motor nehezen indul"
 
-        result = mock_embedding_service.preprocess_hungarian(
-            "A motor nehezen indul."
-        )
+        result = mock_embedding_service.preprocess_hungarian("A motor nehezen indul.")
 
         # "A" is a stopword and should be removed
         assert "a" not in result.lower().split()
@@ -366,7 +364,6 @@ class TestEmbeddingServiceSingleton:
             mock_instance = MagicMock()
             mock_instance._initialized = True
             MockClass.return_value = mock_instance
-
 
             # This will use the mocked class
             # In real usage, would return singleton instance
