@@ -81,9 +81,9 @@ RUN addgroup -g 1000 -S appgroup && \
                               /etc/nginx && \
     # Set permissions
     chmod -R 755 /usr/share/nginx/html && \
-    # Ensure nginx can write pid file
-    touch /var/run/nginx.pid && \
-    chown appuser:appgroup /var/run/nginx.pid
+    # Ensure nginx can write pid file (/tmp is always writable)
+    touch /tmp/nginx.pid && \
+    chown appuser:appgroup /tmp/nginx.pid
 
 # Switch to non-root user
 USER appuser
@@ -94,10 +94,8 @@ ENV PORT=3000
 # Expose port
 EXPOSE 3000
 
-# Health check (uses PORT env variable)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
-
 # Start nginx with dynamic port substitution
 # Railway provides PORT env variable, nginx needs to listen on it
-CMD sed -i "s/listen 3000;/listen ${PORT:-3000};/g" /etc/nginx/nginx.conf && nginx -g "daemon off;"
+# Using exec to make nginx PID 1 for proper signal handling
+# Railway handles health checks via railway.toml (healthcheckPath = "/health")
+CMD ["/bin/sh", "-c", "sed -i 's/listen 3000;/listen '\"${PORT:-3000}\"';/g' /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]
