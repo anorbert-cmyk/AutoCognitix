@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
-import { DiagnosisResponse } from '../services/api';
+import { DiagnosisResponse, PartWithPrice } from '../services/api';
 
 // Material Symbol ikon komponens
 function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
@@ -129,10 +129,10 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
     return getVehicleImageUrl(result.vehicle_make, result.vehicle_model);
   }, [result.vehicle_make, result.vehicle_model]);
 
-  const licensePlate = 'ABC-123';
-  const vin = result.dtc_codes.length > 0 ? 'JT1B33...894' : 'N/A';
-  const mileage = '142,580 km';
-  const engineInfo = '2.5L Hybrid';
+  const licensePlate = 'N/A';
+  const vin = 'N/A';
+  const mileage = 'N/A';
+  const engineInfo = 'N/A';
 
   // Elsődleges DTC kód
   const primaryDTC = result.dtc_codes[0] || 'P0303';
@@ -142,54 +142,25 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const customerComplaint = result.symptoms || 'Reggelente rángat a motor hidegindításnál. A check engine lámpa villog, amikor autópályára hajtok fel.';
 
   // AI elemzés szöveg
-  const aiAnalysisDetails = result.probable_causes[0]?.description ||
-    `A diagnosztikai adatok alapján a probléma fókuszpontja a 3-as henger gyújtási ciklusa. A 2.5L-es Atkinson-ciklusú hibrid hajtásláncnál ez a jelenség 140,000 km felett leggyakrabban a gyújtótrafó szekunder körének feszültségesésére vagy a gyújtógyertya elektróda-hézagának kritikus növekedésére vezethető vissza.`;
+  const aiAnalysisDetails = result.root_cause_analysis
+    || result.probable_causes[0]?.description
+    || 'Az AI elemzés nem tartalmaz részletes leírást ehhez a hibakódhoz.';
 
   // Konfidencia százalék
   const confidencePercentage = Math.round(result.confidence_score * 100);
 
   // Javítási lépések
   const repairSteps = result.recommended_repairs.length > 0
-    ? result.recommended_repairs.slice(0, 3).map((repair, index) => ({
+    ? result.recommended_repairs.slice(0, 5).map((repair, index) => ({
         number: index + 1,
         title: repair.title,
         description: repair.description,
-        tools: repair.parts_needed.slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
-        expertTip: 'Ellenőrizze a kapcsolódó alkatrészeket is a javítás során.',
+        tools: (repair.tools_needed?.length > 0)
+          ? repair.tools_needed.map(t => ({ icon: t.icon_hint || 'handyman', name: t.name }))
+          : repair.parts_needed.slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
+        expertTip: repair.expert_tips?.[0] || repair.root_cause_explanation || 'Ellenőrizze a kapcsolódó alkatrészeket is a javítás során.',
       }))
-    : [
-        {
-          number: 1,
-          title: 'Gyújtógyertya vizuális és hézagvizsgálata',
-          description: 'Szerelje ki a 3-as henger gyújtógyertyáját. Ellenőrizze az elektróda színét és állapotát (az őzbarna szín megfelelő égésre utal). Mérje meg a hézagot hézagmérővel, és hasonlítsa össze a gyári specifikációval (1.1 mm).',
-          tools: [
-            { icon: 'handyman', name: '16mm gyertyakulcs' },
-            { icon: 'straighten', name: 'Hézagmérő' },
-            { icon: 'sync_alt', name: 'Nyomatékkulcs (18-22 Nm)' },
-          ],
-          expertTip: 'Vizsgálja meg alaposan a gyertya kerámia szigetelőtestét repedések vagy "flashover" nyomok (vékony fekete csíkok) után kutatva. Ezek a nagyfeszültség külső áthúzására utalnak.',
-        },
-        {
-          number: 2,
-          title: 'Gyújtótrafó keresztcsere és diagnosztika',
-          description: 'Amennyiben a gyertya állapota megfelelő, végezzen keresztcserét: helyezze át a 3-as henger gyújtótrafóját a 2-es hengerbe. Törölje a hibakódot az OBD eszközzel, majd végezzen próbautat.',
-          tools: [
-            { icon: 'build', name: '10mm dugókulcs' },
-            { icon: 'tablet_mac', name: 'OBD II Szkenner' },
-          ],
-          expertTip: 'Mielőtt visszaszerelné a trafókat, ellenőrizze a csatlakozót ("pin drag" teszt). A hibrid Camry modelleknél a motor vibrációja miatt az érintkezők kitágulhatnak.',
-        },
-        {
-          number: 3,
-          title: 'Befecskendező rendszer és kompresszió mérés',
-          description: 'Ellenőrizze az üzemanyag-injektor működését (ellenállás mérés). Ezt követően végezzen kompressziómérést mind a 4 hengeren. A nyomáskülönbség nem haladhatja meg a 10-15%-ot.',
-          tools: [
-            { icon: 'speed', name: 'Kompressziómérő' },
-            { icon: 'electric_bolt', name: 'Multiméter' },
-          ],
-          expertTip: 'Hibrid gépjárművön a kompresszióméréshez kapcsolja a motort "Karbantartási Üzemmódba", hogy a benzinmotor folyamatosan forogjon.',
-        },
-      ];
+    : [];
 
   // PDF mentés
   const handleSavePDF = () => {
@@ -386,22 +357,142 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">{repairSteps.length} lépés</span>
               </div>
 
-              <div className="relative pl-4 md:pl-6 space-y-12">
-                {/* Vertical line */}
-                <div className="absolute left-[28px] md:left-[36px] top-6 bottom-6 w-0.5 bg-slate-200 rounded-full"></div>
+              {repairSteps.length > 0 ? (
+                <div className="relative pl-4 md:pl-6 space-y-12">
+                  {/* Vertical line */}
+                  <div className="absolute left-[28px] md:left-[36px] top-6 bottom-6 w-0.5 bg-slate-200 rounded-full"></div>
 
-                {repairSteps.map((step) => (
-                  <RepairStep
-                    key={step.number}
-                    number={step.number}
-                    title={step.title}
-                    description={step.description}
-                    tools={step.tools}
-                    expertTip={step.expertTip}
-                  />
-                ))}
-              </div>
+                  {repairSteps.map((step) => (
+                    <RepairStep
+                      key={step.number}
+                      number={step.number}
+                      title={step.title}
+                      description={step.description}
+                      tools={step.tools}
+                      expertTip={step.expertTip}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-slate-100 rounded-2xl p-8 text-center">
+                  <MaterialIcon name="info" className="text-4xl text-slate-400 mb-3" />
+                  <p className="text-slate-500 font-medium">Nincs elérhető javítási javaslat ehhez a diagnosztikához.</p>
+                </div>
+              )}
             </section>
+
+            {/* Parts & Prices Section */}
+            {result.parts_with_prices && result.parts_with_prices.length > 0 && (
+              <section>
+                <div className="flex items-center gap-4 mb-10">
+                  <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Alkatrészek és Árak</h3>
+                  <div className="h-px flex-1 bg-slate-200"></div>
+                  <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">{result.parts_with_prices.length} alkatrész</span>
+                </div>
+
+                {/* Parts Table */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-8">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="text-left px-6 py-4 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Alkatrész</th>
+                          <th className="text-left px-6 py-4 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Kategória</th>
+                          <th className="text-right px-6 py-4 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Ár (HUF)</th>
+                          <th className="text-right px-6 py-4 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Munkaidő</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {result.parts_with_prices.map((part: PartWithPrice, idx: number) => (
+                          <tr key={part.id || idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-slate-900 text-sm">{part.name}</div>
+                              {part.name_en && <div className="text-xs text-slate-400 mt-0.5">{part.name_en}</div>}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100">
+                                {part.category}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <span className="font-bold text-slate-900 text-sm">
+                                {part.price_range_min?.toLocaleString('hu-HU')} - {part.price_range_max?.toLocaleString('hu-HU')}
+                              </span>
+                              <span className="text-xs text-slate-400 ml-1">Ft</span>
+                            </td>
+                            <td className="px-6 py-4 text-right text-sm text-slate-600">
+                              {part.labor_hours} óra
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Total Cost Estimate Card */}
+                {result.total_cost_estimate && (
+                  <div className="bg-gradient-to-br from-[#0D1B2A] to-[#1B2838] rounded-2xl p-8 text-white shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[60px] -translate-y-1/2 translate-x-1/3"></div>
+                    <div className="relative z-10">
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 border border-white/10">
+                          <MaterialIcon name="payments" className="text-green-300" />
+                        </div>
+                        <h4 className="text-lg font-bold">Becsült Javítási Költség</h4>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
+                        <div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Alkatrészek</div>
+                          <div className="text-lg font-bold">
+                            {result.total_cost_estimate.parts_min?.toLocaleString('hu-HU')} - {result.total_cost_estimate.parts_max?.toLocaleString('hu-HU')} Ft
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Munkadíj</div>
+                          <div className="text-lg font-bold">
+                            {result.total_cost_estimate.labor_min?.toLocaleString('hu-HU')} - {result.total_cost_estimate.labor_max?.toLocaleString('hu-HU')} Ft
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Becsült idő</div>
+                          <div className="text-lg font-bold">{result.total_cost_estimate.estimated_hours} óra</div>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/10 pt-6">
+                        <div className="flex items-end justify-between">
+                          <div>
+                            <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Összesen</div>
+                            <div className="text-3xl font-black font-['Space_Grotesk',sans-serif]">
+                              {result.total_cost_estimate.total_min?.toLocaleString('hu-HU')} - {result.total_cost_estimate.total_max?.toLocaleString('hu-HU')} Ft
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                              result.total_cost_estimate.difficulty === 'easy' ? 'bg-green-500/20 text-green-300' :
+                              result.total_cost_estimate.difficulty === 'medium' ? 'bg-yellow-500/20 text-yellow-300' :
+                              result.total_cost_estimate.difficulty === 'hard' ? 'bg-orange-500/20 text-orange-300' :
+                              'bg-red-500/20 text-red-300'
+                            }`}>
+                              {result.total_cost_estimate.difficulty === 'easy' ? 'Könnyű' :
+                               result.total_cost_estimate.difficulty === 'medium' ? 'Közepes' :
+                               result.total_cost_estimate.difficulty === 'hard' ? 'Nehéz' :
+                               'Szakértő'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {result.total_cost_estimate.disclaimer && (
+                        <p className="mt-4 text-xs text-slate-400 italic">{result.total_cost_estimate.disclaimer}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         </div>
       </main>

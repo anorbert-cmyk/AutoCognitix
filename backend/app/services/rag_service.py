@@ -178,6 +178,9 @@ class RepairRecommendation:
     estimated_cost_max: int | None = None
     parts: List[Dict[str, Any]] = field(default_factory=list)
     diagnostic_steps: List[str] = field(default_factory=list)
+    tools_needed: List[Dict[str, str]] = field(default_factory=list)
+    expert_tips: List[str] = field(default_factory=list)
+    root_cause_explanation: str | None = None
 
 
 @dataclass
@@ -1074,6 +1077,9 @@ class RAGService:
                     estimated_cost_min=repair.get("estimated_cost_min"),
                     estimated_cost_max=repair.get("estimated_cost_max"),
                     parts=repair.get("parts_needed", []),
+                    tools_needed=repair.get("tools_needed", []),
+                    expert_tips=repair.get("expert_tips", []),
+                    root_cause_explanation=repair.get("root_cause_explanation"),
                 )
             )
 
@@ -1107,7 +1113,7 @@ class RAGService:
             symptoms=symptoms,
             vehicle_info=vehicle,
             diagnosis_summary=diagnosis.summary,
-            root_cause_analysis="\n".join(
+            root_cause_analysis=diagnosis.root_cause_analysis if hasattr(diagnosis, 'root_cause_analysis') and diagnosis.root_cause_analysis else "\n".join(
                 f"- {cause.get('title', '')}: {cause.get('description', '')}"
                 for cause in diagnosis.probable_causes[:3]
             ),

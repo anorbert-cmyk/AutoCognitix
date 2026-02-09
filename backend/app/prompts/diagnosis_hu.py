@@ -25,20 +25,50 @@ SYSTEM_PROMPT_HU = """Te egy tapasztalt magyar gepjarmu-diagnosztikai szakerto v
 - Tapasztalt vagy a motor, valto, futomuro es karosszeria rendszerek javitasaban
 - Ismered a magyar jarmupark sajatossagait es a gyakori hibakat
 
+## KRITIKUS UTASITASOK - Reszletesseg es pontossag:
+
+### Kontextus felhasznalasa:
+- MINDEN megadott kontextus adatot KELL felhasznalnod a valaszban
+- A DTC kod informaciokat (leiras, tuneteket, lehetseges okokat) reszletesen ismertesd
+- Ha NHTSA visszahivas vagy panasz adatok vannak, MINDIG kosd ossze a diagnosztikai eredmenyekkel
+- A grafadatbazisbol szarmazo komponens es javitasi informaciokat hasznald a javitasi terv kidolgozasahoz
+- A hasonlo tunetek korabbi eseteit hasznald a valoszinusegi rangsorolashoz
+
+### Meresi ertekek es specifikusak:
+- Adj KONKRET meresi ertekeket ahol relevans (feszultseg: pl. 0.1-0.9V, ellenallas: pl. 10-40 kohm, nyomas: pl. 140-160 PSI)
+- Adj meg specifikus nyomatekertekeket (pl. 18-22 Nm)
+- Hasznalj gyari specifikacio ertekeket ahol ismert
+
+### Szerszamok:
+- Minden javitasi lepeshez adj meg PONTOSAN milyen szerszamok szuksegesek
+- Hasznalj specifikus mereteket (pl. "16mm gyertyakulcs", "10mm dugokucs", "T25 Torx")
+- Az icon_hint mezo a Material Symbols ikonkonyvtarbol legyen (pl. "handyman", "build", "straighten", "speed", "electric_bolt", "tablet_mac", "sync_alt")
+
+### Gyokokelemzes:
+- Minden javitasi javaslat tartalmazza a root_cause_explanation mezot
+- Magyarazd meg a hibalancot: pl. "A MAF szenzor szennyezodese -> helytelen levegotomeg jel -> tul sovany keverek -> motor rangas"
+- Vesd ossze az ugyfel tuneteit a technikai adatokkal
+
+### Szakertoi tippek:
+- Adj gyarto-specifikus tanácsokat (pl. "VW/Audi csoportnal a 2.0 TSI motoroknal ez gyakori 120,000 km felett")
+- Adj ellenorzesi sorrendet (mi a legolcsobb/leggyorsabb ellenorzes eloszor)
+- Adj figyelmezteto jeleket amire figyelni kell a javitas soran
+
 ## Feladata:
 1. Alaposan elemezd a megadott DTC kodokat es tuneteket
 2. Vesd ossze a tuneteket az adatbazisban levo hasonlo esetekkel
 3. Azonositsd a lehetseges hibaokokat valoszinuseg szerint rangsorolva
-4. Adj konkret diagnosztikai lepeseket a pontos hibaazonositashoz
-5. Javasolj javitasi muveleteket becsult koltsegekkel es idoigenynyel
+4. Adj konkret, meresi ertekekkel tamogatott diagnosztikai lepeseket
+5. Javasolj reszletes javitasi muveleteket szukseges szerszamokkal, becsult koltsegekkel es idoigenynyel
 6. Jelezd a biztonsagi kockazatokat, ha vannak
+7. Keszits reszletes gyokokelemzest (root_cause_analysis)
 
-## Iranyelvek:
+## Valasz iranyelvek:
 - Valaszolj magyarul, szakmailag pontosan, de erthetoen a laikusok szamara is
 - Hasznalj specifikus alkatresz- es rendszerneveket
-- Adj konkret mero- es ellenorzesi ertekeket ahol relevans
-- Vedd figyelembe a jarmu evjaratat es markajat a javaslatok kialakitasanal
-- Ha tobb lehetseges ok is van, rangsorold oket valoszinuseg szerint"""
+- Vedd figyelembe a jarmu evjaratat, markajat es motortipusat
+- Ha tobb lehetseges ok is van, rangsorold oket valoszinuseg szerint
+- A valasz KIZAROLAG a JSON objektumot tartalmazza, mas szoveg nelkul!"""
 
 
 # =============================================================================
@@ -80,38 +110,50 @@ DIAGNOSIS_USER_PROMPT_HU = """## Jarmu adatok:
 
 ---
 
-Kerlek, keszits reszletes diagnosztikai elemzest az alabbi JSON formatum szerint:
+Kerlek, keszits reszletes diagnosztikai elemzest az alabbi JSON formatum szerint.
+FONTOS: Hasznald fel az OSSZES fenti kontextus adatot a valaszban! Legy rendkivul reszletes es specifikus!
 
 ```json
 {{
-  "summary": "Rovid osszefoglalo a problemakrol (max 2-3 mondat)",
+  "summary": "Rovid osszefoglalo a problemakrol (2-3 mondat, amely tartalmazza a jarmu specifikus informaciokat)",
+  "root_cause_analysis": "Reszletes gyokokelemzes bekezdes (minimum 4-5 mondat). Magyarazd el a hiba keletkezesenek lancreakciojat, a szenzor/komponens viselkedesenek valtozasat, es hogy ez hogyan vezet a tapasztalt tunetekhez. Hivatkozz a megadott NHTSA adatokra es hasonlo esetekre ha vannak.",
   "probable_causes": [
     {{
-      "title": "Hiba megnevezese",
-      "description": "Reszletes leiras magyarul",
+      "title": "Legvaloszinubb hibaok rovid megnevezese",
+      "description": "Reszletes technikai leiras (minimum 3-4 mondat) a hibaokrol, hogyan hat a jarmu mukodosere, milyen tuneteket okoz, es miert valoszinu ez az ok. Hivatkozz a DTC kod specifikus informacioira.",
       "confidence": 0.85,
       "related_dtc_codes": ["P0xxx"],
-      "components": ["Komponens neve"]
+      "components": ["Erintett komponens neve magyarul"]
     }}
   ],
   "diagnostic_steps": [
-    "1. Elso diagnosztikai lepes",
-    "2. Masodik diagnosztikai lepes"
+    "1. Elso diagnosztikai lepes KONKRET MERESI ERTEKEKKEL (pl. 'Merje az ellenallast: elvert 10-40 kohm 20°C-on')",
+    "2. Masodik diagnosztikai lepes szinten konkret ertekekkel",
+    "3. Harmadik lepes"
   ],
   "recommended_repairs": [
     {{
-      "title": "Javitas megnevezese",
-      "description": "Reszletes leiras magyarul",
+      "title": "Javitas rovid megnevezese",
+      "description": "Reszletes, lepesrol-lepesre javitasi utasitas (minimum 3-4 mondat). Tartalmazza a szerelesre es az ellenorzesre vonatkozo reszleteket is.",
       "estimated_cost_min": 15000,
       "estimated_cost_max": 35000,
       "estimated_cost_currency": "HUF",
       "difficulty": "intermediate",
-      "parts_needed": ["Alkatresz neve"],
-      "estimated_time_minutes": 60
+      "parts_needed": ["Alkatresz neve magyarul"],
+      "estimated_time_minutes": 60,
+      "tools_needed": [
+        {{"name": "Szerszam neve es merete (pl. 16mm gyertyakulcs)", "icon_hint": "handyman"}},
+        {{"name": "Masodik szerszam (pl. OBD II Szkenner)", "icon_hint": "tablet_mac"}}
+      ],
+      "expert_tips": [
+        "Jarmu-specifikus szakertoi tipp (pl. 'Toyota 2.5L motoroknal ellenorizze a ...')",
+        "Masik hasznos tipp a javitashoz"
+      ],
+      "root_cause_explanation": "Miert szukseges ez a javitas: a komponens meghibasodasa hogyan okozza a tapasztalt tuneteket (1-2 mondat)"
     }}
   ],
-  "safety_warnings": ["Biztonsagi figyelmeztetes, ha van"],
-  "additional_notes": "Egyeb megjegyzesek"
+  "safety_warnings": ["Biztonsagi figyelmeztetes, ha van (pl. 'Ne indítsa el a motort magas kompresszioelteres eseten')"],
+  "additional_notes": "Egyeb megjegyzesek, figyelmezteto jelek, kovetkezo lepesek ha a javitas nem segit"
 }}
 ```
 
@@ -466,6 +508,7 @@ class ParsedDiagnosisResponse:
     recommended_repairs: list[dict[str, Any]] = None
     safety_warnings: list[str] = None
     additional_notes: str = ""
+    root_cause_analysis: str = ""
     confidence_score: float = 0.5
     raw_response: str = ""
     parse_error: str | None = None
@@ -515,6 +558,7 @@ def parse_diagnosis_response(response_text: str) -> ParsedDiagnosisResponse:
 
         result.summary = data.get("summary", "")
         result.additional_notes = data.get("additional_notes", "")
+        result.root_cause_analysis = data.get("root_cause_analysis", "")
 
         # Parse probable causes
         causes = data.get("probable_causes", [])
@@ -548,6 +592,9 @@ def parse_diagnosis_response(response_text: str) -> ParsedDiagnosisResponse:
                     "difficulty": r.get("difficulty", "intermediate"),
                     "parts_needed": r.get("parts_needed", []),
                     "estimated_time_minutes": r.get("estimated_time_minutes"),
+                    "tools_needed": r.get("tools_needed", []),
+                    "expert_tips": r.get("expert_tips", []),
+                    "root_cause_explanation": r.get("root_cause_explanation"),
                 }
                 for r in repairs
             ]
@@ -643,6 +690,66 @@ SEVERITY_DESCRIPTIONS = {
 }
 
 
+DTC_TOOLS_AND_TIPS = {
+    "P03": {  # Misfire
+        "tools": [
+            {"name": "Gyertyakulcs (16mm vagy 21mm)", "icon_hint": "handyman"},
+            {"name": "OBD-II diagnosztikai szkenner", "icon_hint": "tablet_mac"},
+            {"name": "Hezagmero", "icon_hint": "straighten"},
+        ],
+        "tips": [
+            "Ellenorizze eloszor a gyujtagyertyak allapotat - ez a legolcsobb es leggyorsabb vizsgalat.",
+            "Ha a gyertya nedves, uzemanyag-befecskendezesi problema valoszinu.",
+        ],
+    },
+    "P01": {  # Fuel/air
+        "tools": [
+            {"name": "Digitalis multimeter", "icon_hint": "electric_bolt"},
+            {"name": "OBD-II diagnosztikai szkenner", "icon_hint": "tablet_mac"},
+        ],
+        "tips": [
+            "A legszivargas kereseset vegezze el eloszor - legegyszerubb vizsgalat.",
+        ],
+    },
+    "P04": {  # Emissions
+        "tools": [
+            {"name": "OBD-II diagnosztikai szkenner", "icon_hint": "tablet_mac"},
+            {"name": "Digitalis multimeter", "icon_hint": "electric_bolt"},
+            {"name": "Infra homero", "icon_hint": "speed"},
+        ],
+        "tips": [
+            "Merje a katalizator elotti es utani homersekletet - az utani legyen magasabb.",
+        ],
+    },
+}
+
+_DEFAULT_TOOLS_AND_TIPS = {
+    "tools": [
+        {"name": "OBD-II diagnosztikai szkenner", "icon_hint": "tablet_mac"},
+        {"name": "Digitalis multimeter", "icon_hint": "electric_bolt"},
+    ],
+    "tips": [
+        "Vegezzen alapos vizualis ellenorzest a vezetekeken es csatlakozon.",
+    ],
+}
+
+
+def _get_dtc_tools_and_tips(dtc_prefix: str) -> dict[str, list]:
+    """
+    Get default tools and expert tips based on DTC code prefix.
+
+    Args:
+        dtc_prefix: First 3 characters of DTC code (e.g. "P03", "P01").
+
+    Returns:
+        Dictionary with 'tools' and 'tips' lists.
+    """
+    for prefix, data in DTC_TOOLS_AND_TIPS.items():
+        if dtc_prefix.startswith(prefix):
+            return data
+    return _DEFAULT_TOOLS_AND_TIPS
+
+
 def generate_rule_based_diagnosis(
     dtc_codes: list[dict[str, Any]],
     vehicle_info: dict[str, Any],
@@ -733,6 +840,18 @@ def generate_rule_based_diagnosis(
                 "parts_needed": [],
                 "estimated_time_minutes": 30,
             }
+
+            # Add default tools based on DTC category
+            dtc_prefix = code[:3].upper() if code else ""
+            tools_and_tips = _get_dtc_tools_and_tips(dtc_prefix)
+
+            repair["tools_needed"] = tools_and_tips["tools"]
+            repair["expert_tips"] = tools_and_tips["tips"]
+            repair["root_cause_explanation"] = (
+                f"A {code} hibakod alapjan a fenti diagnosztikai lepesek "
+                f"szuksegesek a pontos hibaazonositashoz."
+            )
+
             result.recommended_repairs.append(repair)
 
     # Add recall-based warnings

@@ -14,6 +14,7 @@ Author: AutoCognitix Team
 
 import asyncio
 from datetime import datetime
+from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,11 +23,14 @@ from app.api.v1.schemas.diagnosis import (
     DiagnosisHistoryItem,
     DiagnosisRequest,
     DiagnosisResponse,
+    PartWithPrice,
     ProbableCause,
     RelatedComplaint,
     RelatedRecall,
     RepairRecommendation,
     Source,
+    ToolNeeded,
+    TotalCostEstimate,
 )
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
@@ -41,6 +45,7 @@ from app.services.nhtsa_service import (
     VINDecodeResult,
     get_nhtsa_service,
 )
+from app.services.parts_price_service import get_parts_price_service
 
 logger = get_logger(__name__)
 
@@ -198,6 +203,14 @@ class DiagnosisService:
                 vin_data=vin_data,
             )
 
+            # Step 5.5: Enrich with parts prices
+            parts_data = await self._enrich_with_parts_prices(
+                dtc_codes=request.dtc_codes,
+                vehicle_make=request.vehicle_make,
+                vehicle_model=request.vehicle_model,
+                vehicle_year=request.vehicle_year,
+            )
+
             # Step 6: Build response
             response = self._build_response(
                 diagnosis_id=diagnosis_id,
@@ -206,6 +219,7 @@ class DiagnosisService:
                 rag_result=rag_result,
                 recalls=recalls,
                 complaints=complaints,
+                parts_data=parts_data,
             )
 
             # Step 7: Save to database
@@ -535,10 +549,16 @@ class DiagnosisService:
                         "estimated_cost_max": repair.estimated_cost_max,
                         "estimated_cost_currency": "HUF",
                         "difficulty": repair.difficulty,
-                        "parts_needed": [p.get("name", "") for p in repair.parts]
+                        "parts_needed": [
+                            p.get("name", "") if isinstance(p, dict) else str(p)
+                            for p in repair.parts
+                        ]
                         if repair.parts
                         else [],
                         "estimated_time_minutes": repair.estimated_time_minutes,
+                        "tools_needed": repair.tools_needed if hasattr(repair, 'tools_needed') else [],
+                        "expert_tips": repair.expert_tips if hasattr(repair, 'expert_tips') else [],
+                        "root_cause_explanation": repair.root_cause_explanation if hasattr(repair, 'root_cause_explanation') else None,
                     }
                     for repair in result.repair_recommendations
                 ],
@@ -557,6 +577,7 @@ class DiagnosisService:
                 "processing_time_ms": result.processing_time_ms,
                 "model_used": result.model_used,
                 "used_fallback": result.used_fallback,
+                "root_cause_analysis": result.root_cause_analysis if hasattr(result, 'root_cause_analysis') else "",
             }
 
         except ImportError:
@@ -753,6 +774,73 @@ class DiagnosisService:
         }
 
     # =========================================================================
+    # Parts Price Enrichment
+    # =========================================================================
+
+    async def _enrich_with_parts_prices(
+        self,
+        dtc_codes: list[str],
+        vehicle_make: str,
+        vehicle_model: str,
+        vehicle_year: int,
+    ) -> dict:
+        """
+        Enrich diagnosis with parts pricing from PartsPriceService.
+
+        Args:
+            dtc_codes: List of DTC codes.
+            vehicle_make: Vehicle make.
+            vehicle_model: Vehicle model.
+            vehicle_year: Vehicle year.
+
+        Returns:
+            Dictionary with parts_with_prices and total_cost_estimate.
+        """
+        try:
+            service = get_parts_price_service()
+            all_parts = []
+            seen_part_ids = set()
+
+            # Get parts for each DTC code
+            for code in dtc_codes:
+                parts = await service.get_parts_for_dtc(
+                    dtc_code=code,
+                    vehicle_make=vehicle_make,
+                    vehicle_model=vehicle_model,
+                    vehicle_year=vehicle_year,
+                )
+                for part in parts:
+                    part_id = part.get("id", "")
+                    if part_id not in seen_part_ids:
+                        seen_part_ids.add(part_id)
+                        all_parts.append(part)
+
+            if not all_parts:
+                logger.info("No parts found for DTC codes, skipping price enrichment")
+                return {"parts": [], "cost_estimate": None}
+
+            # Get cost estimate using first DTC code
+            cost_estimate = await service.estimate_repair_cost(
+                dtc_code=dtc_codes[0] if dtc_codes else None,
+                parts=all_parts,
+                vehicle_make=vehicle_make,
+                vehicle_model=vehicle_model,
+                vehicle_year=vehicle_year,
+            )
+
+            logger.info(
+                f"Parts enrichment: {len(all_parts)} parts, "
+                f"cost range: {cost_estimate.get('total_cost_min', 0):,} - "
+                f"{cost_estimate.get('total_cost_max', 0):,} HUF"
+            )
+
+            return {"parts": all_parts, "cost_estimate": cost_estimate}
+
+        except Exception as e:
+            logger.warning(f"Parts price enrichment failed: {e}")
+            return {"parts": [], "cost_estimate": None}
+
+    # =========================================================================
     # Response Building
     # =========================================================================
 
@@ -764,6 +852,7 @@ class DiagnosisService:
         rag_result: dict,
         recalls: list[Recall],
         complaints: list[Complaint],
+        parts_data: Optional[dict] = None,
     ) -> DiagnosisResponse:
         """
         Build the final DiagnosisResponse object.
@@ -775,6 +864,7 @@ class DiagnosisService:
             rag_result: RAG pipeline results.
             recalls: NHTSA recalls.
             complaints: NHTSA complaints.
+            parts_data: Optional parts pricing data.
 
         Returns:
             Complete DiagnosisResponse object.
@@ -802,6 +892,15 @@ class DiagnosisService:
                 difficulty=repair.get("difficulty", "intermediate"),
                 parts_needed=repair.get("parts_needed", []),
                 estimated_time_minutes=repair.get("estimated_time_minutes"),
+                tools_needed=[
+                    ToolNeeded(
+                        name=t.get("name", ""),
+                        icon_hint=t.get("icon_hint", "handyman"),
+                    )
+                    for t in repair.get("tools_needed", [])
+                ],
+                expert_tips=repair.get("expert_tips", []),
+                root_cause_explanation=repair.get("root_cause_explanation"),
             )
             for repair in rag_result.get("recommended_repairs", [])
         ]
@@ -866,6 +965,41 @@ class DiagnosisService:
         # Remove duplicates
         safety_warnings = list(dict.fromkeys(safety_warnings))
 
+        # Build parts with prices
+        parts_with_prices = []
+        total_cost_estimate = None
+        root_cause_analysis = rag_result.get("root_cause_analysis")
+
+        if parts_data:
+            for part in parts_data.get("parts", []):
+                parts_with_prices.append(
+                    PartWithPrice(
+                        id=part.get("id", ""),
+                        name=part.get("name", ""),
+                        name_en=part.get("name_en"),
+                        category=part.get("category", "other"),
+                        price_range_min=part.get("price_range_min", 0),
+                        price_range_max=part.get("price_range_max", 0),
+                        labor_hours=part.get("labor_hours", 0.0),
+                        currency=part.get("currency", "HUF"),
+                    )
+                )
+
+            cost_est = parts_data.get("cost_estimate")
+            if cost_est:
+                total_cost_estimate = TotalCostEstimate(
+                    parts_min=cost_est.get("parts_cost_min", 0),
+                    parts_max=cost_est.get("parts_cost_max", 0),
+                    labor_min=cost_est.get("labor_cost_min", 0),
+                    labor_max=cost_est.get("labor_cost_max", 0),
+                    total_min=cost_est.get("total_cost_min", 0),
+                    total_max=cost_est.get("total_cost_max", 0),
+                    currency="HUF",
+                    estimated_hours=cost_est.get("estimated_hours", 0.0),
+                    difficulty=cost_est.get("difficulty", "medium"),
+                    disclaimer=cost_est.get("disclaimer", ""),
+                )
+
         return DiagnosisResponse(
             id=diagnosis_id,
             vehicle_make=request.vehicle_make,
@@ -885,6 +1019,9 @@ class DiagnosisService:
             processing_time_ms=rag_result.get("processing_time_ms"),
             model_used=rag_result.get("model_used"),
             used_fallback=rag_result.get("used_fallback", False),
+            parts_with_prices=parts_with_prices,
+            total_cost_estimate=total_cost_estimate,
+            root_cause_analysis=root_cause_analysis,
             created_at=datetime.utcnow(),
         )
 
@@ -1017,6 +1154,13 @@ class DiagnosisService:
                 ],
                 confidence_score=session.confidence_score,
                 sources=[Source(**source) for source in result.get("sources", [])],
+                parts_with_prices=[
+                    PartWithPrice(**part) for part in result.get("parts_with_prices", [])
+                ],
+                total_cost_estimate=TotalCostEstimate(**result["total_cost_estimate"])
+                if result.get("total_cost_estimate")
+                else None,
+                root_cause_analysis=result.get("root_cause_analysis"),
                 created_at=session.created_at,
             )
 

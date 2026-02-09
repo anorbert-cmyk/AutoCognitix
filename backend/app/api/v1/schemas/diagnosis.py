@@ -58,6 +58,41 @@ class ProbableCause(BaseModel):
         return max(0.0, min(1.0, v))
 
 
+class ToolNeeded(BaseModel):
+    """Schema for a tool needed for a repair step."""
+
+    name: str = Field(..., description="Tool name in Hungarian")
+    icon_hint: str = Field("handyman", description="Material Symbols icon name hint")
+
+
+class PartWithPrice(BaseModel):
+    """Schema for a part with price information."""
+
+    id: str = Field(..., description="Part identifier key")
+    name: str = Field(..., description="Part name in Hungarian")
+    name_en: Optional[str] = Field(None, description="Part name in English")
+    category: str = Field("other", description="Part category")
+    price_range_min: int = Field(0, ge=0, description="Minimum price in HUF")
+    price_range_max: int = Field(0, ge=0, description="Maximum price in HUF")
+    labor_hours: float = Field(0.0, ge=0, description="Estimated labor hours")
+    currency: str = Field("HUF", description="Currency code")
+
+
+class TotalCostEstimate(BaseModel):
+    """Schema for total repair cost estimate breakdown."""
+
+    parts_min: int = Field(0, ge=0, description="Minimum parts cost")
+    parts_max: int = Field(0, ge=0, description="Maximum parts cost")
+    labor_min: int = Field(0, ge=0, description="Minimum labor cost")
+    labor_max: int = Field(0, ge=0, description="Maximum labor cost")
+    total_min: int = Field(0, ge=0, description="Total minimum cost")
+    total_max: int = Field(0, ge=0, description="Total maximum cost")
+    currency: str = Field("HUF", description="Currency code")
+    estimated_hours: float = Field(0.0, ge=0, description="Total estimated labor hours")
+    difficulty: str = Field("medium", description="Overall difficulty level")
+    disclaimer: str = Field("", description="Price estimate disclaimer")
+
+
 class RepairRecommendation(BaseModel):
     """Schema for repair recommendation."""
 
@@ -73,6 +108,15 @@ class RepairRecommendation(BaseModel):
     parts_needed: List[str] = Field(default_factory=list, description="List of parts needed")
     estimated_time_minutes: Optional[int] = Field(
         None, ge=0, description="Estimated repair time in minutes"
+    )
+    tools_needed: List[ToolNeeded] = Field(
+        default_factory=list, description="Tools needed for this repair step"
+    )
+    expert_tips: List[str] = Field(
+        default_factory=list, description="Expert tips for this repair step"
+    )
+    root_cause_explanation: Optional[str] = Field(
+        None, description="Why this repair is needed - root cause analysis"
     )
 
 
@@ -162,6 +206,17 @@ class DiagnosisResponse(BaseModel):
     # Diagnostic steps
     diagnostic_steps: List[str] = Field(
         default_factory=list, description="Recommended diagnostic steps"
+    )
+
+    # Parts and cost information
+    parts_with_prices: List[PartWithPrice] = Field(
+        default_factory=list, description="Parts with Hungarian price ranges"
+    )
+    total_cost_estimate: Optional[TotalCostEstimate] = Field(
+        None, description="Total repair cost estimate"
+    )
+    root_cause_analysis: Optional[str] = Field(
+        None, description="Detailed root cause analysis paragraph"
     )
 
     # Processing metadata

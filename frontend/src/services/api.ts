@@ -188,6 +188,35 @@ export interface ProbableCause {
   components: string[]
 }
 
+export interface ToolNeeded {
+  name: string
+  icon_hint: string
+}
+
+export interface PartWithPrice {
+  id: string
+  name: string
+  name_en?: string
+  category: string
+  price_range_min: number
+  price_range_max: number
+  labor_hours: number
+  currency: string
+}
+
+export interface TotalCostEstimate {
+  parts_min: number
+  parts_max: number
+  labor_min: number
+  labor_max: number
+  total_min: number
+  total_max: number
+  currency: string
+  estimated_hours: number
+  difficulty: string
+  disclaimer: string
+}
+
 export interface RepairRecommendation {
   title: string
   description: string
@@ -197,6 +226,9 @@ export interface RepairRecommendation {
   difficulty: 'beginner' | 'intermediate' | 'advanced' | 'professional'
   parts_needed: string[]
   estimated_time_minutes?: number
+  tools_needed: ToolNeeded[]
+  expert_tips: string[]
+  root_cause_explanation?: string
 }
 
 export interface Source {
@@ -218,6 +250,9 @@ export interface DiagnosisResponse {
   confidence_score: number
   sources: Source[]
   created_at: string
+  parts_with_prices: PartWithPrice[]
+  total_cost_estimate?: TotalCostEstimate
+  root_cause_analysis?: string
 }
 
 export interface DiagnosisHistoryItem {

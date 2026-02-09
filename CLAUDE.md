@@ -4,7 +4,7 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 5 befejezve - Adatbázisok feltöltve, AI indexelés kész
+**Státusz:** Sprint 7.5 befejezve - Enhanced Diagnosis Report (LLM prompt, PartsPriceService, Frontend UI)
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
@@ -212,10 +212,10 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 
 | Végpont | Státusz | Leírás |
 |---------|---------|--------|
-| `POST /api/v1/diagnosis/analyze` | Scaffold | Fő diagnosztika |
-| `GET /api/v1/dtc/search` | Scaffold | DTC keresés |
-| `POST /api/v1/vehicles/decode-vin` | Scaffold | VIN dekódolás |
-| `POST /api/v1/auth/login` | Scaffold | Bejelentkezés |
+| `POST /api/v1/diagnosis/analyze` | ✅ Kész | Fő diagnosztika (LLM + RAG + PartsPriceService) |
+| `GET /api/v1/dtc/search` | ✅ Kész | DTC keresés |
+| `POST /api/v1/vehicles/decode-vin` | ✅ Kész | VIN dekódolás |
+| `POST /api/v1/auth/login` | ✅ Kész | Bejelentkezés (JWT) |
 
 ## Adatforrások
 
@@ -228,6 +228,13 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-02-09 - Enhanced Diagnosis Report (Sprint 7.5)
+- PartsPriceService integráció: korábban létezett de nem volt bekötve a pipeline-ba
+- LLM prompt újraírás: direktív utasítások, mérési értékek, szerszámok szekciók
+- Agent Teams 8 fővel: delegate mode lead + file ownership = sikeres koordináció
+- ruff PLR0912 fix: if/elif chain helyett dictionary lookup
+- ruff RUF013 fix: `dict = None` helyett `Optional[dict] = None` (Python 3.9)
 
 ### 2026-02-08 - Adatbázis feltöltés befejezve
 - HuBERT lokális embedding: Groq API limit helyett lokális modell (nincs rate limit)
@@ -250,11 +257,18 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 - [x] LangChain RAG chain (rag_service.py)
 - [x] NHTSA API kliens (nhtsa_service.py)
 
-### Sprint 6: API & Frontend (KÖVETKEZŐ)
-- [ ] Auth végpontok működőképessé
-- [ ] DTC keresés API endpoint
-- [ ] Vehicle lookup API
-- [ ] Frontend diagnosis wizard
+### Sprint 6: ✅ BEFEJEZVE
+- [x] Auth végpontok működőképessé
+- [x] DTC keresés API endpoint
+- [x] Vehicle lookup API
+- [x] Frontend diagnosis wizard
+
+### Sprint 7.5: ✅ BEFEJEZVE
+- [x] LLM prompt újraírás (direktív utasítások, mérési értékek, szerszámok, gyökérok elemzés)
+- [x] PartsPriceService integráció a diagnosis pipeline-ba (Step 5.5)
+- [x] Frontend mock adatok eltávolítása, valódi API adatok megjelenítése
+- [x] Új sémák: ToolNeeded, PartWithPrice, TotalCostEstimate
+- [x] Alkatrészek és Árak táblázat + Összköltség becslés kártya (ResultPage)
 
 ## Deployment - Railway
 

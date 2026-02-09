@@ -1420,3 +1420,94 @@ revision = "004_idx_optimization"    # 21 char - OK
 # KERÜLENDŐ
 revision = "003_add_vehicle_recalls_complaints"  # 35 char - FAIL!
 ```
+
+---
+
+## 2026-02-09 - Sprint 7.5: Enhanced Diagnosis Report
+
+### Agent Teams 8 Fovel - Sikeres Koordinacio
+
+**Felallas:** 8 agent team (delegate mode lead + 7 teammate) Cross-Layer Feature teamkent.
+
+**Trigger-ek:** CROSS_LAYER (backend + frontend) + MULTI_MODULE_FEATURE (schema + prompt + service + frontend)
+
+**Tanulsag:** 8 fo meg kezelheto ha:
+1. Lead CSAK koordinal (delegate mode), nem ir kodot
+2. File ownership szigoruan betartva (egy fajl = egy teammate)
+3. Task granularity: 5-6 task per teammate
+4. Backend teammate-ek elobb fejezik be (frontend fugg toluk)
+
+### PartsPriceService Integracio - "Letezik de Nem Mukodik" Anti-Pattern
+
+**Problema:** `PartsPriceService` implementalva volt (`parts_price_service.py`), de a diagnosis pipeline SOHA nem hivta meg. Az eredmeny oldalon nem jelentek meg alkatresz arak.
+
+**Gyokerok:** A service keszitese es a pipeline integracio kulon sprintben tortent, es az osszekapcsolas kimaradt.
+
+**Megoldas:** `_enrich_with_parts_prices()` metodus a `diagnosis_service.py`-ban (Step 5.5, RAG utan, response osszerakas elott).
+
+**Szabaly:**
+```python
+# Uj service letrehozasakor MINDIG:
+# 1. Implementald a service-t
+# 2. AZONNAL integrad a hivo pipeline-ba
+# 3. Teszteld end-to-end (nem csak unit test!)
+```
+
+**Prevencio:** Service letrehozas = integracios ticket automatikusan.
+
+### Ruff Lint Fixek
+
+#### PLR0912: Too many branches (if/elif chain)
+**Problema:** `diagnosis_hu.py`-ban DTC kodhoz tartozo tippeket if/elif lancban kereste.
+
+**Megoldas:** Dictionary lookup pattern:
+```python
+# HELYTELEN - PLR0912
+def get_tips(code):
+    if code.startswith("P0"):
+        return tip_p0
+    elif code.startswith("P1"):
+        return tip_p1
+    # ... sok elif
+
+# HELYES - dictionary lookup
+DTC_TOOLS_AND_TIPS = {
+    "P0": tip_p0,
+    "P1": tip_p1,
+    # ...
+}
+def get_tips(code):
+    prefix = code[:2]
+    return DTC_TOOLS_AND_TIPS.get(prefix, default_tip)
+```
+
+#### RUF013: `dict = None` tipusannotacio
+**Problema:** Python 3.9-ben `dict = None` nem valid tipusannotacio default ertekkel.
+
+**Megoldas:** `Optional[dict] = None` hasznalata:
+```python
+# HELYTELEN
+def func(data: dict = None): ...
+
+# HELYES (Python 3.9 kompatibilis)
+from typing import Optional
+def func(data: Optional[dict] = None): ...
+```
+
+### Frontend TypeScript Unused Import Trap
+
+**Problema:** `TotalCostEstimate` interface importalva lett az `api.ts`-bol a `ResultPage.tsx`-be, de kozvetlenul nem volt hasznalva (csak a `DiagnosisResponse` objektumon belul). A TypeScript compiler `unused import` warning-ot adott.
+
+**Megoldas:** Csak azokat az interface-eket importald, amiket kozvetlenul hasznalsz tipusellenorzesre. A beagyazott tipusok (pl. `response.total_cost_estimate`) automatikusan tipusellenorzottek ha a szulo tipus (`DiagnosisResponse`) importalva van.
+
+```typescript
+// HELYTELEN - unused import warning
+import { DiagnosisResponse, TotalCostEstimate } from '../services/api'
+
+// HELYES - TotalCostEstimate a DiagnosisResponse-on belul elerheto
+import { DiagnosisResponse } from '../services/api'
+```
+
+### `from __future__ import annotations` - Ismetelt Megerosites
+
+Sprint 7.5-ben is felmerult: **TILOS** Pydantic V2 schemakban. Ez mar a harmadik sprint ahol ez problemahoz vezetett. A szabaly valtozatlan: Pydantic V2 nativankezeli a forward reference-eket, PEP 563 postponed annotations inkompatibilis.
