@@ -50,8 +50,8 @@ LABEL maintainer="AutoCognitix Team"
 LABEL version="1.0"
 LABEL description="AutoCognitix Frontend - Production"
 
-# Install curl for health checks
-RUN apk add --no-cache curl
+# Install curl for health checks and gettext for envsubst (port substitution)
+RUN apk add --no-cache curl gettext
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
@@ -102,4 +102,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Start nginx with envsubst for dynamic port substitution
 # Railway provides PORT env variable, nginx needs to listen on it
 # Only substitute $PORT to avoid breaking other nginx variables like $uri, $request
-CMD envsubst '${PORT}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g "daemon off;"
+CMD set -e && \
+    echo "Starting with PORT=${PORT}" && \
+    envsubst '${PORT}' < /etc/nginx/templates/nginx.conf.template > /etc/nginx/nginx.conf && \
+    nginx -t 2>&1 && \
+    echo "Nginx config OK, starting..." && \
+    exec nginx -g "daemon off;"
