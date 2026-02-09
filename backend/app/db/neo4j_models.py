@@ -23,7 +23,11 @@ from neomodel import (
 from app.core.config import settings
 
 # Configure Neo4j connection
-config.DATABASE_URL = f"bolt://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{settings.NEO4J_URI.replace('bolt://', '')}"
+# Handle both bolt:// and neo4j+s:// URI schemes (Aura uses neo4j+s://)
+_neo4j_host = settings.NEO4J_URI
+for _scheme in ("neo4j+s://", "neo4j+ssc://", "neo4j://", "bolt+s://", "bolt://"):
+    _neo4j_host = _neo4j_host.replace(_scheme, "")
+config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"
 
 
 # Relationship models
