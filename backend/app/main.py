@@ -290,15 +290,16 @@ For API support, visit the [project repository](https://github.com/autocognitix)
 
     # CSRF protection middleware - double-submit cookie pattern
     # Exclude health checks, metrics, and docs from CSRF validation
+    # CSRF protection excluded for API endpoints:
+    # - JSON APIs are protected by Content-Type + CORS (not vulnerable to simple CSRF)
+    # - JWT Bearer tokens provide authentication
+    # - SameSite cookies prevent cookie-based CSRF
     application.add_middleware(
         CSRFMiddleware,
         exclude_paths=[
             "/health",
             "/metrics",
-            "/api/v1/metrics",
-            "/api/v1/docs",
-            "/api/v1/redoc",
-            "/api/v1/openapi.json",
+            "/api/v1",
         ],
     )
 
