@@ -1,29 +1,29 @@
 """
-Vehicle Service for Neo4j queries.
+Vehicle Service with Neo4j primary and PostgreSQL fallback.
 
-Provides async methods to query vehicle data from Neo4j:
-- Get all makes (manufacturers)
-- Get models for a make
-- Get years for a make/model
-- Get vehicle details by ID
-- Get complaints and recalls for a vehicle
+Queries Neo4j first for vehicle data. Falls back to PostgreSQL
+vehicle_makes/vehicle_models tables if Neo4j returns empty results.
 """
 
 import asyncio
 from typing import Any
 
 from neomodel import db as neomodel_db
+from sqlalchemy import func, select
 
 from app.core.logging import get_logger
+from app.db.postgres.models import VehicleMake, VehicleModel as VehicleModelDB
+from app.db.postgres.session import async_session_maker
 
 logger = get_logger(__name__)
 
 
 class VehicleService:
     """
-    Service for querying vehicle data from Neo4j.
+    Service for querying vehicle data.
 
-    Uses Neomodel for ORM-style access and raw Cypher for complex queries.
+    Primary: Neo4j VehicleNode
+    Fallback: PostgreSQL vehicle_makes/vehicle_models (seeded via migration 010)
     """
 
     async def get_all_makes(
@@ -32,18 +32,23 @@ class VehicleService:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """
-        Get all unique vehicle makes from Neo4j.
+        """Get all vehicle makes. Tries Neo4j first, falls back to PostgreSQL."""
+        try:
+            makes, total = await self._get_makes_neo4j(search, limit, offset)
+            if total > 0:
+                return makes, total
+        except Exception as e:
+            logger.warning(f"Neo4j makes query failed, using PostgreSQL: {e}")
 
-        Args:
-            search: Optional search term to filter makes
-            limit: Maximum number of results
-            offset: Number of results to skip
+        return await self._get_makes_postgres(search, limit, offset)
 
-        Returns:
-            Tuple of (list of make dictionaries, total count)
-        """
-        # Build the query
+    async def _get_makes_neo4j(
+        self,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get makes from Neo4j VehicleNode."""
         if search:
             query = """
                 MATCH (v:VehicleNode)
@@ -77,27 +82,50 @@ class VehicleService:
             params = {"limit": limit, "offset": offset}
             count_params = {}
 
-        # Execute queries in thread pool (neomodel is sync)
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
+        results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, query, params
         )
-        count_results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(count_query, count_params)
+        count_results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, count_query, count_params
         )
 
         total = count_results[0][0] if count_results else 0
-
         makes = []
         for row in results:
             make_name = row[0]
-            makes.append(
-                {
-                    "id": make_name.lower().replace(" ", "_").replace("-", "_"),
-                    "name": make_name,
-                    "country": self._get_country_for_make(make_name),
-                }
-            )
+            makes.append({
+                "id": make_name.lower().replace(" ", "_").replace("-", "_"),
+                "name": make_name,
+                "country": self._get_country_for_make(make_name),
+            })
+
+        return makes, total
+
+    async def _get_makes_postgres(
+        self,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get makes from PostgreSQL vehicle_makes table."""
+        async with async_session_maker() as session:
+            stmt = select(VehicleMake)
+            count_stmt = select(func.count(VehicleMake.id))
+
+            if search:
+                stmt = stmt.where(VehicleMake.name.ilike(f"%{search}%"))
+                count_stmt = count_stmt.where(VehicleMake.name.ilike(f"%{search}%"))
+
+            stmt = stmt.order_by(VehicleMake.name).offset(offset).limit(limit)
+
+            result = await session.execute(stmt)
+            count_result = await session.execute(count_stmt)
+
+            total = count_result.scalar() or 0
+            makes = [
+                {"id": m.id, "name": m.name, "country": m.country}
+                for m in result.scalars().all()
+            ]
 
         return makes, total
 
@@ -108,19 +136,24 @@ class VehicleService:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """
-        Get all models for a specific make from Neo4j.
+        """Get models for a make. Tries Neo4j first, falls back to PostgreSQL."""
+        try:
+            models, total = await self._get_models_neo4j(make, search, limit, offset)
+            if total > 0:
+                return models, total
+        except Exception as e:
+            logger.warning(f"Neo4j models query failed, using PostgreSQL: {e}")
 
-        Args:
-            make: Vehicle make (manufacturer)
-            search: Optional search term to filter models
-            limit: Maximum number of results
-            offset: Number of results to skip
+        return await self._get_models_postgres(make, search, limit, offset)
 
-        Returns:
-            Tuple of (list of model dictionaries, total count)
-        """
-        # Normalize the make name for case-insensitive comparison
+    async def _get_models_neo4j(
+        self,
+        make: str,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get models from Neo4j VehicleNode."""
         if search:
             query = """
                 MATCH (v:VehicleNode)
@@ -164,12 +197,11 @@ class VehicleService:
             params = {"make": make, "limit": limit, "offset": offset}
             count_params = {"make": make}
 
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
+        results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, query, params
         )
-        count_results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(count_query, count_params)
+        count_results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, count_query, count_params
         )
 
         total = count_results[0][0] if count_results else 0
@@ -178,25 +210,70 @@ class VehicleService:
         models = []
         for row in results:
             model_name, year_start, year_end, body_types_raw = row
-            # Flatten body types (may be nested lists)
             body_types = []
             for bt in body_types_raw:
                 if isinstance(bt, list):
                     body_types.extend(bt)
                 elif bt:
                     body_types.append(bt)
-            body_types = list(set(body_types))
 
-            models.append(
-                {
-                    "id": model_name.lower().replace(" ", "_").replace("-", "_"),
-                    "name": model_name,
-                    "make_id": make_id,
-                    "year_start": year_start,
-                    "year_end": year_end,
-                    "body_types": body_types,
-                }
+            models.append({
+                "id": model_name.lower().replace(" ", "_").replace("-", "_"),
+                "name": model_name,
+                "make_id": make_id,
+                "year_start": year_start,
+                "year_end": year_end,
+                "body_types": list(set(body_types)),
+            })
+
+        return models, total
+
+    async def _get_models_postgres(
+        self,
+        make: str,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Get models from PostgreSQL vehicle_models table."""
+        make_id = make.lower().replace(" ", "_").replace("-", "_")
+
+        async with async_session_maker() as session:
+            make_obj_result = await session.execute(
+                select(VehicleMake).where(
+                    (VehicleMake.id == make_id) | (VehicleMake.name.ilike(make))
+                )
             )
+            make_obj = make_obj_result.scalar_one_or_none()
+            if not make_obj:
+                return [], 0
+
+            stmt = select(VehicleModelDB).where(VehicleModelDB.make_id == make_obj.id)
+            count_stmt = select(func.count(VehicleModelDB.id)).where(
+                VehicleModelDB.make_id == make_obj.id
+            )
+
+            if search:
+                stmt = stmt.where(VehicleModelDB.name.ilike(f"%{search}%"))
+                count_stmt = count_stmt.where(VehicleModelDB.name.ilike(f"%{search}%"))
+
+            stmt = stmt.order_by(VehicleModelDB.name).offset(offset).limit(limit)
+
+            result = await session.execute(stmt)
+            count_result = await session.execute(count_stmt)
+
+            total = count_result.scalar() or 0
+            models = [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "make_id": make_obj.id,
+                    "year_start": m.year_start,
+                    "year_end": m.year_end,
+                    "body_types": [],
+                }
+                for m in result.scalars().all()
+            ]
 
         return models, total
 
@@ -205,16 +282,7 @@ class VehicleService:
         make: str,
         model: str,
     ) -> list[int]:
-        """
-        Get all available years for a specific make and model.
-
-        Args:
-            make: Vehicle make
-            model: Vehicle model
-
-        Returns:
-            List of years in descending order
-        """
+        """Get all available years for a specific make and model."""
         query = """
             MATCH (v:VehicleNode)
             WHERE toLower(v.make) = toLower($make)
@@ -223,13 +291,15 @@ class VehicleService:
         """
         params = {"make": make, "model": model}
 
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
-        )
+        try:
+            results, _ = await asyncio.to_thread(
+                neomodel_db.cypher_query, query, params
+            )
+        except Exception:
+            results = []
 
         years = set()
-        current_year = 2026  # Default max year
+        current_year = 2026
 
         for row in results:
             year_start, year_end = row
@@ -238,30 +308,38 @@ class VehicleService:
                 end = int(year_end) if year_end else current_year
                 years.update(range(start, end + 1))
 
+        # Fallback: if no Neo4j results, use PostgreSQL year_start
+        if not years:
+            try:
+                async with async_session_maker() as session:
+                    make_id = make.lower().replace(" ", "_").replace("-", "_")
+                    stmt = select(VehicleModelDB).where(
+                        (VehicleModelDB.make_id == make_id)
+                        & (VehicleModelDB.name.ilike(model))
+                    )
+                    result = await session.execute(stmt)
+                    for m in result.scalars().all():
+                        if m.year_start:
+                            end = m.year_end if m.year_end else current_year
+                            years.update(range(m.year_start, end + 1))
+            except Exception as e:
+                logger.warning(f"PostgreSQL years fallback failed: {e}")
+
         return sorted(years, reverse=True)
 
     async def get_vehicle_by_id(
         self,
         vehicle_id: str,
     ) -> dict[str, Any] | None:
-        """
-        Get vehicle details by Neo4j UID.
-
-        Args:
-            vehicle_id: Vehicle UID
-
-        Returns:
-            Vehicle dictionary or None if not found
-        """
+        """Get vehicle details by Neo4j UID."""
         query = """
             MATCH (v:VehicleNode {uid: $vehicle_id})
             RETURN v
         """
         params = {"vehicle_id": vehicle_id}
 
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
+        results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, query, params
         )
 
         if not results:
@@ -276,17 +354,7 @@ class VehicleService:
         model: str,
         year: int | None = None,
     ) -> dict[str, Any] | None:
-        """
-        Find a vehicle by make, model, and optional year.
-
-        Args:
-            make: Vehicle make
-            model: Vehicle model
-            year: Optional year
-
-        Returns:
-            Vehicle dictionary or None if not found
-        """
+        """Find a vehicle by make, model, and optional year."""
         if year:
             query = """
                 MATCH (v:VehicleNode)
@@ -308,9 +376,8 @@ class VehicleService:
             """
             params = {"make": make, "model": model}
 
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
+        results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, query, params
         )
 
         if not results:
@@ -325,17 +392,7 @@ class VehicleService:
         model: str,
         year: int | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Get common DTC issues for a vehicle.
-
-        Args:
-            make: Vehicle make
-            model: Vehicle model
-            year: Optional year filter
-
-        Returns:
-            List of common DTC issues
-        """
+        """Get common DTC issues for a vehicle from Neo4j."""
         if year:
             query = """
                 MATCH (v:VehicleNode)-[r:HAS_COMMON_ISSUE]->(d:DTCNode)
@@ -367,71 +424,34 @@ class VehicleService:
             """
             params = {"make": make, "model": model}
 
-        loop = asyncio.get_event_loop()
-        results, _ = await loop.run_in_executor(
-            None, lambda: neomodel_db.cypher_query(query, params)
+        results, _ = await asyncio.to_thread(
+            neomodel_db.cypher_query, query, params
         )
 
-        issues = []
-        for row in results:
-            issues.append(
-                {
-                    "code": row[0],
-                    "description_en": row[1],
-                    "description_hu": row[2],
-                    "severity": row[3],
-                    "frequency": row[4],
-                    "occurrence_count": row[5],
-                }
-            )
-
-        return issues
+        return [
+            {
+                "code": row[0],
+                "description_en": row[1],
+                "description_hu": row[2],
+                "severity": row[3],
+                "frequency": row[4],
+                "occurrence_count": row[5],
+            }
+            for row in results
+        ]
 
     def _node_to_dict(self, node: Any) -> dict[str, Any]:
         """Convert a Neo4j node to a dictionary."""
         if hasattr(node, "__dict__"):
-            # Neomodel node
             return {
-                "id": node.get("uid")
-                if hasattr(node, "get")
-                else node.uid
-                if hasattr(node, "uid")
-                else None,
-                "make": node.get("make")
-                if hasattr(node, "get")
-                else node.make
-                if hasattr(node, "make")
-                else None,
-                "model": node.get("model")
-                if hasattr(node, "get")
-                else node.model
-                if hasattr(node, "model")
-                else None,
-                "year_start": node.get("year_start")
-                if hasattr(node, "get")
-                else node.year_start
-                if hasattr(node, "year_start")
-                else None,
-                "year_end": node.get("year_end")
-                if hasattr(node, "get")
-                else node.year_end
-                if hasattr(node, "year_end")
-                else None,
-                "platform": node.get("platform")
-                if hasattr(node, "get")
-                else node.platform
-                if hasattr(node, "platform")
-                else None,
-                "engine_codes": node.get("engine_codes")
-                if hasattr(node, "get")
-                else node.engine_codes
-                if hasattr(node, "engine_codes")
-                else [],
-                "body_types": node.get("body_types")
-                if hasattr(node, "get")
-                else node.body_types
-                if hasattr(node, "body_types")
-                else [],
+                "id": node.get("uid") if hasattr(node, "get") else getattr(node, "uid", None),
+                "make": node.get("make") if hasattr(node, "get") else getattr(node, "make", None),
+                "model": node.get("model") if hasattr(node, "get") else getattr(node, "model", None),
+                "year_start": node.get("year_start") if hasattr(node, "get") else getattr(node, "year_start", None),
+                "year_end": node.get("year_end") if hasattr(node, "get") else getattr(node, "year_end", None),
+                "platform": node.get("platform") if hasattr(node, "get") else getattr(node, "platform", None),
+                "engine_codes": node.get("engine_codes") if hasattr(node, "get") else getattr(node, "engine_codes", []),
+                "body_types": node.get("body_types") if hasattr(node, "get") else getattr(node, "body_types", []),
             }
         elif isinstance(node, dict):
             return {
@@ -450,85 +470,32 @@ class VehicleService:
     def _get_country_for_make(make: str) -> str | None:
         """Get country of origin for a vehicle make."""
         make_countries = {
-            # German
-            "volkswagen": "Germany",
-            "audi": "Germany",
-            "bmw": "Germany",
-            "mercedes-benz": "Germany",
-            "mercedes": "Germany",
-            "opel": "Germany",
-            "porsche": "Germany",
-            "mini": "Germany",
-            # Japanese
-            "toyota": "Japan",
-            "honda": "Japan",
-            "nissan": "Japan",
-            "mazda": "Japan",
-            "suzuki": "Japan",
-            "subaru": "Japan",
-            "mitsubishi": "Japan",
-            "lexus": "Japan",
-            "infiniti": "Japan",
-            "acura": "Japan",
-            "daihatsu": "Japan",
-            "isuzu": "Japan",
-            # Korean
-            "hyundai": "South Korea",
-            "kia": "South Korea",
-            "genesis": "South Korea",
-            "ssangyong": "South Korea",
-            # American
-            "ford": "USA",
-            "chevrolet": "USA",
-            "gmc": "USA",
-            "dodge": "USA",
-            "jeep": "USA",
-            "chrysler": "USA",
-            "ram": "USA",
-            "buick": "USA",
-            "cadillac": "USA",
-            "lincoln": "USA",
-            "tesla": "USA",
-            # French
-            "renault": "France",
-            "peugeot": "France",
-            "citroen": "France",
-            "citroën": "France",
-            "dacia": "France",
-            "alpine": "France",
-            # Italian
-            "fiat": "Italy",
-            "alfa romeo": "Italy",
-            "alfa": "Italy",
-            "ferrari": "Italy",
-            "lamborghini": "Italy",
-            "maserati": "Italy",
+            "volkswagen": "Germany", "audi": "Germany", "bmw": "Germany",
+            "mercedes-benz": "Germany", "mercedes": "Germany", "opel": "Germany",
+            "porsche": "Germany", "mini": "Germany",
+            "toyota": "Japan", "honda": "Japan", "nissan": "Japan",
+            "mazda": "Japan", "suzuki": "Japan", "subaru": "Japan",
+            "mitsubishi": "Japan", "lexus": "Japan", "infiniti": "Japan",
+            "acura": "Japan", "daihatsu": "Japan", "isuzu": "Japan",
+            "hyundai": "South Korea", "kia": "South Korea",
+            "genesis": "South Korea", "ssangyong": "South Korea",
+            "ford": "USA", "chevrolet": "USA", "gmc": "USA",
+            "dodge": "USA", "jeep": "USA", "chrysler": "USA",
+            "ram": "USA", "buick": "USA", "cadillac": "USA",
+            "lincoln": "USA", "tesla": "USA",
+            "renault": "France", "peugeot": "France", "citroen": "France",
+            "citroën": "France", "dacia": "France", "alpine": "France",
+            "fiat": "Italy", "alfa romeo": "Italy", "alfa": "Italy",
+            "ferrari": "Italy", "lamborghini": "Italy", "maserati": "Italy",
             "lancia": "Italy",
-            # British
-            "jaguar": "UK",
-            "land rover": "UK",
-            "bentley": "UK",
-            "rolls-royce": "UK",
-            "aston martin": "UK",
-            "lotus": "UK",
-            "mclaren": "UK",
-            "mg": "UK",
-            # Czech
-            "skoda": "Czech Republic",
-            "škoda": "Czech Republic",
-            # Spanish
-            "seat": "Spain",
-            "cupra": "Spain",
-            # Swedish
-            "volvo": "Sweden",
-            "saab": "Sweden",
-            # Chinese
-            "byd": "China",
-            "geely": "China",
-            "great wall": "China",
-            "nio": "China",
-            "xpeng": "China",
-            "li auto": "China",
+            "jaguar": "UK", "land rover": "UK", "bentley": "UK",
+            "rolls-royce": "UK", "aston martin": "UK", "lotus": "UK",
+            "mclaren": "UK", "mg": "UK",
+            "skoda": "Czech Republic", "škoda": "Czech Republic",
+            "seat": "Spain", "cupra": "Spain",
+            "volvo": "Sweden", "saab": "Sweden",
+            "byd": "China", "geely": "China", "great wall": "China",
+            "nio": "China", "xpeng": "China", "li auto": "China",
         }
         return make_countries.get(make.lower())
 
@@ -538,12 +505,7 @@ _vehicle_service: VehicleService | None = None
 
 
 def get_vehicle_service() -> VehicleService:
-    """
-    Get or create vehicle service instance.
-
-    Returns:
-        VehicleService instance
-    """
+    """Get or create vehicle service instance."""
     global _vehicle_service
     if _vehicle_service is None:
         _vehicle_service = VehicleService()
