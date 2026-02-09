@@ -266,9 +266,7 @@ class HungarianEmbeddingService:
             logger.error(f"Failed to load HuSpaCy model: {e}")
             raise RuntimeError(f"Could not load HuSpaCy model: {e}") from e
 
-    def _mean_pooling(
-        self, model_output, attention_mask
-    ):
+    def _mean_pooling(self, model_output, attention_mask):
         """
         Apply mean pooling to token embeddings.
 
