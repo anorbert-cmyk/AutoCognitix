@@ -196,14 +196,34 @@ data/processed/
 *.csv
 *.parquet
 *.json
+*.zip
+*.txt
 !data/**/.gitkeep
 !data/dtc_codes/*.json
 !data/parts_mapping.json
+!data/epa/import_stats.json
+!data/epa/fuel_types_summary.json
+!data/nhtsa/complaints_flat/flat_import_stats.json
 !backend/data/dtc_codes_seed.json
 !frontend/package.json
 !frontend/package-lock.json
 !frontend/tsconfig.json
 !frontend/tsconfig.node.json
+
+# Large downloaded data files (keep locally, don't commit)
+data/nhtsa/flat_files/
+data/nhtsa/complaints_flat/*.json
+!data/nhtsa/complaints_flat/flat_import_stats.json
+data/epa/vehicles_complete.json
+data/epa/vehicles_by_year/
+data/epa/engine_specs.json
+data/vehicles/vehicles_master.json
+data/nhtsa/all_makes_complete.json
+data/nhtsa/all_models_complete.json
+data/nhtsa/models_by_make/
+data/dtc_codes/xinings_dtc/
+data/dtc_codes/fabiovila_obd/
+data/obdb/
 
 # ============================================
 # Temporary files

@@ -1,0 +1,107 @@
+{
+  "Regular": {
+    "count": 14722,
+    "unique_makes": 44,
+    "year_range": "2000-2026",
+    "avg_mpg_combined": 22.6,
+    "avg_co2_grams_per_mile": 422.3
+  },
+  "Premium": {
+    "count": 12835,
+    "unique_makes": 65,
+    "year_range": "2000-2026",
+    "avg_mpg_combined": 20.4,
+    "avg_co2_grams_per_mile": 456.3
+  },
+  "Gasoline or E85": {
+    "count": 1410,
+    "unique_makes": 22,
+    "year_range": "2000-2026",
+    "avg_mpg_combined": 17.8,
+    "avg_co2_grams_per_mile": 518.5
+  },
+  "Electricity": {
+    "count": 1319,
+    "unique_makes": 42,
+    "year_range": "2000-2026",
+    "avg_mpg_combined": 93.4,
+    "avg_co2_grams_per_mile": 0
+  },
+  "Diesel": {
+    "count": 475,
+    "unique_makes": 16,
+    "year_range": "2000-2026",
+    "avg_mpg_combined": 27.0,
+    "avg_co2_grams_per_mile": 389.8
+  },
+  "Premium and Electricity": {
+    "count": 245,
+    "unique_makes": 15,
+    "year_range": "2014-2026",
+    "avg_mpg_combined": 24.0,
+    "avg_co2_grams_per_mile": 212.6
+  },
+  "Midgrade": {
+    "count": 168,
+    "unique_makes": 4,
+    "year_range": "2011-2026",
+    "avg_mpg_combined": 17.7,
+    "avg_co2_grams_per_mile": 506.4
+  },
+  "Premium or E85": {
+    "count": 128,
+    "unique_makes": 6,
+    "year_range": "2004-2023",
+    "avg_mpg_combined": 20.1,
+    "avg_co2_grams_per_mile": 458.8
+  },
+  "Regular Gas and Electricity": {
+    "count": 128,
+    "unique_makes": 12,
+    "year_range": "2012-2026",
+    "avg_mpg_combined": 37.3,
+    "avg_co2_grams_per_mile": 117.1
+  },
+  "Premium Gas or Electricity": {
+    "count": 55,
+    "unique_makes": 6,
+    "year_range": "2011-2021",
+    "avg_mpg_combined": 26.4,
+    "avg_co2_grams_per_mile": 175.2
+  },
+  "CNG": {
+    "count": 47,
+    "unique_makes": 8,
+    "year_range": "2000-2015",
+    "avg_mpg_combined": 18.4,
+    "avg_co2_grams_per_mile": 453.5
+  },
+  "Hydrogen": {
+    "count": 39,
+    "unique_makes": 3,
+    "year_range": "2014-2025",
+    "avg_mpg_combined": 63.8,
+    "avg_co2_grams_per_mile": 0
+  },
+  "Gasoline or natural gas": {
+    "count": 20,
+    "unique_makes": 3,
+    "year_range": "2000-2016",
+    "avg_mpg_combined": 15.3,
+    "avg_co2_grams_per_mile": 639.0
+  },
+  "Gasoline or propane": {
+    "count": 8,
+    "unique_makes": 1,
+    "year_range": "2001-2004",
+    "avg_mpg_combined": 13.5,
+    "avg_co2_grams_per_mile": 666.5
+  },
+  "Regular Gas or Electricity": {
+    "count": 4,
+    "unique_makes": 1,
+    "year_range": "2016-2019",
+    "avg_mpg_combined": 42.0,
+    "avg_co2_grams_per_mile": 51.0
+  }
+}
