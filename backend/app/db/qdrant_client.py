@@ -5,7 +5,7 @@ This module provides a service class for interacting with Qdrant vector database
 supporting both local and cloud deployments with Hungarian error messages.
 """
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
@@ -112,9 +112,9 @@ class QdrantService:
     async def upsert_vectors(
         self,
         collection_name: str,
-        ids: list[str],
-        vectors: list[list[float]],
-        payloads: list[dict] | None = None,
+        ids: List[str],
+        vectors: List[List[float]],
+        payloads: Optional[List[dict]] = None,
     ) -> None:
         """
         Upsert vectors into a collection.
@@ -131,7 +131,7 @@ class QdrantService:
                 vector=vector,
                 payload=payload if payloads else {},
             )
-            for id_, vector, payload in zip(ids, vectors, payloads or [{}] * len(ids), strict=False)
+            for id_, vector, payload in zip(ids, vectors, payloads or [{}] * len(ids))
         ]
 
         self.client.upsert(
@@ -142,11 +142,11 @@ class QdrantService:
     async def search(
         self,
         collection_name: str,
-        query_vector: list[float],
+        query_vector: List[float],
         limit: int = 10,
-        filter_conditions: dict | None = None,
-        score_threshold: float | None = None,
-    ) -> list[dict]:
+        filter_conditions: Optional[dict] = None,
+        score_threshold: Optional[float] = None,
+    ) -> List[dict]:
         """
         Search for similar vectors.
 
@@ -214,11 +214,11 @@ class QdrantService:
 
     async def search_dtc(
         self,
-        query_vector: list[float],
+        query_vector: List[float],
         limit: int = 10,
-        category: str | None = None,
-        severity: str | None = None,
-    ) -> list[dict]:
+        category: Optional[str] = None,
+        severity: Optional[str] = None,
+    ) -> List[dict]:
         """
         Search for similar DTC codes.
 
@@ -246,10 +246,10 @@ class QdrantService:
 
     async def search_similar_symptoms(
         self,
-        query_vector: list[float],
+        query_vector: List[float],
         limit: int = 10,
-        vehicle_make: str | None = None,
-    ) -> list[dict]:
+        vehicle_make: Optional[str] = None,
+    ) -> List[dict]:
         """
         Search for similar symptom descriptions.
 
@@ -274,10 +274,10 @@ class QdrantService:
 
     async def search_components(
         self,
-        query_vector: list[float],
+        query_vector: List[float],
         limit: int = 10,
-        system: str | None = None,
-    ) -> list[dict]:
+        system: Optional[str] = None,
+    ) -> List[dict]:
         """
         Search for similar vehicle components.
 
@@ -302,10 +302,10 @@ class QdrantService:
 
     async def search_repairs(
         self,
-        query_vector: list[float],
+        query_vector: List[float],
         limit: int = 10,
-        difficulty: str | None = None,
-    ) -> list[dict]:
+        difficulty: Optional[str] = None,
+    ) -> List[dict]:
         """
         Search for similar repair procedures.
 
@@ -333,7 +333,7 @@ class QdrantService:
         self.client.delete_collection(collection_name=collection_name)
         logger.info(f"Deleted collection: {collection_name}")
 
-    def get_collection_info(self, collection_name: str) -> dict[str, Any]:
+    def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """Get information about a collection."""
         info = self.client.get_collection(collection_name=collection_name)
         return {

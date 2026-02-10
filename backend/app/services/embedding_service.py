@@ -18,7 +18,7 @@ import gc
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -326,7 +326,7 @@ class HungarianEmbeddingService:
 
         return " ".join(tokens)
 
-    def embed_text(self, text: str, preprocess: bool = False) -> list[float]:
+    def embed_text(self, text: str, preprocess: bool = False) -> List[float]:
         """
         Generate embedding for a single text.
 
@@ -375,11 +375,11 @@ class HungarianEmbeddingService:
 
     def embed_batch(
         self,
-        texts: list[str],
+        texts: List[str],
         preprocess: bool = False,
-        batch_size: int | None = None,
+        batch_size: Optional[int] = None,
         use_cache: bool = True,
-    ) -> list[list[float]]:
+    ) -> List[List[float]]:
         """
         Generate embeddings for multiple texts with optimized batch processing.
 
@@ -416,8 +416,8 @@ class HungarianEmbeddingService:
             texts = [self.preprocess_hungarian(text) for text in texts]
 
         # Try to get cached embeddings first
-        cached_embeddings: list[list[float] | None] = [None] * len(texts)
-        texts_to_embed: list[tuple[int, str]] = []
+        cached_embeddings: List[Optional[List[float]]] = [None] * len(texts)
+        texts_to_embed: List[Tuple[int, str]] = []
 
         if use_cache and self._cache_enabled:
             try:
@@ -443,7 +443,7 @@ class HungarianEmbeddingService:
             texts_to_embed = [(i, t) for i, t in enumerate(texts)]
 
         # Initialize result array
-        all_embeddings: list[list[float]] = [
+        all_embeddings: List[List[float]] = [
             [0.0] * settings.EMBEDDING_DIMENSION for _ in range(len(texts))
         ]
 
@@ -468,8 +468,8 @@ class HungarianEmbeddingService:
 
     def _embed_batch_internal(
         self,
-        texts_with_indices: list[tuple[int, str]],
-        results: list[list[float]],
+        texts_with_indices: List[Tuple[int, str]],
+        results: List[List[float]],
         batch_size: int,
     ) -> None:
         """
@@ -543,14 +543,14 @@ class HungarianEmbeddingService:
             embeddings = embeddings.float().cpu().tolist()
 
             # Assign to correct positions
-            for orig_idx, embedding in zip(indices, embeddings, strict=False):
+            for orig_idx, embedding in zip(indices, embeddings):
                 results[orig_idx] = embedding
 
             logger.debug(f"Batch {i // batch_size + 1}: {len(batch_texts)} texts embedded")
 
     def get_similar_texts(
-        self, query: str, candidates: list[str], top_k: int = 5, preprocess: bool = False
-    ) -> list[tuple[str, float]]:
+        self, query: str, candidates: List[str], top_k: int = 5, preprocess: bool = False
+    ) -> List[Tuple[str, float]]:
         """
         Find most similar texts to a query using cosine similarity.
 
@@ -649,7 +649,7 @@ class HungarianEmbeddingService:
         text: str,
         preprocess: bool = False,
         use_cache: bool = True,
-    ) -> list[float]:
+    ) -> List[float]:
         """
         Async version of embed_text for use in async contexts.
 
@@ -695,11 +695,11 @@ class HungarianEmbeddingService:
 
     async def embed_batch_async(
         self,
-        texts: list[str],
+        texts: List[str],
         preprocess: bool = False,
-        batch_size: int | None = None,
+        batch_size: Optional[int] = None,
         use_cache: bool = True,
-    ) -> list[list[float]]:
+    ) -> List[List[float]]:
         """
         Async version of embed_batch with cache integration.
 
@@ -716,8 +716,8 @@ class HungarianEmbeddingService:
             return []
 
         # Check cache for all texts
-        results: list[list[float] | None] = [None] * len(texts)
-        texts_to_embed: list[tuple[int, str]] = []
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        texts_to_embed: List[Tuple[int, str]] = []
 
         if use_cache and self._cache_enabled:
             try:
@@ -726,7 +726,7 @@ class HungarianEmbeddingService:
                 cache = await get_cache_service()
                 cached = await cache.get_embeddings_batch(texts)
 
-                for i, (text, emb) in enumerate(zip(texts, cached, strict=False)):
+                for i, (text, emb) in enumerate(zip(texts, cached)):
                     if emb is not None:
                         results[i] = emb
                     else:
@@ -759,7 +759,7 @@ class HungarianEmbeddingService:
             )
 
             # Fill in results
-            for idx, emb in zip(uncached_indices, embeddings, strict=False):
+            for idx, emb in zip(uncached_indices, embeddings):
                 results[idx] = emb
 
             # Cache new embeddings
@@ -768,7 +768,7 @@ class HungarianEmbeddingService:
                     from app.db.redis_cache import get_cache_service
 
                     cache = await get_cache_service()
-                    for text, emb in zip(uncached_texts, embeddings, strict=False):
+                    for text, emb in zip(uncached_texts, embeddings):
                         await cache.set_embedding(text, emb)
                 except Exception:
                     pass
@@ -785,7 +785,7 @@ class HungarianEmbeddingService:
 
 
 # Global service instance
-_embedding_service: HungarianEmbeddingService | None = None
+_embedding_service: Optional[HungarianEmbeddingService] = None
 
 
 def get_embedding_service() -> HungarianEmbeddingService:
@@ -802,7 +802,7 @@ def get_embedding_service() -> HungarianEmbeddingService:
 
 
 # Convenience functions for direct usage
-def embed_text(text: str, preprocess: bool = False) -> list[float]:
+def embed_text(text: str, preprocess: bool = False) -> List[float]:
     """
     Generate embedding for a single text.
 
@@ -817,8 +817,8 @@ def embed_text(text: str, preprocess: bool = False) -> list[float]:
 
 
 def embed_batch(
-    texts: list[str], preprocess: bool = False, batch_size: int = 32
-) -> list[list[float]]:
+    texts: List[str], preprocess: bool = False, batch_size: int = 32
+) -> List[List[float]]:
     """
     Generate embeddings for multiple texts with batch processing.
 
@@ -847,8 +847,8 @@ def preprocess_hungarian(text: str) -> str:
 
 
 def get_similar_texts(
-    query: str, candidates: list[str], top_k: int = 5, preprocess: bool = False
-) -> list[tuple[str, float]]:
+    query: str, candidates: List[str], top_k: int = 5, preprocess: bool = False
+) -> List[Tuple[str, float]]:
     """
     Find most similar texts to a query using cosine similarity.
 
@@ -873,7 +873,7 @@ async def embed_text_async(
     text: str,
     preprocess: bool = False,
     use_cache: bool = True,
-) -> list[float]:
+) -> List[float]:
     """
     Async embedding generation for a single text.
 
@@ -889,11 +889,11 @@ async def embed_text_async(
 
 
 async def embed_batch_async(
-    texts: list[str],
+    texts: List[str],
     preprocess: bool = False,
-    batch_size: int | None = None,
+    batch_size: Optional[int] = None,
     use_cache: bool = True,
-) -> list[list[float]]:
+) -> List[List[float]]:
     """
     Async batch embedding generation.
 

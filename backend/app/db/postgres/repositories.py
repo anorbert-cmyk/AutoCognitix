@@ -13,7 +13,7 @@ Performance Optimizations:
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
@@ -50,12 +50,12 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
         self.db = db
 
-    async def get(self, id: str | int | UUID) -> ModelType | None:
+    async def get(self, id: Union[str, int, UUID]) -> Optional[ModelType]:
         """Get a single record by ID."""
         result = await self.db.execute(select(self.model).where(self.model.id == id))  # type: ignore[attr-defined]
         return result.scalar_one_or_none()
 
-    async def get_all(self, skip: int = 0, limit: int = 100) -> list[ModelType]:
+    async def get_all(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
         """Get all records with pagination."""
         result = await self.db.execute(select(self.model).offset(skip).limit(limit))
         return list(result.scalars().all())
@@ -68,7 +68,7 @@ class BaseRepository(Generic[ModelType]):
         await self.db.refresh(db_obj)
         return db_obj
 
-    async def update(self, id: str | int | UUID, obj_in: dict) -> ModelType | None:
+    async def update(self, id: Union[str, int, UUID], obj_in: dict) -> Optional[ModelType]:
         """Update an existing record."""
         db_obj = await self.get(id)
         if db_obj:
@@ -78,7 +78,7 @@ class BaseRepository(Generic[ModelType]):
             await self.db.refresh(db_obj)
         return db_obj
 
-    async def delete(self, id: str | int | UUID) -> bool:
+    async def delete(self, id: Union[str, int, UUID]) -> bool:
         """Delete a record."""
         db_obj = await self.get(id)
         if db_obj:
@@ -99,7 +99,7 @@ class UserRepository(BaseRepository[User]):
         """Initialize the User repository."""
         super().__init__(User, db)
 
-    async def get_by_email(self, email: str) -> User | None:
+    async def get_by_email(self, email: str) -> Optional[User]:
         """
         Get user by email address.
 
@@ -225,7 +225,7 @@ class UserRepository(BaseRepository[User]):
         self,
         skip: int = 0,
         limit: int = 100,
-    ) -> list[User]:
+    ) -> List[User]:
         """
         Get all active users with pagination.
 
@@ -272,7 +272,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         """Initialize the DTC code repository."""
         super().__init__(DTCCode, db)
 
-    async def get_by_code(self, code: str) -> DTCCode | None:
+    async def get_by_code(self, code: str) -> Optional[DTCCode]:
         """
         Get DTC by code string.
 
@@ -288,9 +288,9 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
     async def search(
         self,
         query: str,
-        category: str | None = None,
+        category: Optional[str] = None,
         limit: int = 20,
-    ) -> list[DTCCode]:
+    ) -> List[DTCCode]:
         """
         Search DTC codes by query string.
 
@@ -317,7 +317,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_related_codes(self, code: str) -> list[DTCCode]:
+    async def get_related_codes(self, code: str) -> List[DTCCode]:
         """
         Get DTC codes related to the specified code.
 
@@ -341,7 +341,7 @@ class VehicleMakeRepository(BaseRepository[VehicleMake]):
     def __init__(self, db: AsyncSession):
         super().__init__(VehicleMake, db)
 
-    async def search(self, query: str) -> list[VehicleMake]:
+    async def search(self, query: str) -> List[VehicleMake]:
         """Search makes by name."""
         result = await self.db.execute(
             select(VehicleMake).where(VehicleMake.name.ilike(f"%{query}%"))
@@ -358,8 +358,8 @@ class VehicleModelRepository(BaseRepository[VehicleModel]):
     async def get_by_make(
         self,
         make_id: str,
-        year: int | None = None,
-    ) -> list[VehicleModel]:
+        year: Optional[int] = None,
+    ) -> List[VehicleModel]:
         """Get models by make ID, optionally filtered by year."""
         stmt = select(VehicleModel).where(VehicleModel.make_id == make_id)
 
@@ -384,7 +384,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         user_id: UUID,
         skip: int = 0,
         limit: int = 10,
-    ) -> list[DiagnosisSession]:
+    ) -> List[DiagnosisSession]:
         """Get diagnosis history for a user."""
         result = await self.db.execute(
             select(DiagnosisSession)
@@ -403,15 +403,15 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
     async def get_filtered_history(
         self,
         user_id: UUID,
-        vehicle_make: str | None = None,
-        vehicle_model: str | None = None,
-        vehicle_year: int | None = None,
-        dtc_code: str | None = None,
-        date_from: datetime | None = None,
-        date_to: datetime | None = None,
+        vehicle_make: Optional[str] = None,
+        vehicle_model: Optional[str] = None,
+        vehicle_year: Optional[int] = None,
+        dtc_code: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 10,
-    ) -> tuple[list[DiagnosisSession], int]:
+    ) -> Tuple[List[DiagnosisSession], int]:
         """
         Get filtered diagnosis history with total count.
 
@@ -432,7 +432,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             Tuple of (items, total_count)
         """
         # Build base query
-        conditions: list[ColumnElement[bool]] = [
+        conditions: List[ColumnElement[bool]] = [
             DiagnosisSession.user_id == user_id,
             DiagnosisSession.is_deleted.is_(False),
         ]
@@ -476,7 +476,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
     async def soft_delete(
         self,
         diagnosis_id: UUID,
-        user_id: UUID | None = None,
+        user_id: Optional[UUID] = None,
     ) -> bool:
         """
         Soft delete a diagnosis session.
@@ -503,7 +503,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         await self.db.flush()
         return True
 
-    async def get_user_stats(self, user_id: UUID) -> dict[str, Any]:
+    async def get_user_stats(self, user_id: UUID) -> Dict[str, Any]:
         """
         Get diagnosis statistics for a user.
 
@@ -579,9 +579,9 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
 
     async def get_dtc_frequency(
         self,
-        user_id: UUID | None = None,
+        user_id: Optional[UUID] = None,
         limit: int = 10,
-    ) -> list[dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
         """
         Get most common DTC codes from diagnosis history.
 
@@ -595,7 +595,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             List of {code, count} dictionaries
         """
         # Use unnest to expand the dtc_codes array and count occurrences
-        conditions: list[ColumnElement[bool]] = [DiagnosisSession.is_deleted.is_(False)]
+        conditions: List[ColumnElement[bool]] = [DiagnosisSession.is_deleted.is_(False)]
         if user_id:
             conditions.append(DiagnosisSession.user_id == user_id)
 
@@ -635,7 +635,7 @@ class DTCCodeBatchRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_batch(self, codes: list[str]) -> dict[str, DTCCode]:
+    async def get_batch(self, codes: List[str]) -> Dict[str, DTCCode]:
         """
         Get multiple DTC codes in a single query.
 
@@ -657,7 +657,7 @@ class DTCCodeBatchRepository:
         self,
         query: str,
         limit: int = 20,
-    ) -> list[DTCCode]:
+    ) -> List[DTCCode]:
         """
         Full-text search using PostgreSQL FTS index.
 
@@ -686,9 +686,9 @@ class DTCCodeBatchRepository:
 
     async def get_by_symptoms(
         self,
-        symptoms: list[str],
+        symptoms: List[str],
         limit: int = 20,
-    ) -> list[DTCCode]:
+    ) -> List[DTCCode]:
         """
         Find DTC codes that match given symptoms.
 

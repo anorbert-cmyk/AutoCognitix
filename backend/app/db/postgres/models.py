@@ -650,3 +650,38 @@ class NHTSAVehicleSyncTracking(Base):
 
     # Extra data (stored as JSONB)
     sync_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+
+
+# =============================================================================
+# EPA FuelEconomy.gov Models (from migration 012)
+# =============================================================================
+
+
+class EPAVehicle(Base):
+    """EPA FuelEconomy.gov vehicle specifications."""
+
+    __tablename__ = "epa_vehicles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # EPA id from source
+    make: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
+    base_model: Mapped[Optional[str]] = mapped_column(String(200))
+    model_year: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    vehicle_class: Mapped[Optional[str]] = mapped_column(String(100))
+    drive_type: Mapped[Optional[str]] = mapped_column(String(100))
+    transmission: Mapped[Optional[str]] = mapped_column(String(100))
+    cylinders: Mapped[Optional[int]] = mapped_column(Integer)
+    displacement_liters: Mapped[Optional[float]] = mapped_column(Float)
+    engine_description: Mapped[Optional[str]] = mapped_column(String(300))
+    fuel_type: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+    fuel_category: Mapped[Optional[str]] = mapped_column(String(100))
+    mpg_city: Mapped[Optional[int]] = mapped_column(Integer)
+    mpg_highway: Mapped[Optional[int]] = mapped_column(Integer)
+    mpg_combined: Mapped[Optional[int]] = mapped_column(Integer)
+    co2_grams_per_mile: Mapped[Optional[float]] = mapped_column(Float)
+    ev_motor: Mapped[Optional[str]] = mapped_column(String(200))
+    range_miles: Mapped[Optional[int]] = mapped_column(Integer)
+    has_turbo: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_supercharger: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

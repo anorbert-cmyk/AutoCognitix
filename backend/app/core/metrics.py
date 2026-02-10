@@ -27,7 +27,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict
 
 import psutil
 from fastapi import Request, Response
@@ -456,7 +456,7 @@ def track_embedding_generation(
 @contextmanager
 def track_vector_search(
     collection: str,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Context manager for tracking vector search metrics.
 
@@ -469,7 +469,7 @@ def track_vector_search(
             ctx["results_count"] = len(results)
     """
     start_time = time.time()
-    context: dict[str, Any] = {"results_count": 0}
+    context: Dict[str, Any] = {"results_count": 0}
     success = True
 
     try:
@@ -526,7 +526,7 @@ def track_diagnosis_request(
 def track_external_api_call(
     service: str,
     endpoint: str = "",
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Context manager for tracking external API call metrics.
 
@@ -540,7 +540,7 @@ def track_external_api_call(
             ctx["status_code"] = response.status_code
     """
     start_time = time.time()
-    context: dict[str, Any] = {"status_code": 0}
+    context: Dict[str, Any] = {"status_code": 0}
 
     try:
         yield context
@@ -566,7 +566,7 @@ def track_external_api_call(
 def track_llm_request(
     provider: str,
     model: str,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Context manager for tracking LLM request metrics.
 
@@ -581,7 +581,7 @@ def track_llm_request(
             ctx["output_tokens"] = response.usage.output_tokens
     """
     start_time = time.time()
-    context: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
+    context: Dict[str, Any] = {"input_tokens": 0, "output_tokens": 0}
     success = True
 
     try:
@@ -847,7 +847,7 @@ async def generate_metrics_response() -> Response:
     )
 
 
-def get_metrics_summary() -> dict[str, Any]:
+def get_metrics_summary() -> Dict[str, Any]:
     """
     Get human-readable metrics summary.
 

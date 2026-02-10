@@ -18,7 +18,7 @@ Author: AutoCognitix Team
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -62,8 +62,8 @@ class LLMResponse:
     content: str
     model: str
     provider: LLMProviderType
-    usage: dict[str, int] = field(default_factory=dict)
-    finish_reason: str | None = None
+    usage: Dict[str, int] = field(default_factory=dict)
+    finish_reason: Optional[str] = None
     raw_response: Any = None
 
     @property
@@ -87,7 +87,7 @@ class LLMStreamChunk:
     model: str
     provider: LLMProviderType
     is_final: bool = False
-    finish_reason: str | None = None
+    finish_reason: Optional[str] = None
 
 
 @dataclass
@@ -97,7 +97,7 @@ class LLMConfig:
     temperature: float = 0.3
     max_tokens: int = 4096
     top_p: float = 1.0
-    stop_sequences: list[str] = field(default_factory=list)
+    stop_sequences: List[str] = field(default_factory=list)
     stream: bool = False
 
 
@@ -109,7 +109,7 @@ class LLMConfig:
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
 
-    def __init__(self, config: LLMConfig | None = None):
+    def __init__(self, config: Optional[LLMConfig] = None):
         self.config = config or LLMConfig()
         self._initialized = False
 
@@ -133,16 +133,16 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     async def generate(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """Generate a response from the LLM."""
         pass
 
     async def generate_stream(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ):
         """
         Generate a streaming response from the LLM.
@@ -171,7 +171,7 @@ class BaseLLMProvider(ABC):
         self,
         system_prompt: str,
         user_prompt: str,
-        config: LLMConfig | None = None,
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """
         Convenience method to generate with system and user prompts.
@@ -194,7 +194,7 @@ class BaseLLMProvider(ABC):
         self,
         system_prompt: str,
         user_prompt: str,
-        config: LLMConfig | None = None,
+        config: Optional[LLMConfig] = None,
     ):
         """
         Convenience method to generate streaming response with system and user prompts.
@@ -223,7 +223,7 @@ class BaseLLMProvider(ABC):
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude provider."""
 
-    def __init__(self, config: LLMConfig | None = None):
+    def __init__(self, config: Optional[LLMConfig] = None):
         super().__init__(config)
         self._client = None
 
@@ -252,8 +252,8 @@ class AnthropicProvider(BaseLLMProvider):
 
     async def generate(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """Generate response using Anthropic Claude."""
         cfg = config or self.config
@@ -306,8 +306,8 @@ class AnthropicProvider(BaseLLMProvider):
 
     async def generate_stream(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ):
         """Generate streaming response using Anthropic Claude."""
         cfg = config or self.config
@@ -368,7 +368,7 @@ class AnthropicProvider(BaseLLMProvider):
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider."""
 
-    def __init__(self, config: LLMConfig | None = None):
+    def __init__(self, config: Optional[LLMConfig] = None):
         super().__init__(config)
         self._client = None
 
@@ -397,8 +397,8 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def generate(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """Generate response using OpenAI GPT."""
         cfg = config or self.config
@@ -436,8 +436,8 @@ class OpenAIProvider(BaseLLMProvider):
 
     async def generate_stream(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ):
         """Generate streaming response using OpenAI GPT."""
         cfg = config or self.config
@@ -487,7 +487,7 @@ class OpenAIProvider(BaseLLMProvider):
 class OllamaProvider(BaseLLMProvider):
     """Ollama local LLM provider."""
 
-    def __init__(self, config: LLMConfig | None = None):
+    def __init__(self, config: Optional[LLMConfig] = None):
         super().__init__(config)
         self._client = None
 
@@ -511,8 +511,8 @@ class OllamaProvider(BaseLLMProvider):
 
     async def generate(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """Generate response using Ollama."""
         cfg = config or self.config
@@ -587,8 +587,8 @@ class RuleBasedProvider(BaseLLMProvider):
 
     async def generate(
         self,
-        messages: list[LLMMessage],
-        config: LLMConfig | None = None,
+        messages: List[LLMMessage],
+        config: Optional[LLMConfig] = None,
     ) -> LLMResponse:
         """
         Generate a response using rule-based logic.
@@ -625,20 +625,20 @@ class RuleBasedProvider(BaseLLMProvider):
 class LLMProviderFactory:
     """Factory for creating and managing LLM providers."""
 
-    _providers: dict[LLMProviderType, type[BaseLLMProvider]] = {
+    _providers: Dict[LLMProviderType, type[BaseLLMProvider]] = {
         LLMProviderType.ANTHROPIC: AnthropicProvider,
         LLMProviderType.OPENAI: OpenAIProvider,
         LLMProviderType.OLLAMA: OllamaProvider,
         LLMProviderType.RULE_BASED: RuleBasedProvider,
     }
 
-    _instances: dict[LLMProviderType, BaseLLMProvider] = {}
+    _instances: Dict[LLMProviderType, BaseLLMProvider] = {}
 
     @classmethod
     def get_provider(
         cls,
-        provider_type: LLMProviderType | None = None,
-        config: LLMConfig | None = None,
+        provider_type: Optional[LLMProviderType] = None,
+        config: Optional[LLMConfig] = None,
     ) -> BaseLLMProvider:
         """
         Get or create a provider instance.
@@ -699,7 +699,7 @@ class LLMProviderFactory:
         return LLMProviderType.RULE_BASED
 
     @classmethod
-    def get_available_providers(cls) -> list[LLMProviderType]:
+    def get_available_providers(cls) -> List[LLMProviderType]:
         """Get list of all available providers."""
         available = []
         for provider_type, provider_class in cls._providers.items():
@@ -718,12 +718,12 @@ class LLMProviderFactory:
 # Convenience Functions
 # =============================================================================
 
-_default_provider: BaseLLMProvider | None = None
+_default_provider: Optional[BaseLLMProvider] = None
 
 
 def get_llm_provider(
-    provider_type: LLMProviderType | None = None,
-    config: LLMConfig | None = None,
+    provider_type: Optional[LLMProviderType] = None,
+    config: Optional[LLMConfig] = None,
 ) -> BaseLLMProvider:
     """
     Get an LLM provider instance.
@@ -741,8 +741,8 @@ def get_llm_provider(
 async def generate_response(
     system_prompt: str,
     user_prompt: str,
-    provider_type: LLMProviderType | None = None,
-    config: LLMConfig | None = None,
+    provider_type: Optional[LLMProviderType] = None,
+    config: Optional[LLMConfig] = None,
 ) -> LLMResponse:
     """
     Convenience function to generate a response.
@@ -766,7 +766,7 @@ def is_llm_available() -> bool:
     return any(p != LLMProviderType.RULE_BASED for p in available)
 
 
-def get_current_provider_info() -> dict[str, Any]:
+def get_current_provider_info() -> Dict[str, Any]:
     """Get information about the current LLM provider."""
     provider = get_llm_provider()
     return {

@@ -20,9 +20,9 @@ import traceback
 import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, Dict, List, Optional, TypeVar
 
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -47,7 +47,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 class ErrorContext:
     """Thread-safe storage for error context enrichment."""
 
-    _context: dict[str, Any] = {}
+    _context: Dict[str, Any] = {}
 
     @classmethod
     def set(cls, key: str, value: Any) -> None:
@@ -65,12 +65,12 @@ class ErrorContext:
         cls._context.clear()
 
     @classmethod
-    def get_all(cls) -> dict[str, Any]:
+    def get_all(cls) -> Dict[str, Any]:
         """Get all context values."""
         return cls._context.copy()
 
     @classmethod
-    def update(cls, data: dict[str, Any]) -> None:
+    def update(cls, data: Dict[str, Any]) -> None:
         """Update context with multiple values."""
         cls._context.update(data)
 
@@ -99,14 +99,14 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
 
     def add_fields(
         self,
-        log_record: dict[str, Any],
+        log_record: Dict[str, Any],
         record: logging.LogRecord,
-        message_dict: dict[str, Any],
+        message_dict: Dict[str, Any],
     ) -> None:
         super().add_fields(log_record, record, message_dict)
 
         # Timestamp in RFC 3339 format with timezone
-        log_record["timestamp"] = datetime.now(UTC).isoformat()
+        log_record["timestamp"] = datetime.now(timezone.utc).isoformat()
         log_record["@timestamp"] = log_record["timestamp"]  # ELK compatibility
 
         # Log level with severity
@@ -200,9 +200,9 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
         # Remove None values for cleaner output
         self._remove_none_values(log_record)
 
-    def _extract_stack_frames(self, tb, limit: int = 10) -> list[dict[str, Any]]:
+    def _extract_stack_frames(self, tb, limit: int = 10) -> List[Dict[str, Any]]:
         """Extract structured stack frame information."""
-        frames: list[dict[str, Any]] = []
+        frames: List[Dict[str, Any]] = []
         if tb is None:
             return frames
 
@@ -217,7 +217,7 @@ class StructuredJsonFormatter(jsonlogger.JsonFormatter):
             )
         return frames
 
-    def _remove_none_values(self, d: dict[str, Any]) -> None:
+    def _remove_none_values(self, d: Dict[str, Any]) -> None:
         """Recursively remove None values from dictionary."""
         keys_to_remove = []
         for key, value in d.items():
@@ -486,7 +486,7 @@ class PerformanceLogger:
         self.warn_threshold_ms = warn_threshold_ms
         self.error_threshold_ms = error_threshold_ms
         self.extra_fields = extra_fields
-        self.start_time: float | None = None
+        self.start_time: Optional[float] = None
 
     def __enter__(self) -> "PerformanceLogger":
         self.start_time = time.time()
@@ -562,7 +562,7 @@ class LogLevel:
 
 
 # Logger configuration by module
-LOGGER_CONFIG: dict[str, int] = {
+LOGGER_CONFIG: Dict[str, int] = {
     "uvicorn": logging.INFO,
     "uvicorn.access": logging.WARNING,
     "uvicorn.error": logging.ERROR,
@@ -689,7 +689,7 @@ def log_database_operation(
     duration_ms: float,
     rows_affected: int = 0,
     success: bool = True,
-    error: str | None = None,
+    error: Optional[str] = None,
 ) -> None:
     """
     Log a database operation with standard fields.
@@ -729,7 +729,7 @@ def log_external_api_call(
     status_code: int,
     duration_ms: float,
     success: bool = True,
-    error: str | None = None,
+    error: Optional[str] = None,
 ) -> None:
     """
     Log an external API call with standard fields.
@@ -794,7 +794,7 @@ def log_with_context(
     logger: logging.Logger,
     level: int,
     message: str,
-    context: dict[str, Any],
+    context: Dict[str, Any],
     exc_info: bool = False,
 ) -> None:
     """
@@ -836,10 +836,10 @@ class SpanContext:
     def __init__(self, operation_name: str, **attributes: Any):
         self.operation_name = operation_name
         self.attributes = attributes
-        self.start_time: float | None = None
-        self.old_span_id: str | None = None
-        self.old_parent_span_id: str | None = None
-        self.span_id: str | None = None
+        self.start_time: Optional[float] = None
+        self.old_span_id: Optional[str] = None
+        self.old_parent_span_id: Optional[str] = None
+        self.span_id: Optional[str] = None
         self.logger = get_logger("tracing")
 
     def __enter__(self) -> "SpanContext":
@@ -905,7 +905,7 @@ def enrich_error_context(**kwargs: Any) -> None:
     ErrorContext.update(kwargs)
 
 
-def get_current_trace_context() -> dict[str, str | None]:
+def get_current_trace_context() -> Dict[str, Optional[str]]:
     """
     Get the current distributed tracing context.
 
@@ -921,7 +921,7 @@ def get_current_trace_context() -> dict[str, str | None]:
     }
 
 
-def inject_trace_headers(headers: dict[str, str]) -> dict[str, str]:
+def inject_trace_headers(headers: Dict[str, str]) -> Dict[str, str]:
     """
     Inject trace context into outgoing request headers.
 

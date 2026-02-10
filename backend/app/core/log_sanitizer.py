@@ -8,7 +8,7 @@ Security Issue: CWE-117 (Improper Output Neutralization for Logs)
 """
 
 import re
-from typing import Any
+from typing import Any, Dict
 
 
 def sanitize_log(value: Any, max_length: int = 200) -> str:
@@ -85,7 +85,7 @@ def sanitize_exception(exc: BaseException, max_length: int = 500) -> str:
     return sanitize_log(str(exc), max_length)
 
 
-def sanitize_dict_values(data: dict[str, Any], max_length: int = 200) -> dict[str, str]:
+def sanitize_dict_values(data: Dict[str, Any], max_length: int = 200) -> Dict[str, str]:
     """Sanitize all values in a dictionary for logging.
 
     Useful when logging request parameters or other dictionaries

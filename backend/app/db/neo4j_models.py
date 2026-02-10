@@ -3,7 +3,7 @@ Neo4j graph database models using Neomodel.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Dict, Optional
 
 from neomodel import (
     ArrayProperty,
@@ -306,7 +306,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     if not dtc:
         return {}
 
-    result: dict[str, Any] = {
+    result: Dict[str, Any] = {
         "dtc": {
             "code": dtc.code,
             "description": dtc.description_hu or dtc.description_en,
@@ -371,7 +371,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     return result
 
 
-async def get_vehicle_common_issues(make: str, model: str, year: int | None = None) -> dict:
+async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] = None) -> dict:
     """
     Get common DTC codes and issues for a specific vehicle.
 
@@ -387,7 +387,7 @@ async def get_vehicle_common_issues(make: str, model: str, year: int | None = No
     if not vehicle:
         return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
 
-    result: dict[str, Any] = {
+    result: Dict[str, Any] = {
         "vehicle": {
             "make": vehicle.make,
             "model": vehicle.model,
@@ -466,7 +466,7 @@ async def get_engine_common_issues(engine_code: str) -> dict:
     if not engine:
         return {"engine": None, "common_dtcs": [], "vehicles_using": []}
 
-    result: dict[str, Any] = {
+    result: Dict[str, Any] = {
         "engine": {
             "code": engine.code,
             "name": engine.name,

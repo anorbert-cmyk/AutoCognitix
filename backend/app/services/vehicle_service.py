@@ -6,7 +6,7 @@ vehicle_makes/vehicle_models tables if Neo4j returns empty results.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neomodel import db as neomodel_db
 from sqlalchemy import func, select
@@ -28,10 +28,10 @@ class VehicleService:
 
     async def get_all_makes(
         self,
-        search: str | None = None,
+        search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get all vehicle makes. Tries Neo4j first, falls back to PostgreSQL."""
         try:
             makes, total = await self._get_makes_neo4j(search, limit, offset)
@@ -44,10 +44,10 @@ class VehicleService:
 
     async def _get_makes_neo4j(
         self,
-        search: str | None,
+        search: Optional[str],
         limit: int,
         offset: int,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get makes from Neo4j VehicleNode."""
         if search:
             query = """
@@ -103,10 +103,10 @@ class VehicleService:
 
     async def _get_makes_postgres(
         self,
-        search: str | None,
+        search: Optional[str],
         limit: int,
         offset: int,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get makes from PostgreSQL vehicle_makes table."""
         async with async_session_maker() as session:
             stmt = select(VehicleMake)
@@ -131,10 +131,10 @@ class VehicleService:
     async def get_models_for_make(
         self,
         make: str,
-        search: str | None = None,
+        search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get models for a make. Tries Neo4j first, falls back to PostgreSQL."""
         try:
             models, total = await self._get_models_neo4j(make, search, limit, offset)
@@ -148,10 +148,10 @@ class VehicleService:
     async def _get_models_neo4j(
         self,
         make: str,
-        search: str | None,
+        search: Optional[str],
         limit: int,
         offset: int,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get models from Neo4j VehicleNode."""
         if search:
             query = """
@@ -230,10 +230,10 @@ class VehicleService:
     async def _get_models_postgres(
         self,
         make: str,
-        search: str | None,
+        search: Optional[str],
         limit: int,
         offset: int,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """Get models from PostgreSQL vehicle_models table."""
         make_id = make.lower().replace(" ", "_").replace("-", "_")
 
@@ -262,7 +262,7 @@ class VehicleService:
             count_result = await session.execute(count_stmt)
 
             total = count_result.scalar() or 0
-            models: list[dict[str, Any]] = [
+            models: List[Dict[str, Any]] = [
                 {
                     "id": m.id,
                     "name": m.name,
@@ -280,7 +280,7 @@ class VehicleService:
         self,
         make: str,
         model: str,
-    ) -> list[int]:
+    ) -> List[int]:
         """Get all available years for a specific make and model."""
         query = """
             MATCH (v:VehicleNode)
@@ -295,7 +295,7 @@ class VehicleService:
         except Exception:
             results = []
 
-        years: set[int] = set()
+        years: Set[int] = set()
         current_year = 2026
 
         for row in results:
@@ -326,7 +326,7 @@ class VehicleService:
     async def get_vehicle_by_id(
         self,
         vehicle_id: str,
-    ) -> dict[str, Any] | None:
+    ) -> Optional[Dict[str, Any]]:
         """Get vehicle details by Neo4j UID."""
         query = """
             MATCH (v:VehicleNode {uid: $vehicle_id})
@@ -346,8 +346,8 @@ class VehicleService:
         self,
         make: str,
         model: str,
-        year: int | None = None,
-    ) -> dict[str, Any] | None:
+        year: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Find a vehicle by make, model, and optional year."""
         if year:
             query = """
@@ -382,8 +382,8 @@ class VehicleService:
         self,
         make: str,
         model: str,
-        year: int | None = None,
-    ) -> list[dict[str, Any]]:
+        year: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Get common DTC issues for a vehicle from Neo4j."""
         if year:
             query = """
@@ -430,7 +430,7 @@ class VehicleService:
             for row in results
         ]
 
-    def _node_to_dict(self, node: Any) -> dict[str, Any]:
+    def _node_to_dict(self, node: Any) -> Dict[str, Any]:
         """Convert a Neo4j node to a dictionary."""
         if hasattr(node, "__dict__"):
             return {
@@ -469,7 +469,7 @@ class VehicleService:
         return {}
 
     @staticmethod
-    def _get_country_for_make(make: str) -> str | None:
+    def _get_country_for_make(make: str) -> Optional[str]:
         """Get country of origin for a vehicle make."""
         make_countries = {
             "volkswagen": "Germany",
@@ -545,7 +545,7 @@ class VehicleService:
 
 
 # Singleton instance
-_vehicle_service: VehicleService | None = None
+_vehicle_service: Optional[VehicleService] = None
 
 
 def get_vehicle_service() -> VehicleService:

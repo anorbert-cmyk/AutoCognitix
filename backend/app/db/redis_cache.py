@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional
+from typing import Any, List, Optional, Tuple
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
@@ -101,7 +101,7 @@ class RedisCacheService:
     """
 
     _instance: Optional["RedisCacheService"] = None
-    _pool: ConnectionPool | None = None
+    _pool: Optional[ConnectionPool] = None
     _initialized: bool = False
 
     def __new__(cls) -> "RedisCacheService":
@@ -117,12 +117,12 @@ class RedisCacheService:
             return
 
         self._initialized = True
-        self._client: redis.Redis | None = None
+        self._client: Optional[redis.Redis] = None
         self._connected = False
         self._circuit_open = False
         self._failure_count = 0
         self._max_failures = 5
-        self._reset_task: asyncio.Task | None = None
+        self._reset_task: Optional[asyncio.Task] = None
 
         logger.info("RedisCacheService initialized")
 
@@ -209,7 +209,7 @@ class RedisCacheService:
     # Core Cache Operations
     # =========================================================================
 
-    async def get(self, key: str) -> Any | None:
+    async def get(self, key: str) -> Optional[Any]:
         """
         Get a value from cache.
 
@@ -324,7 +324,7 @@ class RedisCacheService:
     # Batch Operations
     # =========================================================================
 
-    async def mget(self, keys: list[str]) -> list[Any | None]:
+    async def mget(self, keys: List[str]) -> List[Optional[Any]]:
         """
         Get multiple values at once.
 
@@ -382,7 +382,7 @@ class RedisCacheService:
     # DTC Code Caching
     # =========================================================================
 
-    async def get_dtc_code(self, code: str) -> dict | None:
+    async def get_dtc_code(self, code: str) -> Optional[dict]:
         """Get a DTC code from cache."""
         key = f"{CachePrefix.DTC_CODE}{code.upper()}"
         return await self.get(key)
@@ -395,9 +395,9 @@ class RedisCacheService:
     async def get_dtc_search_results(
         self,
         query: str,
-        category: str | None = None,
+        category: Optional[str] = None,
         limit: int = 20,
-    ) -> list[dict] | None:
+    ) -> Optional[List[dict]]:
         """Get cached DTC search results."""
         key = self._make_search_key(query, category, limit)
         return await self.get(key)
@@ -405,8 +405,8 @@ class RedisCacheService:
     async def set_dtc_search_results(
         self,
         query: str,
-        results: list[dict],
-        category: str | None = None,
+        results: List[dict],
+        category: Optional[str] = None,
         limit: int = 20,
     ) -> bool:
         """Cache DTC search results."""
@@ -416,7 +416,7 @@ class RedisCacheService:
     def _make_search_key(
         self,
         query: str,
-        category: str | None,
+        category: Optional[str],
         limit: int,
     ) -> str:
         """Generate a consistent cache key for search queries."""
@@ -424,12 +424,12 @@ class RedisCacheService:
         hash_val = hashlib.md5(params.encode()).hexdigest()[:12]
         return f"{CachePrefix.DTC_SEARCH}{hash_val}"
 
-    async def get_related_codes(self, code: str) -> list[dict] | None:
+    async def get_related_codes(self, code: str) -> Optional[List[dict]]:
         """Get cached related DTC codes."""
         key = f"{CachePrefix.DTC_RELATED}{code.upper()}"
         return await self.get(key)
 
-    async def set_related_codes(self, code: str, related: list[dict]) -> bool:
+    async def set_related_codes(self, code: str, related: List[dict]) -> bool:
         """Cache related DTC codes."""
         key = f"{CachePrefix.DTC_RELATED}{code.upper()}"
         return await self.set(key, related, CacheTTL.DTC_CODE)
@@ -443,7 +443,7 @@ class RedisCacheService:
         make: str,
         model: str,
         year: int,
-    ) -> list[dict] | None:
+    ) -> Optional[List[dict]]:
         """Get cached NHTSA recalls."""
         key = f"{CachePrefix.NHTSA_RECALLS}{make}:{model}:{year}"
         return await self.get(key)
@@ -453,7 +453,7 @@ class RedisCacheService:
         make: str,
         model: str,
         year: int,
-        recalls: list[dict],
+        recalls: List[dict],
     ) -> bool:
         """Cache NHTSA recalls."""
         key = f"{CachePrefix.NHTSA_RECALLS}{make}:{model}:{year}"
@@ -464,7 +464,7 @@ class RedisCacheService:
         make: str,
         model: str,
         year: int,
-    ) -> list[dict] | None:
+    ) -> Optional[List[dict]]:
         """Get cached NHTSA complaints."""
         key = f"{CachePrefix.NHTSA_COMPLAINTS}{make}:{model}:{year}"
         return await self.get(key)
@@ -474,13 +474,13 @@ class RedisCacheService:
         make: str,
         model: str,
         year: int,
-        complaints: list[dict],
+        complaints: List[dict],
     ) -> bool:
         """Cache NHTSA complaints."""
         key = f"{CachePrefix.NHTSA_COMPLAINTS}{make}:{model}:{year}"
         return await self.set(key, complaints, CacheTTL.NHTSA_DATA)
 
-    async def get_vin_decode(self, vin: str) -> dict | None:
+    async def get_vin_decode(self, vin: str) -> Optional[dict]:
         """Get cached VIN decode result."""
         key = f"{CachePrefix.NHTSA_VIN}{vin.upper()}"
         return await self.get(key)
@@ -494,13 +494,13 @@ class RedisCacheService:
     # Embedding Caching
     # =========================================================================
 
-    async def get_embedding(self, text: str) -> list[float] | None:
+    async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Get cached embedding vector."""
         text_hash = hashlib.md5(text.encode()).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
         return await self.get(key)
 
-    async def set_embedding(self, text: str, embedding: list[float]) -> bool:
+    async def set_embedding(self, text: str, embedding: List[float]) -> bool:
         """Cache embedding vector."""
         text_hash = hashlib.md5(text.encode()).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
@@ -508,8 +508,8 @@ class RedisCacheService:
 
     async def get_embeddings_batch(
         self,
-        texts: list[str],
-    ) -> list[list[float] | None]:
+        texts: List[str],
+    ) -> List[Optional[List[float]]]:
         """Get multiple cached embeddings."""
         keys = [f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode()).hexdigest()}" for t in texts]
         return await self.mget(keys)
@@ -523,7 +523,7 @@ class RedisCacheService:
         identifier: str,
         limit: int,
         window_seconds: int,
-    ) -> tuple[bool, int]:
+    ) -> Tuple[bool, int]:
         """
         Check and increment rate limit counter.
 
@@ -596,7 +596,7 @@ class RedisCacheService:
 # Global Instance
 # =============================================================================
 
-_cache_service: RedisCacheService | None = None
+_cache_service: Optional[RedisCacheService] = None
 
 
 async def get_cache_service() -> RedisCacheService:
@@ -620,7 +620,7 @@ async def get_cache_service() -> RedisCacheService:
 def cached(
     prefix: str,
     ttl: int = CacheTTL.API_RESPONSE,
-    key_builder: Callable[..., str] | None = None,
+    key_builder: Optional[Callable[..., str]] = None,
 ) -> Callable[..., Any]:
     """
     Decorator for caching function results.

@@ -10,7 +10,7 @@ Author: AutoCognitix Team
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 # =============================================================================
 # System Prompts
@@ -225,7 +225,7 @@ Ez a szoveg egy szabaly-alapu diagnosztikai sablon, amely az LLM eleresenek hian
 # =============================================================================
 
 
-def format_dtc_context(dtc_data: list[dict[str, Any]]) -> str:
+def format_dtc_context(dtc_data: List[Dict[str, Any]]) -> str:
     """
     Format DTC code information for prompt.
 
@@ -269,7 +269,7 @@ def format_dtc_context(dtc_data: list[dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "Nincs talalat az adatbazisban."
 
 
-def format_symptom_context(symptom_data: list[dict[str, Any]], max_items: int = 5) -> str:
+def format_symptom_context(symptom_data: List[Dict[str, Any]], max_items: int = 5) -> str:
     """
     Format similar symptom matches for prompt.
 
@@ -303,7 +303,7 @@ def format_symptom_context(symptom_data: list[dict[str, Any]], max_items: int = 
     return "\n".join(lines) if lines else "Nincs hasonlo eset az adatbazisban."
 
 
-def format_repair_context(repair_data: dict[str, Any]) -> str:
+def format_repair_context(repair_data: Dict[str, Any]) -> str:
     """
     Format repair and component information for prompt.
 
@@ -381,7 +381,7 @@ def format_repair_context(repair_data: dict[str, Any]) -> str:
 
 
 def format_recall_context(
-    recalls: list[dict[str, Any]], complaints: list[dict[str, Any]] | None = None
+    recalls: List[Dict[str, Any]], complaints: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     """
     Format NHTSA recalls and complaints for prompt.
@@ -450,12 +450,12 @@ class DiagnosisPromptContext:
     make: str
     model: str
     year: int
-    engine_code: str | None = None
-    mileage_km: int | None = None
-    vin: str | None = None
-    dtc_codes: Optional[list[str]] = None
+    engine_code: Optional[str] = None
+    mileage_km: Optional[int] = None
+    vin: Optional[str] = None
+    dtc_codes: Optional[List[str]] = None
     symptoms: str = ""
-    additional_context: str | None = None
+    additional_context: Optional[str] = None
     dtc_context: str = ""
     symptom_context: str = ""
     repair_context: str = ""
@@ -503,15 +503,15 @@ class ParsedDiagnosisResponse:
     """Parsed diagnosis response from LLM."""
 
     summary: str = ""
-    probable_causes: Optional[list[dict[str, Any]]] = None
-    diagnostic_steps: Optional[list[str]] = None
-    recommended_repairs: Optional[list[dict[str, Any]]] = None
-    safety_warnings: Optional[list[str]] = None
+    probable_causes: Optional[List[Dict[str, Any]]] = None
+    diagnostic_steps: Optional[List[str]] = None
+    recommended_repairs: Optional[List[Dict[str, Any]]] = None
+    safety_warnings: Optional[List[str]] = None
     additional_notes: str = ""
     root_cause_analysis: str = ""
     confidence_score: float = 0.5
     raw_response: str = ""
-    parse_error: str | None = None
+    parse_error: Optional[str] = None
 
     def __post_init__(self):
         if self.probable_causes is None:
@@ -734,7 +734,7 @@ _DEFAULT_TOOLS_AND_TIPS = {
 }
 
 
-def _get_dtc_tools_and_tips(dtc_prefix: str) -> dict[str, Any]:
+def _get_dtc_tools_and_tips(dtc_prefix: str) -> Dict[str, Any]:
     """
     Get default tools and expert tips based on DTC code prefix.
 
@@ -751,10 +751,10 @@ def _get_dtc_tools_and_tips(dtc_prefix: str) -> dict[str, Any]:
 
 
 def generate_rule_based_diagnosis(
-    dtc_codes: list[dict[str, Any]],
-    vehicle_info: dict[str, Any],
-    recalls: list[dict[str, Any]] | None = None,
-    complaints: list[dict[str, Any]] | None = None,
+    dtc_codes: List[Dict[str, Any]],
+    vehicle_info: Dict[str, Any],
+    recalls: Optional[List[Dict[str, Any]]] = None,
+    complaints: Optional[List[Dict[str, Any]]] = None,
 ) -> ParsedDiagnosisResponse:
     """
     Generate diagnosis using rule-based logic when LLM is unavailable.

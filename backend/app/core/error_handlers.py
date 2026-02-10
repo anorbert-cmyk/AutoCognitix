@@ -11,7 +11,7 @@ This module provides:
 import traceback
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -92,8 +92,8 @@ def build_error_response(
     request_id: str,
     code: ErrorCode,
     message: str,
-    message_hu: str | None = None,
-    details: dict[str, Any] | None = None,
+    message_hu: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
 ) -> JSONResponse:
     """

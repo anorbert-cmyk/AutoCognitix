@@ -14,7 +14,7 @@ Author: AutoCognitix Team
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +53,7 @@ logger = get_logger(__name__)
 class DiagnosisServiceError(Exception):
     """Custom exception for diagnosis service errors."""
 
-    def __init__(self, message: str, details: dict | None = None):
+    def __init__(self, message: str, details: Optional[dict] = None):
         self.message = message
         self.details = details or {}
         super().__init__(self.message)
@@ -96,9 +96,9 @@ class DiagnosisService:
             db: SQLAlchemy async session for database operations.
         """
         self.db = db
-        self._nhtsa_service: NHTSAService | None = None
-        self._dtc_repository: DTCCodeRepository | None = None
-        self._diagnosis_repository: DiagnosisSessionRepository | None = None
+        self._nhtsa_service: Optional[NHTSAService] = None
+        self._dtc_repository: Optional[DTCCodeRepository] = None
+        self._diagnosis_repository: Optional[DiagnosisSessionRepository] = None
 
     async def _get_nhtsa_service(self) -> NHTSAService:
         """Get or create NHTSA service instance."""
@@ -136,7 +136,7 @@ class DiagnosisService:
     async def analyze_vehicle(
         self,
         request: DiagnosisRequest,
-        user_id: UUID | None = None,
+        user_id: Optional[UUID] = None,
     ) -> DiagnosisResponse:
         """
         Perform comprehensive vehicle diagnosis.
@@ -170,7 +170,7 @@ class DiagnosisService:
 
         try:
             # Step 1: VIN decoding (if provided)
-            vin_data: VINDecodeResult | None = None
+            vin_data: Optional[VINDecodeResult] = None
             if request.vin:
                 vin_data = await self._decode_vin(request.vin)
                 logger.info(
@@ -290,7 +290,7 @@ class DiagnosisService:
     # DTC Code Validation
     # =========================================================================
 
-    async def _validate_and_enrich_dtc_codes(self, dtc_codes: list[str]) -> list[DTCCode]:
+    async def _validate_and_enrich_dtc_codes(self, dtc_codes: List[str]) -> List[DTCCode]:
         """
         Validate DTC codes and fetch their details from database.
 
@@ -309,8 +309,8 @@ class DiagnosisService:
             logger.warning("No DTC codes provided for diagnosis - proceeding with symptoms only")
             return []
 
-        validated_codes: list[DTCCode] = []
-        unknown_codes: list[str] = []
+        validated_codes: List[DTCCode] = []
+        unknown_codes: List[str] = []
 
         for code in dtc_codes:
             code_upper = code.upper().strip()
@@ -396,7 +396,7 @@ class DiagnosisService:
         make: str,
         model: str,
         year: int,
-    ) -> tuple[list[Recall], list[Complaint]]:
+    ) -> Tuple[List[Recall], List[Complaint]]:
         """
         Fetch recalls and complaints from NHTSA API in parallel.
 
@@ -425,8 +425,8 @@ class DiagnosisService:
             recalls_result = results[0]
             complaints_result = results[1]
 
-            final_recalls: list[Recall] = []
-            final_complaints: list[Complaint] = []
+            final_recalls: List[Recall] = []
+            final_complaints: List[Complaint] = []
 
             if isinstance(recalls_result, BaseException):
                 logger.warning(f"Failed to fetch recalls: {sanitize_log(str(recalls_result))}")
@@ -453,11 +453,11 @@ class DiagnosisService:
     async def _run_rag_pipeline(
         self,
         request: DiagnosisRequest,
-        dtc_details: list[DTCCode],
+        dtc_details: List[DTCCode],
         preprocessed_symptoms: str,
-        recalls: list[Recall],
-        complaints: list[Complaint],
-        vin_data: VINDecodeResult | None,
+        recalls: List[Recall],
+        complaints: List[Complaint],
+        vin_data: Optional[VINDecodeResult],
     ) -> dict:
         """
         Execute the RAG (Retrieval-Augmented Generation) pipeline.
@@ -614,11 +614,11 @@ class DiagnosisService:
     def _build_rag_context(
         self,
         request: DiagnosisRequest,
-        dtc_details: list[DTCCode],
+        dtc_details: List[DTCCode],
         preprocessed_symptoms: str,
-        recalls: list[Recall],
-        complaints: list[Complaint],
-        vin_data: VINDecodeResult | None,
+        recalls: List[Recall],
+        complaints: List[Complaint],
+        vin_data: Optional[VINDecodeResult],
     ) -> dict:
         """
         Build context dictionary for RAG pipeline.
@@ -686,9 +686,9 @@ class DiagnosisService:
 
     def _fallback_diagnosis(
         self,
-        dtc_details: list[DTCCode],
-        recalls: list[Recall],
-        complaints: list[Complaint],
+        dtc_details: List[DTCCode],
+        recalls: List[Recall],
+        complaints: List[Complaint],
     ) -> dict:
         """
         Generate fallback diagnosis when RAG service is unavailable.
@@ -795,7 +795,7 @@ class DiagnosisService:
 
     async def _enrich_with_parts_prices(
         self,
-        dtc_codes: list[str],
+        dtc_codes: List[str],
         vehicle_make: str,
         vehicle_model: str,
         vehicle_year: int,
@@ -864,10 +864,10 @@ class DiagnosisService:
         self,
         diagnosis_id: UUID,
         request: DiagnosisRequest,
-        dtc_details: list[DTCCode],
+        dtc_details: List[DTCCode],
         rag_result: dict,
-        recalls: list[Recall],
-        complaints: list[Complaint],
+        recalls: List[Recall],
+        complaints: List[Complaint],
         parts_data: Optional[dict] = None,
     ) -> DiagnosisResponse:
         """
@@ -1043,9 +1043,9 @@ class DiagnosisService:
 
     def _determine_urgency(
         self,
-        dtc_details: list[DTCCode],
-        recalls: list[Recall],
-        complaints: list[Complaint],
+        dtc_details: List[DTCCode],
+        recalls: List[Recall],
+        complaints: List[Complaint],
     ) -> str:
         """
         Determine urgency level based on DTC severity, recalls, and complaints.
@@ -1093,7 +1093,7 @@ class DiagnosisService:
         diagnosis_id: UUID,
         request: DiagnosisRequest,
         response: DiagnosisResponse,
-        user_id: UUID | None,
+        user_id: Optional[UUID],
     ) -> None:
         """
         Save diagnosis session to database.
@@ -1136,7 +1136,7 @@ class DiagnosisService:
 
     async def get_diagnosis_by_id(
         self, diagnosis_id: UUID, user_id: Optional[UUID] = None
-    ) -> DiagnosisResponse | None:
+    ) -> Optional[DiagnosisResponse]:
         """
         Retrieve a diagnosis by its ID.
 
@@ -1209,7 +1209,7 @@ class DiagnosisService:
         user_id: UUID,
         skip: int = 0,
         limit: int = 10,
-    ) -> list[DiagnosisHistoryItem]:
+    ) -> List[DiagnosisHistoryItem]:
         """
         Get diagnosis history for a user.
 
@@ -1286,7 +1286,7 @@ async def get_diagnosis_service(db: AsyncSession) -> DiagnosisService:
 async def analyze_vehicle(
     db: AsyncSession,
     request: DiagnosisRequest,
-    user_id: UUID | None = None,
+    user_id: Optional[UUID] = None,
 ) -> DiagnosisResponse:
     """
     Convenience function for vehicle analysis.
@@ -1306,7 +1306,7 @@ async def analyze_vehicle(
 async def get_diagnosis_by_id(
     db: AsyncSession,
     diagnosis_id: UUID,
-) -> DiagnosisResponse | None:
+) -> Optional[DiagnosisResponse]:
     """
     Convenience function to get diagnosis by ID.
 
@@ -1326,7 +1326,7 @@ async def get_user_history(
     user_id: UUID,
     skip: int = 0,
     limit: int = 10,
-) -> list[DiagnosisHistoryItem]:
+) -> List[DiagnosisHistoryItem]:
     """
     Convenience function to get user diagnosis history.
 

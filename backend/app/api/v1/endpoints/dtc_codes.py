@@ -15,7 +15,7 @@ Performance optimizations:
 """
 
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -243,8 +243,8 @@ async def _get_cached_dtc_detail(code: str) -> Any:
 
 async def _cache_search_results(
     query: str,
-    results: list[dict],
-    category: str | None = None,
+    results: List[dict],
+    category: Optional[str] = None,
     limit: int = 20,
 ) -> None:
     """Cache search results in Redis."""
@@ -255,7 +255,7 @@ async def _cache_search_results(
 
 async def _get_cached_search_results(
     query: str,
-    category: str | None = None,
+    category: Optional[str] = None,
     limit: int = 20,
 ) -> Any:
     """Get cached search results from Redis."""
@@ -274,7 +274,7 @@ async def _invalidate_dtc_cache(code: str) -> None:
         await cache.delete_pattern("dtc:search:*")
 
 
-async def _get_neo4j_relationships(code: str) -> dict[str, Any]:
+async def _get_neo4j_relationships(code: str) -> Dict[str, Any]:
     """
     Get DTC relationships from Neo4j graph database.
 
@@ -299,7 +299,7 @@ async def _get_neo4j_relationships(code: str) -> dict[str, Any]:
 
 
 def _dtc_model_to_search_result(
-    dtc: DTCCodeModel, relevance_score: float | None = None
+    dtc: DTCCodeModel, relevance_score: Optional[float] = None
 ) -> DTCSearchResult:
     """Convert PostgreSQL model to API schema."""
     return DTCSearchResult(
@@ -314,7 +314,7 @@ def _dtc_model_to_search_result(
 
 
 def _dtc_model_to_detail(
-    dtc: DTCCodeModel, neo4j_data: dict[str, Any] | None = None
+    dtc: DTCCodeModel, neo4j_data: Optional[Dict[str, Any]] = None
 ) -> DTCCodeDetail:
     """Convert PostgreSQL model to detailed API schema, enriching with Neo4j data."""
     # Start with PostgreSQL data
@@ -361,7 +361,7 @@ def _dtc_model_to_detail(
 
 @router.get(
     "/search",
-    response_model=list[DTCSearchResult],
+    response_model=List[DTCSearchResult],
     responses=SEARCH_RESPONSES,
     summary="Search DTC codes",
     description="""
@@ -384,8 +384,8 @@ Supports multiple search modes:
 )
 async def search_dtc_codes(
     q: str = Query(..., min_length=1, description="Search query (code or description)"),
-    category: DTCCategory | None = Query(None, description="Filter by category"),
-    make: str | None = Query(None, description="Filter by vehicle make"),
+    category: Optional[DTCCategory] = Query(None, description="Filter by category"),
+    make: Optional[str] = Query(None, description="Filter by vehicle make"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
     use_semantic: bool = Query(True, description="Use semantic search (slower but better)"),
     skip_cache: bool = Query(False, description="Skip cache lookup"),
@@ -435,7 +435,7 @@ async def search_dtc_codes(
         and (len(query) == 1 or query[1:2].isdigit() or query[1:].upper() == query[1:])
     )
 
-    results: list[DTCSearchResult] = []
+    results: List[DTCSearchResult] = []
 
     # If it looks like a code, prioritize exact matches
     if is_code_query:
@@ -516,7 +516,7 @@ async def search_dtc_codes(
 
 @router.get(
     "/categories/list",
-    response_model=list[dict[str, str]],
+    response_model=List[Dict[str, str]],
     responses=CATEGORIES_RESPONSES,
     summary="Get DTC categories",
     description="""
@@ -529,7 +529,7 @@ DTC codes follow the OBD-II standard:
 - **U** (Network): CAN bus, module communication
     """,
 )
-async def get_dtc_categories() -> list[dict[str, str]]:
+async def get_dtc_categories() -> List[Dict[str, str]]:
     """
     Get list of DTC categories with descriptions.
 
@@ -665,7 +665,7 @@ async def get_dtc_code_detail(
 
 @router.get(
     "/{code}/related",
-    response_model=list[DTCSearchResult],
+    response_model=List[DTCSearchResult],
     responses=RELATED_CODES_RESPONSES,
     summary="Get related DTC codes",
     description="""
@@ -714,7 +714,7 @@ async def get_related_codes(
             detail=f"DTC code {code} not found",
         )
 
-    results: list[DTCSearchResult] = []
+    results: List[DTCSearchResult] = []
     existing_codes = {code}  # Exclude the original code
 
     # Get related codes from PostgreSQL (stored in related_codes field)
@@ -846,7 +846,7 @@ async def create_dtc_code(
 
 @router.post(
     "/bulk",
-    response_model=dict[str, Any],
+    response_model=Dict[str, Any],
     status_code=status.HTTP_201_CREATED,
     responses=BULK_IMPORT_RESPONSES,
     summary="Bulk import DTC codes",

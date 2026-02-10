@@ -6,8 +6,8 @@ Provides JWT token management, password hashing, and token blacklisting.
 
 import logging
 import secrets
-from datetime import datetime, timedelta, UTC
-from typing import Any, Dict, Optional, Union
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -40,13 +40,13 @@ def create_access_token(
         Encoded JWT token string
     """
     if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(UTC),
+        "iat": datetime.now(timezone.utc),
         "sub": str(subject),
         "type": "access",
         "jti": secrets.token_urlsafe(16),  # JWT ID for blacklisting
@@ -65,8 +65,8 @@ def create_access_token(
 
 
 def create_refresh_token(
-    subject: str | Any,
-    expires_delta: timedelta | None = None,
+    subject: Union[str, Any],
+    expires_delta: Optional[timedelta] = None,
 ) -> str:
     """
     Create a JWT refresh token.
@@ -79,13 +79,13 @@ def create_refresh_token(
         Encoded JWT refresh token string
     """
     if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(UTC),
+        "iat": datetime.now(timezone.utc),
         "sub": str(subject),
         "type": "refresh",
         "jti": secrets.token_urlsafe(16),  # JWT ID for blacklisting
@@ -101,8 +101,8 @@ def create_refresh_token(
 
 
 def create_password_reset_token(
-    subject: str | Any,
-    expires_delta: timedelta | None = None,
+    subject: Union[str, Any],
+    expires_delta: Optional[timedelta] = None,
 ) -> str:
     """
     Create a JWT password reset token.
@@ -115,13 +115,13 @@ def create_password_reset_token(
         Encoded JWT password reset token string
     """
     if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(hours=1)
+        expire = datetime.now(timezone.utc) + timedelta(hours=1)
 
     to_encode = {
         "exp": expire,
-        "iat": datetime.now(UTC),
+        "iat": datetime.now(timezone.utc),
         "sub": str(subject),
         "type": "password_reset",
         "jti": secrets.token_urlsafe(16),
@@ -203,7 +203,7 @@ async def blacklist_token(token: str) -> bool:
 
         # Calculate TTL based on token expiration
         exp = payload.get("exp", 0)
-        ttl = max(0, exp - int(datetime.now(UTC).timestamp()))
+        ttl = max(0, exp - int(datetime.now(timezone.utc).timestamp()))
 
         # Only store if token hasn't expired yet
         if ttl > 0:
@@ -249,7 +249,7 @@ async def is_token_blacklisted(jti: str) -> bool:
         return False
 
 
-def validate_password_strength(password: str) -> tuple[bool, list[str]]:
+def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
     """
     Validate password strength.
 

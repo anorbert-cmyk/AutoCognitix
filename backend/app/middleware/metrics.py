@@ -28,7 +28,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict, Optional, Set
 
 from fastapi import Request, Response
 from prometheus_client import (
@@ -165,7 +165,7 @@ class EndpointNormalizer:
     DTC_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$", re.IGNORECASE)
 
     # Known static paths that should not be normalized
-    STATIC_PATHS: set[str] = {
+    STATIC_PATHS: Set[str] = {
         "/health",
         "/health/live",
         "/health/ready",
@@ -227,7 +227,7 @@ class EndpointNormalizer:
 def track_request(
     method: str,
     endpoint: str,
-) -> Generator[dict[str, Any], None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """
     Context manager for tracking request metrics.
 
@@ -243,7 +243,7 @@ def track_request(
             response = await process_request()
             ctx["status_code"] = response.status_code
     """
-    context: dict[str, Any] = {
+    context: Dict[str, Any] = {
         "status_code": 0,
         "request_size": 0,
         "response_size": 0,
@@ -333,14 +333,14 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     """
 
     # Endpoints to exclude from metrics (health checks, etc.)
-    EXCLUDED_ENDPOINTS: set[str] = {
+    EXCLUDED_ENDPOINTS: Set[str] = {
         "/health",
         "/health/live",
         "/health/ready",
         "/metrics",
     }
 
-    def __init__(self, app: ASGIApp, exclude_paths: set[str] | None = None):
+    def __init__(self, app: ASGIApp, exclude_paths: Optional[Set[str]] = None):
         """
         Initialize metrics middleware.
 
@@ -455,7 +455,7 @@ def get_metrics_text() -> bytes:
     return generate_latest()
 
 
-def get_metrics_summary() -> dict[str, Any]:
+def get_metrics_summary() -> Dict[str, Any]:
     """
     Get a human-readable metrics summary.
 

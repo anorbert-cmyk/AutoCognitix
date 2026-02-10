@@ -8,7 +8,7 @@ This module defines a hierarchy of exceptions with:
 - Error codes for client-side handling
 """
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 
@@ -80,7 +80,7 @@ class ErrorCode(str, Enum):
 # =============================================================================
 
 
-ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
+ERROR_MESSAGES_HU: Dict[ErrorCode, str] = {
     # General errors
     ErrorCode.INTERNAL_ERROR: "Belso szerverhiba tortent. Kerem, probalkozzon kesobb.",
     ErrorCode.VALIDATION_ERROR: "Ervenytelen adatok. Kerem, ellenorizze a bevitt adatokat.",
@@ -127,7 +127,7 @@ ERROR_MESSAGES_HU: dict[ErrorCode, str] = {
 }
 
 
-def get_error_message(code: ErrorCode, fallback: str | None = None) -> str:
+def get_error_message(code: ErrorCode, fallback: Optional[str] = None) -> str:
     """Get Hungarian error message for error code."""
     return ERROR_MESSAGES_HU.get(code, fallback or "Ismeretlen hiba tortent.")
 
@@ -152,7 +152,7 @@ class AutoCognitixException(Exception):
         self,
         message: str,
         code: ErrorCode = ErrorCode.INTERNAL_ERROR,
-        details: dict[str, Any] | None = None,
+        details: Optional[Dict[str, Any]] = None,
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         self.message = message
@@ -161,7 +161,7 @@ class AutoCognitixException(Exception):
         self.status_code = status_code
         super().__init__(self.message)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert exception to dictionary for JSON response."""
         return {
             "error": {
@@ -191,8 +191,8 @@ class ValidationException(AutoCognitixException):
     def __init__(
         self,
         message: str,
-        field: str | None = None,
-        details: dict[str, Any] | None = None,
+        field: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
     ):
         error_details = details or {}
         if field:
@@ -212,7 +212,7 @@ class DTCValidationException(ValidationException):
     def __init__(
         self,
         message: str,
-        invalid_codes: list[str] | None = None,
+        invalid_codes: Optional[List[str]] = None,
     ):
         details = {}
         if invalid_codes:
@@ -232,7 +232,7 @@ class VINValidationException(ValidationException):
     def __init__(
         self,
         message: str,
-        vin: str | None = None,
+        vin: Optional[str] = None,
     ):
         details = {}
         if vin:
@@ -257,8 +257,8 @@ class NotFoundException(AutoCognitixException):
     def __init__(
         self,
         message: str,
-        resource_type: str | None = None,
-        resource_id: str | None = None,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
     ):
         details = {}
         if resource_type:
@@ -297,8 +297,8 @@ class DatabaseException(AutoCognitixException):
         self,
         message: str,
         code: ErrorCode = ErrorCode.DATABASE_ERROR,
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         error_details = details or {}
         if original_error:
@@ -319,8 +319,8 @@ class PostgresException(DatabaseException):
     def __init__(
         self,
         message: str = "PostgreSQL adatbazis hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -336,7 +336,7 @@ class PostgresConnectionException(PostgresException):
     def __init__(
         self,
         message: str = "Nem sikerult csatlakozni a PostgreSQL adatbazishoz.",
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -351,8 +351,8 @@ class Neo4jException(DatabaseException):
     def __init__(
         self,
         message: str = "Neo4j grafadatbazis hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -368,7 +368,7 @@ class Neo4jConnectionException(Neo4jException):
     def __init__(
         self,
         message: str = "Nem sikerult csatlakozni a Neo4j adatbazishoz.",
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -383,8 +383,8 @@ class QdrantException(DatabaseException):
     def __init__(
         self,
         message: str = "Qdrant vektor adatbazis hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -400,7 +400,7 @@ class QdrantConnectionException(QdrantException):
     def __init__(
         self,
         message: str = "Nem sikerult csatlakozni a Qdrant adatbazishoz.",
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -415,8 +415,8 @@ class RedisException(DatabaseException):
     def __init__(
         self,
         message: str = "Redis cache hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -432,7 +432,7 @@ class RedisConnectionException(RedisException):
     def __init__(
         self,
         message: str = "Nem sikerult csatlakozni a Redis szerverhez.",
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -453,9 +453,9 @@ class ExternalAPIException(AutoCognitixException):
         self,
         message: str,
         code: ErrorCode = ErrorCode.EXTERNAL_API_ERROR,
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
-        retry_after: int | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
+        retry_after: Optional[int] = None,
     ):
         error_details = details or {}
         if original_error:
@@ -479,8 +479,8 @@ class NHTSAException(ExternalAPIException):
     def __init__(
         self,
         message: str = "NHTSA szolgaltatas hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -496,7 +496,7 @@ class NHTSARateLimitException(NHTSAException):
     def __init__(
         self,
         retry_after: int = 60,
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=f"NHTSA API korlat tullepve. Varjon {retry_after} masodpercet.",
@@ -514,8 +514,8 @@ class LLMException(ExternalAPIException):
     def __init__(
         self,
         message: str = "AI szolgaltatas hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -531,7 +531,7 @@ class LLMRateLimitException(LLMException):
     def __init__(
         self,
         retry_after: int = 60,
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=f"AI szolgaltatas korlat tullepve. Varjon {retry_after} masodpercet.",
@@ -549,7 +549,7 @@ class LLMUnavailableException(LLMException):
     def __init__(
         self,
         message: str = "AI szolgaltatas jelenleg nem elerheto.",
-        original_error: Exception | None = None,
+        original_error: Optional[Exception] = None,
     ):
         super().__init__(
             message=message,
@@ -570,8 +570,8 @@ class DiagnosisException(AutoCognitixException):
     def __init__(
         self,
         message: str,
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         error_details = details or {}
         if original_error:
@@ -592,8 +592,8 @@ class EmbeddingException(AutoCognitixException):
     def __init__(
         self,
         message: str = "Szovegfeldolgozasi hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         error_details = details or {}
         if original_error:
@@ -613,8 +613,8 @@ class RAGException(AutoCognitixException):
     def __init__(
         self,
         message: str = "Tudazbazis keresesi hiba.",
-        details: dict[str, Any] | None = None,
-        original_error: Exception | None = None,
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
     ):
         error_details = details or {}
         if original_error:
@@ -640,7 +640,7 @@ class AuthenticationException(AutoCognitixException):
         self,
         message: str,
         code: ErrorCode = ErrorCode.AUTH_ERROR,
-        details: dict[str, Any] | None = None,
+        details: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             message=message,
@@ -695,7 +695,7 @@ class ForbiddenException(AutoCognitixException):
     def __init__(
         self,
         message: str = "Nincs jogosultsaga ehhez a muvelethez.",
-        details: dict[str, Any] | None = None,
+        details: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             message=message,

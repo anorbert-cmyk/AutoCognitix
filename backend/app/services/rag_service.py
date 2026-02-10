@@ -93,9 +93,9 @@ class VehicleInfo:
     make: str
     model: str
     year: int
-    vin: str | None = None
-    engine_code: str | None = None
-    mileage_km: int | None = None
+    vin: Optional[str] = None
+    engine_code: Optional[str] = None
+    mileage_km: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -173,14 +173,14 @@ class RepairRecommendation:
     name: str
     description: str
     difficulty: str
-    estimated_time_minutes: int | None = None
-    estimated_cost_min: int | None = None
-    estimated_cost_max: int | None = None
+    estimated_time_minutes: Optional[int] = None
+    estimated_cost_min: Optional[int] = None
+    estimated_cost_max: Optional[int] = None
     parts: List[Dict[str, Any]] = field(default_factory=list)
     diagnostic_steps: List[str] = field(default_factory=list)
     tools_needed: List[Dict[str, str]] = field(default_factory=list)
     expert_tips: List[str] = field(default_factory=list)
-    root_cause_explanation: str | None = None
+    root_cause_explanation: Optional[str] = None
 
 
 @dataclass
@@ -240,7 +240,7 @@ class HybridRanker:
 
     def reciprocal_rank_fusion(
         self,
-        ranked_lists: list[List[RetrievedItem]],
+        ranked_lists: List[List[RetrievedItem]],
         weights: Optional[List[float]] = None,
     ) -> List[RetrievedItem]:
         """
@@ -263,7 +263,7 @@ class HybridRanker:
         item_scores: Dict[str, float] = {}
         item_objects: Dict[str, RetrievedItem] = {}
 
-        for weight, ranked_list in zip(weights, ranked_lists, strict=False):
+        for weight, ranked_list in zip(weights, ranked_lists):
             for rank, item in enumerate(ranked_list, 1):
                 # Create unique key for item
                 item_key = self._get_item_key(item)
@@ -321,7 +321,7 @@ class ContextCache:
     """Simple in-memory cache for retrieval results."""
 
     def __init__(self, max_size: int = 100, ttl_seconds: int = 300):
-        self._cache: dict[str, tuple[Any, float]] = {}
+        self._cache: Dict[str, Tuple[Any, float]] = {}
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
 
@@ -329,7 +329,7 @@ class ContextCache:
         """Create cache key from arguments."""
         return hashlib.md5(str(args).encode()).hexdigest()
 
-    def get(self, *args) -> Any | None:
+    def get(self, *args) -> Optional[Any]:
         """Get item from cache if not expired."""
         key = self._make_key(*args)
         if key in self._cache:
@@ -393,7 +393,7 @@ class RAGService:
         self._embedding_service = None
         self._ranker = HybridRanker()
         self._cache = ContextCache()
-        self._db_session: AsyncSession | None = None
+        self._db_session: Optional[AsyncSession] = None
 
         logger.info("RAGService initialized")
 
@@ -416,7 +416,7 @@ class RAGService:
         query: str,
         collection: str,
         top_k: int = 10,
-        filters: Dict[str, Any] | None = None,
+        filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5,
     ) -> List[RetrievedItem]:
         """
@@ -529,7 +529,7 @@ class RAGService:
         self,
         query: str,
         dtc_codes: List[str],
-        vehicle_make: str | None = None,
+        vehicle_make: Optional[str] = None,
         top_k: int = 10,
     ) -> List[RetrievedItem]:
         """
@@ -816,7 +816,7 @@ class RAGService:
         self,
         context: RAGContext,
         dtc_codes: List[str],
-    ) -> tuple[ConfidenceLevel, float]:
+    ) -> Tuple[ConfidenceLevel, float]:
         """
         Calculate confidence score for diagnosis.
 
@@ -895,7 +895,7 @@ class RAGService:
         dtc_codes: List[str],
         symptoms: str,
         context: RAGContext,
-        additional_context: str | None = None,
+        additional_context: Optional[str] = None,
     ) -> ParsedDiagnosisResponse:
         """
         Generate diagnosis using LLM with assembled context.
@@ -1006,7 +1006,7 @@ class RAGService:
         symptoms: str,
         recalls: Optional[List[Dict[str, Any]]] = None,
         complaints: Optional[List[Dict[str, Any]]] = None,
-        additional_context: str | None = None,
+        additional_context: Optional[str] = None,
     ) -> DiagnosisResult:
         """
         Perform complete vehicle diagnosis using RAG.
@@ -1181,7 +1181,7 @@ class RAGService:
 # =============================================================================
 
 
-_rag_service: RAGService | None = None
+_rag_service: Optional[RAGService] = None
 
 
 def get_rag_service() -> RAGService:
@@ -1203,7 +1203,7 @@ async def diagnose(
     symptoms: str,
     recalls: Optional[List[Dict[str, Any]]] = None,
     complaints: Optional[List[Dict[str, Any]]] = None,
-    db_session: AsyncSession | None = None,
+    db_session: Optional[AsyncSession] = None,
 ) -> DiagnosisResult:
     """
     Convenience function to perform vehicle diagnosis.

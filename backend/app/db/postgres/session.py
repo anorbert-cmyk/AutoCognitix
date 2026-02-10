@@ -9,7 +9,7 @@ Optimized for performance with:
 - Comprehensive error handling with Hungarian error messages
 """
 
-from typing import Any
+from typing import Any, Dict, Optional
 
 from sqlalchemy.exc import (
     DBAPIError,
@@ -119,7 +119,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         PostgresConnectionException: When unable to connect to database
         PostgresException: For other database errors
     """
-    session: AsyncSession | None = None
+    session: Optional[AsyncSession] = None
     try:
         session = async_session_maker()
         yield session
@@ -234,7 +234,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # =============================================================================
 
 
-async def get_pool_status() -> dict[str, Any]:
+async def get_pool_status() -> Dict[str, Any]:
     """
     Get current connection pool status.
 
@@ -279,7 +279,7 @@ async def check_database_connection() -> bool:
         return False
 
 
-async def get_database_info() -> dict[str, Any]:
+async def get_database_info() -> Dict[str, Any]:
     """
     Get database connection information for health checks.
 

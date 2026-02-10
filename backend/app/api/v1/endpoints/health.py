@@ -18,7 +18,7 @@ Endpoints:
 import asyncio
 import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -49,8 +49,8 @@ class ServiceHealth(BaseModel):
     name: str
     status: str  # "healthy", "degraded", "unhealthy", "unknown"
     latency_ms: float = 0.0
-    details: dict[str, Any] = {}
-    error: str | None = None
+    details: Dict[str, Any] = {}
+    error: Optional[str] = None
 
 
 class DetailedHealthResponse(BaseModel):
@@ -60,7 +60,7 @@ class DetailedHealthResponse(BaseModel):
     version: str
     environment: str
     uptime_seconds: float
-    services: dict[str, ServiceHealth]
+    services: Dict[str, ServiceHealth]
     checked_at: str
 
 
@@ -68,7 +68,7 @@ class ReadinessResponse(BaseModel):
     """Readiness probe response."""
 
     status: str
-    checks: dict[str, bool]
+    checks: Dict[str, bool]
     checked_at: str
 
 
@@ -82,14 +82,14 @@ class LivenessResponse(BaseModel):
 class DatabaseStats(BaseModel):
     """Database statistics."""
 
-    postgres: dict[str, Any]
-    neo4j: dict[str, Any]
-    qdrant: dict[str, Any]
-    redis: dict[str, Any]
+    postgres: Dict[str, Any]
+    neo4j: Dict[str, Any]
+    qdrant: Dict[str, Any]
+    redis: Dict[str, Any]
 
 
 # Track startup time for uptime calculation
-_startup_time: float | None = None
+_startup_time: Optional[float] = None
 
 
 def get_startup_time() -> float:

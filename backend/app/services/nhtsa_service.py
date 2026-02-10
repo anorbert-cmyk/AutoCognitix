@@ -279,12 +279,12 @@ class NHTSAService:
             redis_url: Redis connection URL (uses settings.REDIS_URL if not provided)
             timeout: HTTP request timeout in seconds
         """
-        self._client: httpx.AsyncClient | None = None
+        self._client: Optional[httpx.AsyncClient] = None
         self._timeout = timeout
         self._use_redis = use_redis
         self._redis_url = redis_url or settings.REDIS_URL
-        self._cache: CacheBackend | None = None
-        self._request_timestamps: list[float] = []
+        self._cache: Optional[CacheBackend] = None
+        self._request_timestamps: List[float] = []
         self._rate_limit_lock = asyncio.Lock()
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -349,7 +349,7 @@ class NHTSAService:
         self,
         method: str,
         url: str,
-        params: Dict[str, Any] | None = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Make HTTP request with retry logic.
@@ -708,7 +708,7 @@ class NHTSAService:
 # =============================================================================
 
 
-_service_instance: NHTSAService | None = None
+_service_instance: Optional[NHTSAService] = None
 
 
 async def get_nhtsa_service(use_redis: bool = False) -> NHTSAService:

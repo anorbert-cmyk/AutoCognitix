@@ -9,7 +9,7 @@ Provides endpoints to:
 - Get recalls and complaints from NHTSA
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
@@ -307,7 +307,7 @@ async def get_vehicle_makes(
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     vehicle_service: VehicleService = Depends(get_vehicle_service),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """
     Get list of vehicle makes (manufacturers).
 
@@ -386,7 +386,7 @@ async def get_vehicle_models(
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     vehicle_service: VehicleService = Depends(get_vehicle_service),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """
     Get list of models for a specific make.
 
@@ -637,7 +637,7 @@ async def decode_vin(
 
 @router.get(
     "/{make}/{model}/{year}/recalls",
-    response_model=list[Recall],
+    response_model=List[Recall],
     responses=RECALLS_RESPONSES,
     summary="Get vehicle recalls",
     description="""
@@ -654,7 +654,7 @@ async def get_vehicle_recalls(
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
-) -> list[Recall]:
+) -> List[Recall]:
     """
     Get recall information for a specific vehicle.
 
@@ -696,7 +696,7 @@ async def get_vehicle_recalls(
 
 @router.get(
     "/{make}/{model}/{year}/complaints",
-    response_model=list[Complaint],
+    response_model=List[Complaint],
     responses=COMPLAINTS_RESPONSES,
     summary="Get vehicle complaints",
     description="""
@@ -714,7 +714,7 @@ async def get_vehicle_complaints(
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
     nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
-) -> list[Complaint]:
+) -> List[Complaint]:
     """
     Get complaint information for a specific vehicle.
 

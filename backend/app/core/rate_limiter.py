@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -41,8 +41,8 @@ class InMemoryRateLimiter:
 
     def __init__(self) -> None:
         # Structure: {key: [(timestamp, count), ...]}
-        self._requests: dict[str, list] = defaultdict(list)
-        self._blocked: dict[str, float] = {}  # key: block_until_timestamp
+        self._requests: Dict[str, list] = defaultdict(list)
+        self._blocked: Dict[str, float] = {}  # key: block_until_timestamp
 
     def _cleanup_old_requests(self, key: str, window_seconds: int) -> None:
         """Remove requests older than the window."""
@@ -54,7 +54,7 @@ class InMemoryRateLimiter:
         key: str,
         limit: int,
         window_seconds: int,
-    ) -> tuple[bool, int, int]:
+    ) -> Tuple[bool, int, int]:
         """
         Check if a request is allowed.
 
@@ -102,10 +102,10 @@ class RedisRateLimiter:
     """
 
     def __init__(self) -> None:
-        self._redis: Any | None = None
+        self._redis: Optional[Any] = None
         self._initialized = False
 
-    async def _get_redis(self) -> Any | None:
+    async def _get_redis(self) -> Optional[Any]:
         """Get Redis connection (lazy initialization)."""
         if self._initialized:
             return self._redis
@@ -134,7 +134,7 @@ class RedisRateLimiter:
         key: str,
         limit: int,
         window_seconds: int,
-    ) -> tuple[bool, int, int]:
+    ) -> Tuple[bool, int, int]:
         """
         Check if a request is allowed using Redis.
 
@@ -257,7 +257,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         return f"ip:{client_ip}"
 
-    def _get_limits_for_endpoint(self, path: str) -> tuple[int, int]:
+    def _get_limits_for_endpoint(self, path: str) -> Tuple[int, int]:
         """Get rate limits for specific endpoint."""
         # Check sensitive endpoints
         for endpoint, limits in self.SENSITIVE_ENDPOINTS.items():

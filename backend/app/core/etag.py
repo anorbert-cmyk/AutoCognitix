@@ -13,6 +13,7 @@ Benefits:
 import hashlib
 import logging
 from collections.abc import Callable
+from typing import List, Optional, Set
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -34,8 +35,8 @@ class ETagMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        include_paths: list[str] | None = None,
-        exclude_paths: list[str] | None = None,
+        include_paths: Optional[List[str]] = None,
+        exclude_paths: Optional[List[str]] = None,
         weak_etag: bool = True,
     ) -> None:
         """
@@ -49,7 +50,7 @@ class ETagMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.include_paths = include_paths
-        self.exclude_paths: set[str] = set(
+        self.exclude_paths: Set[str] = set(
             exclude_paths
             or [
                 "/api/v1/metrics",
@@ -184,7 +185,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        cache_rules: dict | None = None,
+        cache_rules: Optional[dict] = None,
     ) -> None:
         """
         Initialize Cache-Control middleware.

@@ -1,8 +1,8 @@
 # Ruff configuration for AutoCognitix Backend
 # https://docs.astral.sh/ruff/configuration/
 
-# Target Python 3.11
-target-version = "py311"
+# Target Python 3.9 (Railway deployment)
+target-version = "py39"
 
 # Line length to match existing setup
 line-length = 100
@@ -63,6 +63,7 @@ ignore = [
     "I001",    # Import block un-sorted (handled separately)
     "SIM103",  # Return negated condition (sometimes clearer with if/else)
     "RUF006",  # Store asyncio.create_task reference (handled by class attribute)
+    "B905",    # zip() strict= param not available in Python 3.9
 ]
 
 # Allow autofix for all enabled rules

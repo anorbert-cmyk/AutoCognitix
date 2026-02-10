@@ -6,7 +6,7 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 """
 
 import logging
-from typing import Any, Dict, Union, cast
+from typing import Any, Dict, Optional, Union, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -113,11 +113,11 @@ async def get_current_user_from_token(
 
 
 async def get_optional_current_user(
-    token: str | None = Depends(
+    token: Optional[str] = Depends(
         OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
     ),
     db: AsyncSession = Depends(get_db),
-) -> User | None:
+) -> Optional[User]:
     """
     Optional dependency to get current user (returns None if not authenticated).
 
@@ -566,7 +566,7 @@ Felhasználó kijelentkeztetése és tokenek érvénytelenítése.
     """,
 )
 async def logout(
-    logout_data: LogoutRequest | None = None,
+    logout_data: Optional[LogoutRequest] = None,
     token: str = Depends(oauth2_scheme),
 ) -> LogoutResponse:
     """
@@ -668,7 +668,7 @@ async def update_me(
             )
 
     # Build update dict
-    update_dict: dict[str, Any] = {}
+    update_dict: Dict[str, Any] = {}
     if update_data.full_name is not None:
         update_dict["full_name"] = update_data.full_name
     if update_data.email is not None:

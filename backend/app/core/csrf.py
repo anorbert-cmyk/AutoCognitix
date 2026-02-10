@@ -5,6 +5,7 @@ Implements double-submit cookie pattern for CSRF protection.
 """
 
 import secrets
+from typing import List, Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -31,7 +32,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     CSRF_HEADER = "X-CSRF-Token"
     CSRF_COOKIE = "csrf_token"
 
-    def __init__(self, app, exclude_paths: list[str] | None = None):
+    def __init__(self, app, exclude_paths: Optional[List[str]] = None):
         """
         Initialize CSRF middleware.
 
