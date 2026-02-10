@@ -19,7 +19,7 @@ import json
 import logging
 from collections.abc import Callable
 from functools import wraps
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
@@ -582,7 +582,7 @@ class RedisCacheService:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def _calculate_hit_rate(self, info: dict) -> float:
+    def _calculate_hit_rate(self, info: Mapping[str, Any]) -> float:
         """Calculate cache hit rate percentage."""
         hits: int = info.get("keyspace_hits", 0)
         misses: int = info.get("keyspace_misses", 0)
