@@ -4,21 +4,15 @@
  * Sticky header, floating bottom bar, responsive design
  */
 
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
 import { DiagnosisResponse, PartWithPrice } from '../services/api';
-
-// Material Symbol ikon komponens
-function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
-  return (
-    <span className={`material-symbols-outlined ${className}`} style={{ fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24" }}>
-      {name}
-    </span>
-  );
-}
+import { MaterialIcon } from '../components/ui/MaterialIcon';
+import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
+import { RepairStep } from '../components/features/diagnosis/RepairStep';
 
 // Autó kép URL - Unsplash vagy fallback
 function getVehicleImageUrl(make: string, model: string): string {
@@ -40,81 +34,6 @@ const fallbackImages: Record<string, string> = {
   'Opel': 'https://images.unsplash.com/photo-1612825173281-9a193378527e?w=800&h=600&fit=crop',
   'default': 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=800&h=600&fit=crop',
 };
-
-// Conic gradient circular progress
-function DiagnosticConfidence({ percentage }: { percentage: number }) {
-  return (
-    <div className="flex-none w-full md:w-auto flex flex-col items-center justify-center bg-white/5 rounded-2xl p-6 border border-white/10 backdrop-blur-sm">
-      <div
-        className="relative w-36 h-36 rounded-full mb-4"
-        style={{ background: `conic-gradient(#3b82f6 0% ${percentage}%, rgba(255,255,255,0.05) ${percentage}% 100%)` }}
-      >
-        <div className="absolute inset-[12px] bg-[#0D1B2A] rounded-full flex flex-col items-center justify-center shadow-inner">
-          <span className="text-4xl font-bold text-white tracking-tighter">{percentage}%</span>
-        </div>
-      </div>
-      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-200 text-center">
-        Diagnosztikai<br/>Konfidencia
-      </span>
-    </div>
-  );
-}
-
-// Javítási lépés komponens
-function RepairStep({
-  number,
-  title,
-  description,
-  tools,
-  expertTip,
-}: {
-  number: number;
-  title: string;
-  description: string;
-  tools: { icon: string; name: string }[];
-  expertTip: string;
-}) {
-  return (
-    <div className="relative group">
-      <div className="absolute left-0 md:left-0 top-0 w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold z-10 border-4 border-slate-50 shadow-sm group-hover:scale-110 transition-transform">
-        {number}
-      </div>
-      <div className="ml-12 md:ml-16 bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-100 hover:shadow-md transition-all duration-300">
-        <h4 className="text-xl font-bold text-slate-900 mb-3">{title}</h4>
-        <p className="text-slate-600 text-sm leading-relaxed mb-6">{description}</p>
-
-        {/* Szükséges szerszámok */}
-        <div className="mb-6">
-          <h5 className="text-[10px] font-bold uppercase text-slate-400 mb-3 tracking-widest">Szükséges szerszámok</h5>
-          <div className="flex flex-wrap gap-2">
-            {tools.map((tool, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-xs font-medium hover:bg-white transition-colors"
-              >
-                <MaterialIcon name={tool.icon} className="text-sm font-light" />
-                {tool.name}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Szakértői tipp */}
-        <div className="mt-4 border-l-4 border-amber-400 bg-amber-50 p-5 rounded-r-xl">
-          <div className="flex items-start gap-4">
-            <div className="p-1.5 bg-amber-100 rounded-full text-amber-600">
-              <MaterialIcon name="lightbulb" className="text-lg" />
-            </div>
-            <div>
-              <span className="block text-xs font-black text-amber-700 uppercase tracking-wide mb-1.5">Szakértői Tipp</span>
-              <p className="text-sm text-slate-800 font-medium leading-relaxed">{expertTip}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const toast = useToast();
@@ -187,9 +106,9 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
           </div>
 
           <nav className="hidden md:flex items-center gap-8">
-            <a className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" href="/diagnosis">Vezérlőpult</a>
-            <a className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" href="/history">Előzmények</a>
-            <a className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" href="#">Beállítások</a>
+            <Link className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" to="/diagnosis">Vezérlőpult</Link>
+            <Link className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" to="/history">Előzmények</Link>
+            <Link className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" to="#">Beállítások</Link>
           </nav>
 
           <div className="flex items-center gap-4">

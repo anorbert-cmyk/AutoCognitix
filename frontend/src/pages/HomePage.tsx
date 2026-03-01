@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Wrench, Zap, Shield, ArrowRight } from 'lucide-react'
+import { Wrench, Zap, Shield, ArrowRight, Eye } from 'lucide-react'
 
 export default function HomePage() {
   return (
@@ -15,13 +15,22 @@ export default function HomePage() {
               Gyors és pontos hibakód-elemzés mesterséges intelligenciával.
               Hardver nélkül, bárhonnan elérhető.
             </p>
-            <Link
-              to="/diagnosis"
-              className="inline-flex items-center gap-2 bg-white text-primary-700 hover:bg-primary-50 px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
-            >
-              Diagnózis indítása
-              <ArrowRight className="h-5 w-5" />
-            </Link>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Link
+                to="/diagnosis"
+                className="inline-flex items-center gap-2 bg-white text-primary-700 hover:bg-primary-50 px-8 py-4 rounded-lg font-semibold text-lg transition-colors"
+              >
+                Diagnózis indítása
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+              <Link
+                to="/demo"
+                className="inline-flex items-center gap-2 bg-white/20 text-white hover:bg-white/30 border border-white/40 px-8 py-4 rounded-lg font-semibold text-lg transition-colors backdrop-blur-sm"
+              >
+                <Eye className="h-5 w-5" />
+                Demo megtekintése
+              </Link>
+            </div>
           </div>
         </div>
       </section>
