@@ -1,12 +1,8 @@
 /**
- * PartStoreCard Component — Redesigned v2
+ * PartStoreCard Component
  *
- * 3-column "Color-Topped Columns" layout for store price comparison.
- * Each store (Bárdi Autó, Unix Autó, AUTODOC) gets a branded color lane.
- * Best price visually elevated with emerald accent + savings badge.
- *
- * Design: Navy theme (#0D1B2A), Space Grotesk, Material Symbols
- * Patterns: Bento card zones, Von Restorff effect, progressive disclosure
+ * Demo pricing card for 3-store comparison (Bárdi, Unix, AUTODOC).
+ * Layout is optimized for fast scanning: store, price, stock, delivery, delta.
  */
 
 import type { DemoPartWithStores, StorePricing } from '../../../data/demoData';
@@ -52,176 +48,82 @@ function getMaxPrice(stores: StorePricing[]): number {
   return Math.max(...stores.map((s) => s.price));
 }
 
-// =============================================================================
-// Store Column — single store in the 3-column comparison
-// =============================================================================
-
-interface StoreColumnProps {
+interface StoreComparisonRowProps {
   store: StorePricing;
   isBest: boolean;
-  savings: number;
+  deltaFromBest: number;
 }
 
-function StoreColumn({ store, isBest, savings }: StoreColumnProps) {
-  return (
-    <div className="relative flex flex-col">
-      {/* Brand color top strip */}
-      <div
-        className="h-1 w-full flex-shrink-0"
-        style={{ backgroundColor: store.storeLogoColor }}
-      />
+function StoreComparisonRow({ store, isBest, deltaFromBest }: StoreComparisonRowProps) {
+  const hasPriceRange = Boolean(store.priceMax && store.priceMax > store.price);
 
-      <div
-        className={`flex-1 flex flex-col items-center px-3 py-4 sm:px-4 sm:py-5 transition-colors duration-200 ${
-          isBest ? 'bg-emerald-50/60' : 'bg-white'
-        }`}
-      >
-        {/* Store logo circle */}
-        <div
-          className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-white text-xs sm:text-sm font-black shadow-sm flex-shrink-0"
-          style={{ backgroundColor: store.storeLogoColor }}
-        >
-          {store.storeName.charAt(0)}
-        </div>
-
-        {/* Store name */}
-        <p className="text-[11px] sm:text-xs font-bold text-slate-900 mt-2 text-center leading-tight">
-          {store.storeName}
-        </p>
-
-        {/* Brand */}
-        <p className="text-[10px] text-slate-400 mt-0.5 text-center truncate w-full font-mono" title={store.brand}>
-          {store.brand}
-        </p>
-
-        {/* Price — hero element */}
-        <div className="mt-3 mb-1.5">
-          <span
-            className={`tabular-nums font-['Space_Grotesk',sans-serif] ${
-              isBest
-                ? 'text-lg sm:text-xl font-black text-emerald-700'
-                : 'text-base sm:text-lg font-bold text-slate-800'
-            }`}
-          >
-            {formatHUF(store.price)}
-          </span>
-          <span className={`text-[10px] ml-0.5 ${isBest ? 'text-emerald-600' : 'text-slate-400'}`}>
-            Ft
-          </span>
-        </div>
-
-        {/* Best price badge + savings */}
-        {isBest && (
-          <div className="flex flex-col items-center gap-0.5 mb-1.5">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
-              <MaterialIcon name="trending_down" className="text-[10px]" />
-              Legjobb ár
-            </span>
-            {savings > 0 && (
-              <span className="text-[9px] sm:text-[10px] font-medium text-emerald-600">
-                -{formatHUF(savings)} Ft
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Price range if available */}
-        {store.priceMax && store.priceMax > store.price && !isBest && (
-          <p className="text-[9px] text-slate-400 mb-1.5">
-            max. {formatHUF(store.priceMax)} Ft
-          </p>
-        )}
-
-        {/* Stock status */}
-        <div className="mt-auto pt-2">
-          {store.inStock ? (
-            <div className="flex items-center gap-1">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              </span>
-              <span className="text-[10px] sm:text-[11px] font-medium text-emerald-700">Készleten</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-              <span className="text-[10px] sm:text-[11px] font-medium text-amber-700">
-                {store.deliveryDays} nap
-              </span>
-            </div>
-          )}
-          {store.inStock && store.deliveryDays <= 1 && (
-            <p className="text-[9px] text-slate-400 mt-0.5 text-center">holnap kézbesítve</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// Mobile Store Card — horizontal scroll version
-// =============================================================================
-
-function MobileStoreCard({ store, isBest, savings }: StoreColumnProps) {
   return (
     <div
-      className={`snap-start flex-shrink-0 w-[70vw] max-w-[260px] rounded-xl overflow-hidden border transition-all duration-200 ${
-        isBest
-          ? 'border-emerald-200 bg-emerald-50/40 ring-1 ring-emerald-200/60'
-          : 'border-slate-100 bg-white'
+      className={`px-4 py-3 sm:px-5 transition-colors ${
+        isBest ? 'bg-emerald-50/70' : 'bg-white hover:bg-slate-50/80'
       }`}
     >
-      {/* Brand strip */}
-      <div className="h-1.5 w-full" style={{ backgroundColor: store.storeLogoColor }} />
-
-      <div className="p-4 flex flex-col items-center">
-        {/* Logo + Name */}
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-black shadow-sm"
-          style={{ backgroundColor: store.storeLogoColor }}
-        >
-          {store.storeName.charAt(0)}
+      <div className="flex flex-col gap-2 sm:grid sm:grid-cols-[minmax(0,1.6fr)_auto_auto_auto] sm:items-center sm:gap-4">
+        <div className="min-w-0 flex items-center gap-2.5">
+          <span
+            className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: store.storeLogoColor }}
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900">{store.storeName}</p>
+            <p className="text-[11px] text-slate-500 font-mono truncate" title={store.brand}>
+              {store.brand}
+            </p>
+          </div>
         </div>
-        <p className="text-xs font-bold text-slate-900 mt-2">{store.storeName}</p>
-        <p className="text-[10px] text-slate-400 font-mono truncate w-full text-center" title={store.brand}>
-          {store.brand}
-        </p>
 
-        {/* Price */}
-        <div className="mt-3 mb-2">
+        <div className="flex items-baseline gap-1 sm:justify-self-end">
           <span
             className={`tabular-nums font-['Space_Grotesk',sans-serif] ${
-              isBest ? 'text-xl font-black text-emerald-700' : 'text-lg font-bold text-slate-800'
+              isBest ? 'text-lg font-black text-emerald-700' : 'text-base font-bold text-slate-900'
             }`}
           >
             {formatHUF(store.price)}
           </span>
-          <span className={`text-[10px] ml-0.5 ${isBest ? 'text-emerald-600' : 'text-slate-400'}`}>Ft</span>
+          <span className={`text-[10px] font-semibold ${isBest ? 'text-emerald-600' : 'text-slate-500'}`}>
+            Ft
+          </span>
+          {hasPriceRange && (
+            <span className="ml-1.5 text-[10px] text-slate-400">
+              max. {formatHUF(store.priceMax!)}
+            </span>
+          )}
         </div>
 
-        {isBest && savings > 0 && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200 mb-2">
-            <MaterialIcon name="trending_down" className="text-[10px]" />
-            -{formatHUF(savings)} Ft olcsóbb
-          </span>
-        )}
-
-        {/* Stock */}
-        <div className="flex items-center gap-1 mt-auto">
+        <div className="text-[11px] sm:justify-self-end">
           {store.inStock ? (
-            <>
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              </span>
-              <span className="text-[11px] font-medium text-emerald-700">Készleten</span>
-            </>
+            <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Készleten
+            </span>
           ) : (
-            <>
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-              <span className="text-[11px] font-medium text-amber-700">Rendelhető · {store.deliveryDays} nap</span>
-            </>
+            <span className="inline-flex items-center gap-1.5 font-medium text-amber-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Rendelhető
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between sm:justify-self-end sm:gap-2">
+          <span className="text-[11px] text-slate-500">{store.deliveryDays} nap</span>
+          {isBest ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
+              <MaterialIcon name="workspace_premium" className="text-[11px]" />
+              Legjobb ár
+            </span>
+          ) : deltaFromBest === 0 ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+              Azonos ár
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600">
+              +{formatHUF(deltaFromBest)} Ft
+            </span>
           )}
         </div>
       </div>
@@ -242,6 +144,7 @@ export function PartStoreCard({ part, index }: PartStoreCardProps) {
   const bestPrice = getBestPrice(part.stores);
   const maxPrice = getMaxPrice(part.stores);
   const savings = bestPrice ? maxPrice - bestPrice.price : 0;
+  const sortedStores = [...part.stores].sort((a, b) => a.price - b.price);
 
   return (
     <article className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:border-slate-300 group">
@@ -304,36 +207,29 @@ export function PartStoreCard({ part, index }: PartStoreCardProps) {
         </p>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          ZONE B: 3-Column Store Price Comparison
-          ═══════════════════════════════════════════════════════════════════ */}
-
-      {/* Desktop: 3-column grid */}
-      <div className="hidden sm:grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100">
-        {part.stores.map((store) => (
-          <StoreColumn
-            key={store.storeName}
-            store={store}
-            isBest={bestPrice !== null && store.storeName === bestPrice.storeName}
-            savings={savings}
-          />
-        ))}
-      </div>
-
-      {/* Mobile: horizontal snap scroll */}
-      <div className="sm:hidden border-t border-slate-100 bg-slate-50/50">
-        <div className="px-4 pt-3 pb-1">
-          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">
-            Ár-összehasonlítás
-          </span>
+      {/* Ár-összehasonlítás */}
+      <div className="border-t border-slate-100">
+        <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              Ár-összehasonlítás · 3 bolt
+            </span>
+            {savings > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                <MaterialIcon name="savings" className="text-sm" />
+                Max. különbség: {formatHUF(savings)} Ft
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-4 px-4 scrollbar-hide">
-          {part.stores.map((store) => (
-            <MobileStoreCard
+
+        <div className="divide-y divide-slate-100">
+          {sortedStores.map((store) => (
+            <StoreComparisonRow
               key={store.storeName}
               store={store}
               isBest={bestPrice !== null && store.storeName === bestPrice.storeName}
-              savings={savings}
+              deltaFromBest={bestPrice ? store.price - bestPrice.price : 0}
             />
           ))}
         </div>
