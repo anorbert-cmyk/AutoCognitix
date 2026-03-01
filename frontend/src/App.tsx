@@ -14,6 +14,7 @@ const ResultPage = lazy(() => import('./pages/ResultPage'))
 const HistoryPage = lazy(() => import('./pages/HistoryPage'))
 const DTCDetailPage = lazy(() => import('./pages/DTCDetailPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
+const DemoResultPage = lazy(() => import('./pages/DemoResultPage'))
 
 // Auth pages
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -68,6 +69,7 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
+                <Route path="demo" element={<DemoResultPage />} />
                 <Route path="dtc/:code" element={<DTCDetailPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

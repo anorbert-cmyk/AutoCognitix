@@ -4,7 +4,7 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 7.5 befejezve - Enhanced Diagnosis Report (LLM prompt, PartsPriceService, Frontend UI)
+**Státusz:** Sprint 8 befejezve - Demo Error Simulation & Store-specific Parts Pricing
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
@@ -216,6 +216,19 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 | `GET /api/v1/dtc/search` | ✅ Kész | DTC keresés |
 | `POST /api/v1/vehicles/decode-vin` | ✅ Kész | VIN dekódolás |
 | `POST /api/v1/auth/login` | ✅ Kész | Bejelentkezés (JWT) |
+| `GET /demo` | ✅ Kész | Demo bemutató oldal (P0300 szimuláció, valós árak) |
+
+## Frontend Demo Oldal
+
+A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést mutat:
+- **Szimulált hiba:** P0300 + P0301 + P0304 (több hengeres égéskimaradás)
+- **Jármű:** VW Golf VII 1.4 TSI (2018), 98.420 km
+- **Alkatrész árak:** Bárdi Autó, Uni Autó, AUTODOC – valós 2026 márciusi árak
+- **6 alkatrész kártyás megjelenítéssel:** gyújtógyertya, gyújtótekercs, levegőszűrő, üzemanyagszűrő, injektor, lambda szonda
+- **Demó fájlok:**
+  - `frontend/src/data/demoData.ts` – demó adatok és árak
+  - `frontend/src/pages/DemoResultPage.tsx` – demó oldal
+  - `frontend/src/components/features/diagnosis/PartStoreCard.tsx` – bolt-specifikus alkatrész kártya
 
 ## Adatforrások
 
@@ -228,6 +241,13 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-03-01 - Demo Error Simulation (Sprint 8)
+- Demo oldal: pre-filled P0300 szimuláció VW Golf VII 1.4 TSI-hez valós árakkal
+- PartStoreCard: bolt-specifikus kártyás megjelenítés (Bárdi Autó, Uni Autó, AUTODOC)
+- Árkutatás: Bárdi és Uni Autó nem indexeli nyilvánosan az árakat → AUTODOC + más webshopok referenciaárai
+- DemoPartWithStores típus: StorePricing interface bolt-specifikus árakhoz (storeName, price, inStock, brand)
+- Agent Teams 8 fővel: Lead Koordinátor + 7 specialist (Data, CardDesign, PageBuilder, Router, Docs, Types, Lint)
 
 ### 2026-02-09 - Enhanced Diagnosis Report (Sprint 7.5)
 - PartsPriceService integráció: korábban létezett de nem volt bekötve a pipeline-ba
@@ -269,6 +289,15 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 - [x] Frontend mock adatok eltávolítása, valódi API adatok megjelenítése
 - [x] Új sémák: ToolNeeded, PartWithPrice, TotalCostEstimate
 - [x] Alkatrészek és Árak táblázat + Összköltség becslés kártya (ResultPage)
+
+### Sprint 8: ✅ BEFEJEZVE
+- [x] Demo Error Simulation – P0300 (több hengeres égéskimaradás) VW Golf VII 1.4 TSI
+- [x] DemoResultPage – teljes pre-filled bemutató oldal képpel, elemzéssel, javítási tervvel
+- [x] PartStoreCard komponens – kártyás megjelenítés bolt-specifikus árakkal
+- [x] Valós alkatrész árak: Bárdi Autó, Uni Autó, AUTODOC (2026. márciusi árak)
+- [x] 6 alkatrész demó adattal: gyújtógyertya, gyújtótekercs, levegőszűrő, üzemanyagszűrő, injektor, lambda szonda
+- [x] Demo route (/demo) + HomePage demo gomb
+- [x] Agent Teams (7+ ügynök) implementáció: koordinátor + 7 specialist
 
 ## Deployment - Railway
 

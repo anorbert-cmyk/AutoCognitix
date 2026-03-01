@@ -30,3 +30,8 @@ export {
   type CostEstimateProps,
   type RepairCostEstimate,
 } from './CostEstimate';
+
+export {
+  PartStoreCard,
+  PartStoreCardGrid,
+} from './PartStoreCard';
