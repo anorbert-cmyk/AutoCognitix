@@ -90,7 +90,7 @@ function StoreComparisonRow({ store, isBest, deltaFromBest }: StoreComparisonRow
           </span>
           {hasPriceRange && (
             <span className="ml-1.5 text-[10px] text-slate-400">
-              max. {formatHUF(store.priceMax!)}
+              max. {formatHUF(store.priceMax!)} Ft
             </span>
           )}
         </div>
