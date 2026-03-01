@@ -9,59 +9,21 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   demoDiagnosisResponse,
   demoParts,
   demoVehicleImage,
   demoVehicleDetails,
 } from '../data/demoData';
+import { MaterialIcon } from '../components/ui/MaterialIcon';
+import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
+import { RepairStep } from '../components/features/diagnosis/RepairStep';
 import { PartStoreCardGrid } from '../components/features/diagnosis/PartStoreCard';
-
-// =============================================================================
-// Material Icon Component
-// =============================================================================
-
-function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
-  return (
-    <span
-      className={`material-symbols-outlined ${className}`}
-      style={{ fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24" }}
-    >
-      {name}
-    </span>
-  );
-}
-
-// =============================================================================
-// Diagnostic Confidence Component
-// =============================================================================
-
-function DiagnosticConfidence({ percentage }: { percentage: number }) {
-  return (
-    <div className="flex-none w-full md:w-auto flex flex-col items-center justify-center bg-white/5 rounded-2xl p-6 border border-white/10 backdrop-blur-sm">
-      <div
-        className="relative w-36 h-36 rounded-full mb-4"
-        style={{ background: `conic-gradient(#3b82f6 0% ${percentage}%, rgba(255,255,255,0.05) ${percentage}% 100%)` }}
-      >
-        <div className="absolute inset-[12px] bg-[#0D1B2A] rounded-full flex flex-col items-center justify-center shadow-inner">
-          <span className="text-4xl font-bold text-white tracking-tighter">{percentage}%</span>
-        </div>
-      </div>
-      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-200 text-center">
-        Diagnosztikai<br />Konfidencia
-      </span>
-    </div>
-  );
-}
-
-// =============================================================================
-// Demo Banner Component
-// =============================================================================
 
 function DemoBanner({ onStartDiagnosis }: { onStartDiagnosis: () => void }) {
   return (
-    <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-slate-900 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+    <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-slate-900 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg print:hidden">
       <div className="flex items-center gap-3">
         <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/30 backdrop-blur-sm">
           <MaterialIcon name="visibility" className="text-2xl text-slate-900" />
@@ -82,65 +44,6 @@ function DemoBanner({ onStartDiagnosis }: { onStartDiagnosis: () => void }) {
         <MaterialIcon name="add_circle" className="text-xl" />
         Saját diagnózis indítása
       </button>
-    </div>
-  );
-}
-
-// =============================================================================
-// Repair Step Component
-// =============================================================================
-
-function RepairStep({
-  number,
-  title,
-  description,
-  tools,
-  expertTip,
-}: {
-  number: number;
-  title: string;
-  description: string;
-  tools: { icon: string; name: string }[];
-  expertTip: string;
-}) {
-  return (
-    <div className="relative group">
-      <div className="absolute left-0 md:left-0 top-0 w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold z-10 border-4 border-slate-50 shadow-sm group-hover:scale-110 transition-transform">
-        {number}
-      </div>
-      <div className="ml-12 md:ml-16 bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-100 hover:shadow-md transition-all duration-300">
-        <h4 className="text-xl font-bold text-slate-900 mb-3">{title}</h4>
-        <p className="text-slate-600 text-sm leading-relaxed mb-6">{description}</p>
-
-        {/* Tools */}
-        <div className="mb-6">
-          <h5 className="text-[10px] font-bold uppercase text-slate-400 mb-3 tracking-widest">Szükséges szerszámok</h5>
-          <div className="flex flex-wrap gap-2">
-            {tools.map((tool, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-xs font-medium hover:bg-white transition-colors"
-              >
-                <MaterialIcon name={tool.icon} className="text-sm font-light" />
-                {tool.name}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Expert Tip */}
-        <div className="mt-4 border-l-4 border-amber-400 bg-amber-50 p-5 rounded-r-xl">
-          <div className="flex items-start gap-4">
-            <div className="p-1.5 bg-amber-100 rounded-full text-amber-600">
-              <MaterialIcon name="lightbulb" className="text-lg" />
-            </div>
-            <div>
-              <span className="block text-xs font-black text-amber-700 uppercase tracking-wide mb-1.5">Szakértői Tipp</span>
-              <p className="text-sm text-slate-800 font-medium leading-relaxed">{expertTip}</p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -191,8 +94,8 @@ export default function DemoResultPage() {
           </div>
 
           <nav className="hidden md:flex items-center gap-8">
-            <a className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" href="/">Főoldal</a>
-            <a className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" href="/diagnosis">Új diagnózis</a>
+            <Link className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" to="/">Főoldal</Link>
+            <Link className="text-sm font-medium text-slate-500 hover:text-[#0D1B2A] transition-colors" to="/diagnosis">Új diagnózis</Link>
           </nav>
         </div>
       </header>
@@ -253,6 +156,8 @@ export default function DemoResultPage() {
                   src={imageError ? 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=800&h=600&fit=crop' : demoVehicleImage}
                   alt={`${result.vehicle_make} ${result.vehicle_model}`}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="lazy"
+                  decoding="async"
                   onError={() => setImageError(true)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent"></div>
@@ -469,8 +374,16 @@ export default function DemoResultPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-yellow-500/20 text-yellow-300">
-                            Közepes
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                            result.total_cost_estimate.difficulty === 'easy' ? 'bg-green-500/20 text-green-300' :
+                            result.total_cost_estimate.difficulty === 'medium' ? 'bg-yellow-500/20 text-yellow-300' :
+                            result.total_cost_estimate.difficulty === 'hard' ? 'bg-orange-500/20 text-orange-300' :
+                            'bg-red-500/20 text-red-300'
+                          }`}>
+                            {result.total_cost_estimate.difficulty === 'easy' ? 'Könnyű' :
+                             result.total_cost_estimate.difficulty === 'medium' ? 'Közepes' :
+                             result.total_cost_estimate.difficulty === 'hard' ? 'Nehéz' :
+                             'Szakértő'}
                           </span>
                         </div>
                       </div>

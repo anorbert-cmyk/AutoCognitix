@@ -5,6 +5,7 @@
  */
 
 import { useMemo } from 'react';
+import { MaterialIcon } from '../../ui/MaterialIcon';
 
 // =============================================================================
 // Types
@@ -72,22 +73,6 @@ function getConfidenceLevel(confidence: number): { label: string; color: string 
   if (confidence >= 0.8) return { label: 'Magas', color: 'text-green-600' };
   if (confidence >= 0.5) return { label: 'K\u00f6zepes', color: 'text-amber-600' };
   return { label: 'Alacsony', color: 'text-red-600' };
-}
-
-// =============================================================================
-// Material Icon Component
-// =============================================================================
-
-function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
-  return (
-    <span
-      className={`material-symbols-outlined ${className}`}
-      style={{ fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24" }}
-      aria-hidden="true"
-    >
-      {name}
-    </span>
-  );
 }
 
 // =============================================================================

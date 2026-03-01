@@ -5,6 +5,7 @@
  */
 
 import { useMemo } from 'react';
+import { MaterialIcon } from '../../ui/MaterialIcon';
 
 // =============================================================================
 // Types
@@ -83,22 +84,6 @@ function getQualityStars(rating: number | undefined): string[] {
     stars.push(i < normalizedRating ? 'star' : 'star_outline');
   }
   return stars;
-}
-
-// =============================================================================
-// Material Icon Component
-// =============================================================================
-
-function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
-  return (
-    <span
-      className={`material-symbols-outlined ${className}`}
-      style={{ fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24" }}
-      aria-hidden="true"
-    >
-      {name}
-    </span>
-  );
 }
 
 // =============================================================================

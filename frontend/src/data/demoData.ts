@@ -68,7 +68,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'NGK BKUR6ET-10',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 13200,
@@ -119,7 +119,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'BERU ZSE032',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 14500,
@@ -170,7 +170,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'FILTRON AP 183/3',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 3890,
@@ -221,7 +221,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'MANN WK 69/2',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 5200,
@@ -272,7 +272,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'BOSCH 0 261 500 160',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 35000,
@@ -323,7 +323,7 @@ export const demoParts: DemoPartWithStores[] = [
         brand: 'NGK OZA851-EE3',
       },
       {
-        storeName: 'Uni Autó',
+        storeName: 'Unix Autó',
         storeUrl: 'https://www.unixauto.com',
         storeLogoColor: '#1A56DB',
         price: 19900,
@@ -353,17 +353,17 @@ export const demoParts: DemoPartWithStores[] = [
 // =============================================================================
 
 export const demoCostEstimate: TotalCostEstimate = {
-  parts_min: 83880,
+  parts_min: 83940,
   parts_max: 199694,
   labor_min: 28800,
   labor_max: 45600,
-  total_min: 112680,
+  total_min: 112740,
   total_max: 245294,
   currency: 'HUF',
   estimated_hours: 3.8,
   difficulty: 'medium',
   disclaimer:
-    'Az árak a Bárdi Autó, Uni Autó és AUTODOC webshopok 2026. márciusi kínálata alapján készültek. A tényleges költségek a szerviz munkadíjától és az alkatrész minőségétől függően eltérhetnek. Az összesítés az összes lehetséges alkatrész cseréjét tartalmazza – a tényleges javításhoz nem feltétlenül szükséges mindegyik.',
+    'Az árak a Bárdi Autó, Unix Autó és AUTODOC webshopok 2026. márciusi kínálata alapján készültek. A tényleges költségek a szerviz munkadíjától és az alkatrész minőségétől függően eltérhetnek. Az összesítés az összes lehetséges alkatrész cseréjét tartalmazza – a tényleges javításhoz nem feltétlenül szükséges mindegyik.',
 };
 
 export const demoDiagnosisResponse: DiagnosisResponse = {
@@ -389,7 +389,7 @@ export const demoDiagnosisResponse: DiagnosisResponse = {
         'Az egyedi gyújtótekercsek (COP rendszer) bármelyike meghibásodhat. A P0301 és P0304 kódok az 1. és 4. henger specifikus problémájára utalnak. Méréssel (ohmméterrel) azonosítható a hibás tekercs.',
       confidence: 0.78,
       related_dtc_codes: ['P0301', 'P0304'],
-      components: ['Gyújtótekercs', 'Gyújtókábel'],
+      components: ['Gyújtótekercs', 'Gyújtótekercs csatlakozó'],
     },
     {
       title: 'Eltömődött üzemanyagszűrő vagy injektorprobléma',
@@ -510,29 +510,29 @@ export const demoDiagnosisResponse: DiagnosisResponse = {
     {
       type: 'database',
       title: 'VW Golf VII 1.4 TSI szerviz adatbázis – P0300 hibakód elemzés',
-      url: undefined,
+
       relevance_score: 0.95,
     },
     {
       type: 'tsb',
       title: 'VW Technikai Szerviz Közlemény TPI 2029411 – 1.4 TSI égéskimaradás',
-      url: undefined,
+
       relevance_score: 0.88,
     },
     {
       type: 'forum',
       title: 'Golf7.hu fórum – P0300/P0301 tapasztalatok (412 hozzászólás)',
-      url: undefined,
+
       relevance_score: 0.72,
     },
     {
       type: 'manual',
       title: 'ELSA Workshop Manual – EA211 1.4 TSI Gyújtási rendszer',
-      url: undefined,
+
       relevance_score: 0.91,
     },
   ],
-  created_at: new Date().toISOString(),
+  created_at: '2026-03-01T10:30:00.000Z',
   parts_with_prices: demoParts.map((p) => ({
     id: p.id,
     name: p.name,
@@ -545,7 +545,7 @@ export const demoDiagnosisResponse: DiagnosisResponse = {
   })),
   total_cost_estimate: demoCostEstimate,
   root_cause_analysis:
-    'A Volkswagen Golf VII 1.4 TSI (CZCA motorkód) motorvezérlő egysége (ECU) P0300, P0301 és P0304 hibakódokat regisztrált, amelyek több hengeres égéskimaradásra utalnak. A főtengely pozíció szenzor (CKP) által észlelt szöggyorsulás-ingadozás egyértelműen az 1. és 4. hengernél a legerőteljesebb, ami a „V-mintázatú" (szemben fekvő hengerek) kopási mintára utal.\n\nAz elemzés 87%-os konfidenciával állapítja meg, hogy a probléma gyökérokát a gyújtási rendszer kopása képezi, elsősorban:\n\n• **Gyújtógyertyák** (98.000 km-nél a VW 60.000 km-es ajánláshoz képest 63%-kal túlfutott)\n• **Gyújtótekercsek** (az 1. és 4. henger egyedi COP tekercseinél megnövekedett belső ellenállás)\n• **Levegő- és üzemanyagszűrő** (a szűrő kapacitás csökkenése rontja a keverék-arányokat)\n\nA hiba progresszív jellegű: hidegindításkor a legkifejezettebb (sűrűbb keverék → nagyobb szikraigény), és terhelés alatt (autópálya tempó) is megjelenik, ahol a villódzó check engine lámpa (MI villogás) komoly katalyzátor-károsodás kockázatára figyelmeztet.\n\n⚠️ **Azonnali beavatkozás ajánlott** a katalyzátor védelmében – az elégetlen üzemanyag túlhevítheti és visszafordíthatatlanul károsíthatja a katalizátort, amelynek cseréje 150.000-350.000 Ft.',
+    'A Volkswagen Golf VII 1.4 TSI (CZCA motorkód) motorvezérlő egysége (ECU) P0300, P0301 és P0304 hibakódokat regisztrált, amelyek több hengeres égéskimaradásra utalnak. A főtengely pozíció szenzor (CKP) által észlelt szöggyorsulás-ingadozás egyértelműen az 1. és 4. hengernél a legerőteljesebb, ami az 1. és 4. hengernél (a sor két szélső hengerénél) a legerőteljesebb.\n\nAz elemzés 87%-os konfidenciával állapítja meg, hogy a probléma gyökérokát a gyújtási rendszer kopása képezi, elsősorban:\n\n• **Gyújtógyertyák** (98.000 km-nél a VW 60.000 km-es ajánláshoz képest 63%-kal túlfutott)\n• **Gyújtótekercsek** (az 1. és 4. henger egyedi COP tekercseinél megnövekedett belső ellenállás)\n• **Levegő- és üzemanyagszűrő** (a szűrő kapacitás csökkenése rontja a keverék-arányokat)\n\nA hiba progresszív jellegű: hidegindításkor a legkifejezettebb (sűrűbb keverék → nagyobb szikraigény), és terhelés alatt (autópálya tempó) is megjelenik, ahol a villódzó check engine lámpa (MI villogás) komoly katalyzátor-károsodás kockázatára figyelmeztet.\n\n⚠️ **Azonnali beavatkozás ajánlott** a katalyzátor védelmében – az elégetlen üzemanyag túlhevítheti és visszafordíthatatlanul károsíthatja a katalizátort, amelynek cseréje 150.000-350.000 Ft.',
 };
 
 // =============================================================================

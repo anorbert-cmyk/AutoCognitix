@@ -35,3 +35,7 @@ export {
   PartStoreCard,
   PartStoreCardGrid,
 } from './PartStoreCard';
+
+export { DiagnosticConfidence } from './DiagnosticConfidence';
+
+export { RepairStep } from './RepairStep';

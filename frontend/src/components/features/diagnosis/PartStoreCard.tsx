@@ -7,31 +7,18 @@
  */
 
 import type { DemoPartWithStores, StorePricing } from '../../../data/demoData';
-
-// =============================================================================
-// Material Icon Component
-// =============================================================================
-
-function MaterialIcon({ name, className = '' }: { name: string; className?: string }) {
-  return (
-    <span
-      className={`material-symbols-outlined ${className}`}
-      style={{ fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24" }}
-      aria-hidden="true"
-    >
-      {name}
-    </span>
-  );
-}
+import { MaterialIcon } from '../../ui/MaterialIcon';
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
+const hufFormatter = new Intl.NumberFormat('hu-HU', {
+  maximumFractionDigits: 0,
+});
+
 function formatHUF(amount: number): string {
-  return new Intl.NumberFormat('hu-HU', {
-    maximumFractionDigits: 0,
-  }).format(amount);
+  return hufFormatter.format(amount);
 }
 
 function getQualityStars(rating: number): JSX.Element[] {
@@ -224,9 +211,9 @@ export function PartStoreCard({ part, index }: PartStoreCardProps) {
 
         {/* Store price rows */}
         <div className="space-y-2">
-          {part.stores.map((store, idx) => (
+          {part.stores.map((store) => (
             <StorePriceRow
-              key={idx}
+              key={store.storeName}
               store={store}
               isBest={bestPrice !== null && store.price === bestPrice.price}
             />
@@ -295,7 +282,7 @@ export function PartStoreCardGrid({ parts, className = '' }: PartStoreCardGridPr
 
         {/* Store legend */}
         <div className="flex items-center gap-3 flex-wrap">
-          {['Bárdi Autó', 'Uni Autó', 'AUTODOC'].map((name) => {
+          {['Bárdi Autó', 'Unix Autó', 'AUTODOC'].map((name) => {
             const store = parts[0]?.stores.find((s) => s.storeName === name);
             if (!store) return null;
             return (
