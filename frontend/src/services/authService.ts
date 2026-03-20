@@ -5,7 +5,7 @@
  * and password management.
  */
 
-import api, { ApiError, setCsrfToken, getCsrfToken } from './api'
+import api, { setCsrfToken, getCsrfToken } from './api'
 
 // =============================================================================
 // Types

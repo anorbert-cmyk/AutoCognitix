@@ -296,7 +296,9 @@ class HybridRanker:
                     item_objects[item_key] = item
 
         # Sort by combined score
-        sorted_keys = sorted(item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True)
+        sorted_keys = sorted(
+            item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True
+        )
 
         # Update item scores and return
         result = []

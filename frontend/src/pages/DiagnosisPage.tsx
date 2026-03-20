@@ -22,6 +22,8 @@ import { cn } from '@/lib/utils';
 import { ApiError, type DiagnosisRequest } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { AnalysisProgress } from '../components/features/diagnosis/AnalysisProgress';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import AIDisclaimerBadge from '../components/features/diagnosis/AIDisclaimerBadge';
 
 const currentYear = new Date().getFullYear();
 
@@ -257,6 +259,7 @@ export default function DiagnosisPage() {
           {/* Űrlap */}
           <form onSubmit={handleSubmit} className="p-6 md:p-8 lg:p-10 space-y-10">
             {/* DTC szekció */}
+            <SectionErrorBoundary sectionName="DTC hibakód">
             <section>
               <label htmlFor="dtc-code" className="block text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
                 Elsődleges hibakód (DTC)
@@ -287,10 +290,12 @@ export default function DiagnosisPage() {
                 Adja meg az OBD-II olvasóból származó fő hibakódot.
               </p>
             </section>
+            </SectionErrorBoundary>
 
             <hr className="border-slate-200" />
 
             {/* Jármű szekció */}
+            <SectionErrorBoundary sectionName="Jármű adatok">
             <section>
               <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
                 <Car className="h-5 w-5 text-[#2563eb]" aria-hidden="true" />
@@ -349,8 +354,10 @@ export default function DiagnosisPage() {
                 </div>
               </div>
             </section>
+            </SectionErrorBoundary>
 
             {/* Szöveges mezők szekció */}
+            <SectionErrorBoundary sectionName="Tünetek és megjegyzések">
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Tulajdonos panaszai */}
               <div className="space-y-3">
@@ -399,6 +406,10 @@ export default function DiagnosisPage() {
                 />
               </div>
             </section>
+            </SectionErrorBoundary>
+
+            {/* AI Felelősségi nyilatkozat */}
+            <AIDisclaimerBadge />
 
             {/* Művelet sáv */}
             <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-6 border-t border-slate-200">

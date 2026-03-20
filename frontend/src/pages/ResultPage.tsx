@@ -6,13 +6,15 @@
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMemo } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
 import { DiagnosisResponse, PartWithPrice } from '../services/api';
 import { MaterialIcon } from '../components/ui/MaterialIcon';
 import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
 import { RepairStep } from '../components/features/diagnosis/RepairStep';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import AIDisclaimerBadge from '../components/features/diagnosis/AIDisclaimerBadge';
 
 // Autó kép URL - placehold.co placeholder
 function getVehicleImageUrl(make: string, model: string): string {
@@ -221,23 +223,10 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
           {/* Right Column - AI Analysis & Repair Steps */}
           <div className="lg:col-span-8 space-y-10">
             {/* AI Disclaimer - GDPR/EU AI Act compliance */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-800">
-                    AI-alapú diagnosztikai javaslat
-                  </p>
-                  <p className="text-xs text-amber-700 mt-1">
-                    Ez az elemzés mesterséges intelligencia által generált javaslat, amely NEM helyettesíti a szakképzett szerelő véleményét.
-                    A végső döntést mindig képzett szakember bevonásával hozza meg. Az alkalmazás fejlesztői nem vállalnak felelősséget
-                    a diagnosztikai javaslatok alapján végzett javításokért.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <AIDisclaimerBadge />
 
             {/* AI Analysis Section */}
+            <SectionErrorBoundary sectionName="AI elemzés">
             <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
               <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/3 group-hover:bg-blue-600/30 transition-colors duration-700"></div>
               <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/3"></div>
@@ -261,8 +250,10 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 <DiagnosticConfidence percentage={confidencePercentage} />
               </div>
             </section>
+            </SectionErrorBoundary>
 
             {/* Repair Steps Section */}
+            <SectionErrorBoundary sectionName="Javítási lépések">
             <section>
               <div className="flex items-center gap-4 mb-10">
                 <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Priorizált javítási terv</h3>
@@ -293,8 +284,10 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 </div>
               )}
             </section>
+            </SectionErrorBoundary>
 
             {/* Parts & Prices Section */}
+            <SectionErrorBoundary sectionName="Alkatrészek és árak">
             {result.parts_with_prices && result.parts_with_prices.length > 0 && (
               <section>
                 <div className="flex items-center gap-4 mb-10">
@@ -406,6 +399,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 )}
               </section>
             )}
+            </SectionErrorBoundary>
           </div>
         </div>
       </main>
