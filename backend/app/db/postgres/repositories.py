@@ -404,6 +404,63 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         )
         return list(result.scalars().all())
 
+    async def find_recent_duplicate(
+        self,
+        user_id: UUID,
+        dtc_codes: List[str],
+        vehicle_vin: Optional[str] = None,
+        window_minutes: int = 5,
+    ) -> Optional[DiagnosisSession]:
+        """
+        Find a recent diagnosis with the same parameters.
+
+        Checks for duplicate submissions within the given time window
+        by comparing user, DTC codes, and optionally VIN.
+
+        Args:
+            user_id: The user ID.
+            dtc_codes: List of DTC codes.
+            vehicle_vin: Optional VIN.
+            window_minutes: Time window to check for duplicates.
+
+        Returns:
+            The existing session if a duplicate is found, None otherwise.
+        """
+        from datetime import timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+
+        # Build query for recent sessions by this user
+        query = (
+            select(DiagnosisSession)
+            .where(
+                and_(
+                    DiagnosisSession.user_id == user_id,
+                    DiagnosisSession.created_at >= cutoff,
+                    DiagnosisSession.is_deleted.is_(False),
+                )
+            )
+            .order_by(DiagnosisSession.created_at.desc())
+            .limit(10)
+        )
+
+        if vehicle_vin:
+            query = query.where(DiagnosisSession.vehicle_vin == vehicle_vin)
+
+        result = await self.db.execute(query)
+        recent_sessions = result.scalars().all()
+
+        # Compare DTC codes (sorted for consistent comparison)
+        sorted_new_codes = sorted(c.upper() for c in dtc_codes)
+
+        for session in recent_sessions:
+            if session.dtc_codes:
+                sorted_existing = sorted(c.upper() for c in session.dtc_codes)
+                if sorted_existing == sorted_new_codes:
+                    return session
+
+        return None
+
     async def get_filtered_history(
         self,
         user_id: UUID,

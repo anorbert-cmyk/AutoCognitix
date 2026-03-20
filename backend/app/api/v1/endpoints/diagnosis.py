@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
@@ -231,6 +231,16 @@ async def analyze_vehicle(
         async with DiagnosisService(db) as service:
             result = await service.analyze_vehicle(request, user_id=user_id)
             response.headers["Location"] = f"/api/v1/diagnosis/{result.id}"
+
+            # Check if this was a duplicate submission
+            duplicate_of = getattr(result, "_duplicate_of", None)
+            if duplicate_of is not None:
+                return JSONResponse(
+                    content=result.model_dump(mode="json"),
+                    status_code=status.HTTP_201_CREATED,
+                    headers={"X-Duplicate-Of": str(duplicate_of)},
+                )
+
             return result
 
     except DTCValidationError as e:

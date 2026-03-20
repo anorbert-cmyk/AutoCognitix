@@ -173,6 +173,30 @@ class DiagnosisService:
         )
 
         try:
+            # Step 0: Check for duplicate submission (authenticated users only)
+            if user_id and request.dtc_codes:
+                duplicate = await self.diagnosis_repository.find_recent_duplicate(
+                    user_id=user_id,
+                    dtc_codes=request.dtc_codes,
+                    vehicle_vin=request.vin,
+                )
+                if duplicate:
+                    duplicate_id = (
+                        UUID(str(duplicate.id))
+                        if not isinstance(duplicate.id, UUID)
+                        else duplicate.id
+                    )
+                    logger.info(
+                        f"Duplicate diagnosis detected for user {user_id}, "
+                        f"returning existing session {duplicate_id}"
+                    )
+                    existing_response = await self.get_diagnosis_by_id(
+                        duplicate_id, user_id=user_id
+                    )
+                    if existing_response is not None:
+                        # Mark response as duplicate so the endpoint can add the header
+                        object.__setattr__(existing_response, "_duplicate_of", duplicate_id)
+                        return existing_response
             # Step 1: VIN decoding (if provided)
             vin_data: Optional[VINDecodeResult] = None
             if request.vin:
