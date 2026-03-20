@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import * as Sentry from '@sentry/react'
 import Layout from './components/Layout'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -39,8 +40,8 @@ function handleGlobalError(error: Error, errorInfo: React.ErrorInfo) {
     console.error('Component stack:', errorInfo.componentStack)
   }
 
-  // In production, you would send this to an error tracking service
-  // e.g., Sentry, LogRocket, etc.
+  // Send to Sentry in production
+  Sentry.captureException(error);
 }
 
 function App() {

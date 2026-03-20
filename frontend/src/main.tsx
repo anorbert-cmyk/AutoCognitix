@@ -2,9 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { initSentry } from './config/sentry'
 import App from './App'
 import { ApiError } from './services/api'
 import './index.css'
+
+// Initialize Sentry before React renders
+initSentry()
 
 /**
  * Custom retry function for TanStack Query
