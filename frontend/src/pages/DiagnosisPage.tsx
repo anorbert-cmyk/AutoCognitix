@@ -141,7 +141,7 @@ export default function DiagnosisPage() {
   }, [vehicleMake, vehicleModel, vehicleYear, dtcCode, ownerComplaints, mechanicNotes, toast]);
 
   // Fallback: non-streaming diagnosis when streaming fails
-  const handleStreamingError = useCallback(async (_error?: string) => {
+  const handleStreamingError = useCallback(async (_error: string) => {
     const request = pendingRequestRef.current;
     if (!request) {
       setCurrentStep('input');
@@ -176,13 +176,14 @@ export default function DiagnosisPage() {
     setDiagnosisId(null);
   }, []);
 
-  const handleAnalysisComplete = useCallback((result?: { id?: string }) => {
-    const resultId = result?.id || diagnosisId;
+  const handleAnalysisComplete = useCallback((result?: Record<string, unknown>) => {
+    const resultId = (result as Record<string, string | undefined>)?.id
+      || (result as Record<string, string | undefined>)?.diagnosis_id;
     if (resultId) {
       setDiagnosisId(resultId);
       navigate(`/diagnosis/${resultId}`);
     }
-  }, [diagnosisId, navigate]);
+  }, [navigate]);
 
   const recentItems = historyData?.items || [];
 

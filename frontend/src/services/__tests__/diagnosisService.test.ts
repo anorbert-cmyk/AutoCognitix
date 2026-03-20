@@ -216,8 +216,9 @@ describe('diagnosisService', () => {
         expect(onProgress).toHaveBeenCalledTimes(2);
       });
 
-      expect(onProgress).toHaveBeenNthCalledWith(1, 0.25, 'Kontextus gyűjtés');
-      expect(onProgress).toHaveBeenNthCalledWith(2, 0.5, 'Elemzés');
+      // onProgress now receives event_type (not data.stage) for step index lookup
+      expect(onProgress).toHaveBeenNthCalledWith(1, 0.25, 'context');
+      expect(onProgress).toHaveBeenNthCalledWith(2, 0.5, 'analysis');
     });
 
     it('should call onComplete when complete event is received', async () => {

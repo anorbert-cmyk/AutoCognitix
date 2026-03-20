@@ -278,7 +278,7 @@ export async function quickAnalyze(dtcCodes: string[]): Promise<QuickAnalyzeResu
 function parseSSEEvents(buffer: string): { events: StreamingEvent[]; remaining: string } {
   const events: StreamingEvent[] = []
   // Split on double newline (SSE event boundary)
-  const parts = buffer.split('\n\n')
+  const parts = buffer.split(/\r?\n\r?\n/)
   // Last part may be incomplete - keep it as remaining
   const remaining = parts.pop() || ''
 
@@ -371,67 +371,69 @@ export function streamDiagnosis(
 
   // Start streaming in the background
   const streamPromise = async () => {
-    let response: Response
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
 
     try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      })
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        return // User cancelled, no error callback needed
-      }
-      callbacks.onError?.(
-        new ApiError(
-          'Halozati hiba - ellenorizze az internetkapcsolatot',
-          0,
-          'Halozati hiba',
-          'NETWORK_ERROR',
-          undefined,
-          true
-        )
-      )
-      return
-    }
+      let response: Response
 
-    if (!response.ok) {
-      let detail = `Szerver hiba (${response.status})`
       try {
-        const errorBody = await response.json()
-        if (errorBody?.detail) {
-          detail = errorBody.detail
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        })
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return // User cancelled, no error callback needed
         }
-      } catch {
-        // Ignore JSON parse errors on error response
+        callbacks.onError?.(
+          new ApiError(
+            'Halozati hiba - ellenorizze az internetkapcsolatot',
+            0,
+            'Halozati hiba',
+            'NETWORK_ERROR',
+            undefined,
+            true
+          )
+        )
+        return
       }
-      callbacks.onError?.(new ApiError(detail, response.status, detail))
-      return
-    }
 
-    if (!response.body) {
-      callbacks.onError?.(new ApiError('A szerver nem tamogatja a streaminget', 500))
-      return
-    }
+      if (!response.ok) {
+        let detail = `Szerver hiba (${response.status})`
+        try {
+          const errorBody = await response.json()
+          if (errorBody?.detail) {
+            detail = errorBody.detail
+          }
+        } catch {
+          // Ignore JSON parse errors on error response
+        }
+        callbacks.onError?.(new ApiError(detail, response.status, detail))
+        return
+      }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+      if (!response.body) {
+        callbacks.onError?.(new ApiError('A szerver nem tamogatja a streaminget', 500))
+        return
+      }
 
-    const callbackMap: Record<StreamingEventType, ((data: Record<string, unknown>) => void) | undefined> = {
-      start: callbacks.onStart,
-      context: callbacks.onContext,
-      analysis: callbacks.onAnalysis,
-      cause: callbacks.onCause,
-      repair: callbacks.onRepair,
-      warning: callbacks.onWarning,
-      complete: callbacks.onComplete,
-      error: undefined, // Handled separately
-    }
+      reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-    try {
+      const callbackMap: Record<StreamingEventType, ((data: Record<string, unknown>) => void) | undefined> = {
+        start: callbacks.onStart,
+        context: callbacks.onContext,
+        analysis: callbacks.onAnalysis,
+        cause: callbacks.onCause,
+        repair: callbacks.onRepair,
+        warning: callbacks.onWarning,
+        complete: callbacks.onComplete,
+        error: undefined, // Handled separately
+      }
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -443,7 +445,8 @@ export function streamDiagnosis(
         for (const event of events) {
           // Handle progress callback
           if (callbacks.onProgress && event.progress != null) {
-            callbacks.onProgress(event.progress, event.data?.stage as string | undefined)
+            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
+            callbacks.onProgress(event.progress, stepName)
           }
 
           // Handle error events specially
@@ -466,7 +469,8 @@ export function streamDiagnosis(
         const { events } = parseSSEEvents(buffer + '\n\n')
         for (const event of events) {
           if (callbacks.onProgress && event.progress != null) {
-            callbacks.onProgress(event.progress, event.data?.stage as string | undefined)
+            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
+            callbacks.onProgress(event.progress, stepName)
           }
           if (event.event_type === 'error') {
             const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
@@ -483,11 +487,16 @@ export function streamDiagnosis(
       if (err instanceof DOMException && err.name === 'AbortError') {
         return // User cancelled
       }
-      callbacks.onError?.(
-        err instanceof Error ? err : new ApiError('Streaming hiba', 500)
+      const apiErr = err instanceof ApiError ? err : new ApiError(
+        err instanceof Error ? err.message : 'Streaming hiba',
+        500,
+        err instanceof Error ? err.message : 'Streaming hiba'
       )
+      callbacks.onError?.(apiErr)
     } finally {
-      reader.releaseLock()
+      if (reader) {
+        reader.releaseLock()
+      }
     }
   }
 

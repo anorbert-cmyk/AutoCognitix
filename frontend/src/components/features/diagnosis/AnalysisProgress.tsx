@@ -27,7 +27,7 @@ import type {
   StreamingCallbacks,
   DiagnosisStreamRequest,
 } from '@/types/streaming';
-import type { DiagnosisRequest, DiagnosisResponse } from '@/services/api';
+import type { DiagnosisRequest } from '@/services/api';
 
 // ---------------------------------------------------------------------------
 // streamDiagnosis – the actual function is being created by another agent in
@@ -68,8 +68,8 @@ export interface AnalysisProgressProps {
   diagnosisId?: string;
   /** Cancel handler */
   onCancel?: () => void;
-  /** Callback when analysis completes (receives DiagnosisResponse in streaming mode) */
-  onComplete?: (result?: DiagnosisResponse) => void;
+  /** Callback when analysis completes (receives raw SSE data in streaming mode) */
+  onComplete?: (result?: Record<string, unknown>) => void;
   /** Callback when error occurs */
   onError?: (error: string) => void;
   /** Vehicle info for display */
@@ -207,6 +207,27 @@ export function AnalysisProgress({
   // Track whether streaming has been started to avoid double-invocation
   const streamStartedRef = useRef(false);
 
+  // Bug 2: Ref for the 600ms completion timeout so it can be cleared on unmount
+  const completionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bug 3: Refs for callbacks to avoid stale closures in mock mode
+  const onCompleteRef = useRef(onComplete);
+  const onCancelRef = useRef(onCancel);
+
+  // Bug 4: Ref for streaming timeout (2 min max)
+  const streamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bug 3: Ref for mock mode completion setTimeout
+  const mockCompletionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bug 3: Keep callback refs in sync with latest props
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
   // ---- Derived state ----
   const completedSteps = steps.filter((s) => s.status === 'completed').length;
   const progress = streamingEnabled
@@ -268,11 +289,16 @@ export function AnalysisProgress({
           if (!mountedRef.current) return;
           setSteps(buildStreamingSteps(STREAMING_STEPS.length));
           setStreamingProgress(1);
-          // Give a brief moment to show 100% before navigating
-          setTimeout(() => {
+          // Bug 4: Clear stream timeout on successful completion
+          if (streamTimeoutRef.current) {
+            clearTimeout(streamTimeoutRef.current);
+            streamTimeoutRef.current = null;
+          }
+          // Bug 2: Store the timeout so it can be cleared on unmount
+          completionTimeoutRef.current = setTimeout(() => {
             if (!mountedRef.current) return;
             if (onComplete) {
-              onComplete(data as unknown as DiagnosisResponse);
+              onComplete(data);
             } else if (diagnosisId) {
               navigate(`/diagnosis/${diagnosisId}`);
             }
@@ -286,6 +312,13 @@ export function AnalysisProgress({
           setSteps((prev) =>
             prev.map((s) => (s.status === 'in_progress' ? { ...s, status: 'error' as const } : s))
           );
+          // Bug 5: Clear stale abort controller reference
+          abortRef.current = null;
+          // Bug 4: Clear stream timeout on error
+          if (streamTimeoutRef.current) {
+            clearTimeout(streamTimeoutRef.current);
+            streamTimeoutRef.current = null;
+          }
           if (onError) {
             onError(msg);
           }
@@ -309,6 +342,20 @@ export function AnalysisProgress({
     );
 
     abortRef.current = handle;
+
+    // Bug 4: Set a 2-minute timeout to abort if backend hangs
+    streamTimeoutRef.current = setTimeout(() => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
+      if (mountedRef.current) {
+        setErrorMessage('Az elemzes tullepte a maximalis idokorlatot (2 perc)');
+        setSteps((prev) =>
+          prev.map((s) => (s.status === 'in_progress' ? { ...s, status: 'error' as const } : s))
+        );
+      }
+    }, 120000);
   }, [diagnosisRequest, diagnosisId, navigate, onComplete, onError]);
 
   // Start streaming on mount (once)
@@ -340,6 +387,16 @@ export function AnalysisProgress({
       if (abortRef.current) {
         abortRef.current.abort();
         abortRef.current = null;
+      }
+      // Bug 2: Clear completion timeout
+      if (completionTimeoutRef.current) {
+        clearTimeout(completionTimeoutRef.current);
+        completionTimeoutRef.current = null;
+      }
+      // Bug 4: Clear stream timeout
+      if (streamTimeoutRef.current) {
+        clearTimeout(streamTimeoutRef.current);
+        streamTimeoutRef.current = null;
       }
     };
   }, [streamingEnabled, diagnosisRequest, startStreaming]);
@@ -380,10 +437,12 @@ export function AnalysisProgress({
           ).length;
 
           if (newCompletedCount === newSteps.length) {
-            if (onComplete) {
-              setTimeout(() => onComplete(), 500);
+            // Bug 3: Use refs to avoid stale closures; store timeout for cleanup
+            if (onCompleteRef.current) {
+              const cb = onCompleteRef.current;
+              mockCompletionTimeoutRef.current = setTimeout(() => cb(), 500);
             } else if (diagnosisId) {
-              setTimeout(() => navigate(`/diagnosis/${diagnosisId}`), 500);
+              mockCompletionTimeoutRef.current = setTimeout(() => navigate(`/diagnosis/${diagnosisId}`), 500);
             }
           }
 
@@ -397,8 +456,15 @@ export function AnalysisProgress({
       setEstimatedTime((t) => Math.max(0, t - 5));
     }, 1500);
 
-    return () => clearInterval(interval);
-  }, [isMockMode, diagnosisId, navigate, onComplete]);
+    return () => {
+      clearInterval(interval);
+      // Bug 3: Clear mock completion timeout on unmount
+      if (mockCompletionTimeoutRef.current) {
+        clearTimeout(mockCompletionTimeoutRef.current);
+        mockCompletionTimeoutRef.current = null;
+      }
+    };
+  }, [isMockMode, diagnosisId, navigate]);
 
   // =========================================================================
   // Handlers

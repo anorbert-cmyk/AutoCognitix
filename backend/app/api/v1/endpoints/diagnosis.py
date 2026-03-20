@@ -909,7 +909,7 @@ async def analyze_vehicle_stream(
                                 "components": cause.get("components", []),
                             },
                             diagnosis_id=diagnosis_id,
-                            progress=0.6 + (0.1 * (idx + 1) / max(len(probable_causes), 1)),
+                            progress=0.60 + (0.15 * (idx + 1) / max(len(probable_causes), 1)),
                         )
                     )
                     await asyncio.sleep(0.02)
@@ -930,7 +930,7 @@ async def analyze_vehicle_stream(
                                 "estimated_time_minutes": repair.get("estimated_time_minutes"),
                             },
                             diagnosis_id=diagnosis_id,
-                            progress=0.8 + (0.1 * (idx + 1) / max(len(repairs), 1)),
+                            progress=0.75 + (0.17 * (idx + 1) / max(len(repairs), 1)),
                         )
                     )
                     await asyncio.sleep(0.02)
@@ -1044,7 +1044,7 @@ def _format_sse_event(event: StreamingEvent) -> str:
         "event_type": event.event_type,
         "data": event.data,
         "diagnosis_id": str(event.diagnosis_id),
-        "timestamp": event.timestamp.isoformat(),
+        "timestamp": event.timestamp.isoformat().replace("+00:00", "Z"),
         "progress": event.progress,
     }
     return f"event: {event.event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
