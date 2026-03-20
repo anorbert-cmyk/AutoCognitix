@@ -88,6 +88,20 @@ class DatabaseStats(BaseModel):
     redis: Dict[str, Any]
 
 
+class ConsistencyResponse(BaseModel):
+    """Cross-database consistency check response."""
+
+    checked_at: str
+    pg_dtc_count: int = 0
+    neo4j_dtc_count: int = 0
+    qdrant_vector_count: int = 0
+    missing_in_neo4j: list = []
+    missing_in_qdrant: list = []
+    orphaned_in_neo4j: list = []
+    is_consistent: bool = False
+    errors: list = []
+
+
 # Track startup time for uptime calculation
 _startup_time: Optional[float] = None
 
@@ -580,3 +594,36 @@ async def database_stats():
         else {"error": str(redis_health)},
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/consistency", response_model=ConsistencyResponse, tags=["Health"])
+async def consistency_check():
+    """
+    Cross-database consistency check.
+
+    Compares DTC codes across PostgreSQL, Neo4j, and Qdrant to detect
+    data synchronization issues. Reports mismatches, orphaned records,
+    and missing entries.
+
+    This is a heavier operation than standard health checks.
+    Intended for admin/monitoring use, not frequent polling.
+
+    Returns:
+        ConsistencyResponse: Consistency report with counts and mismatches
+    """
+    from app.services.consistency_service import ConsistencyService
+
+    service = ConsistencyService()
+    report = await service.check_dtc_consistency()
+
+    return ConsistencyResponse(
+        checked_at=report.checked_at,
+        pg_dtc_count=report.pg_dtc_count,
+        neo4j_dtc_count=report.neo4j_dtc_count,
+        qdrant_vector_count=report.qdrant_vector_count,
+        missing_in_neo4j=report.missing_in_neo4j,
+        missing_in_qdrant=report.missing_in_qdrant,
+        orphaned_in_neo4j=report.orphaned_in_neo4j,
+        is_consistent=report.is_consistent,
+        errors=report.errors,
+    )
