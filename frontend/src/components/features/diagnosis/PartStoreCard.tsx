@@ -8,6 +8,7 @@
  * Design: Navy theme (#0D1B2A), Space Grotesk, Material Symbols
  */
 
+import { useMemo } from 'react';
 import type { DemoPartWithStores, StorePricing } from '../../../data/demoData';
 import { MaterialIcon } from '../../ui/MaterialIcon';
 
@@ -155,8 +156,8 @@ interface PartStoreCardProps {
 }
 
 export function PartStoreCard({ part, index }: PartStoreCardProps) {
-  const bestPrice = getBestPrice(part.stores);
-  const maxPrice = getMaxPrice(part.stores);
+  const bestPrice = useMemo(() => getBestPrice(part.stores), [part.stores]);
+  const maxPrice = useMemo(() => getMaxPrice(part.stores), [part.stores]);
   const savings = bestPrice ? maxPrice - bestPrice.price : 0;
 
   const secondaryStores = part.stores.filter(

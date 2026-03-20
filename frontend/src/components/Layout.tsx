@@ -36,6 +36,7 @@ export default function Layout() {
   const location = useLocation();
 
   const handleLogout = async () => {
+    if (!window.confirm('Biztosan ki szeretne jelentkezni?')) return;
     await logout();
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
@@ -132,14 +133,6 @@ export default function Layout() {
                             </p>
                           </div>
                           <div className="py-1">
-                            <Link
-                              to="/profile"
-                              className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"
-                              onClick={() => setUserMenuOpen(false)}
-                            >
-                              <User className="h-4 w-4" />
-                              Profil
-                            </Link>
                             <Link
                               to="/history"
                               className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted"

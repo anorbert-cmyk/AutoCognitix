@@ -56,6 +56,7 @@ class InMemoryRateLimiter:
         key: str,
         limit: int,
         window_seconds: int,
+        block_duration_seconds: int = 60,
     ) -> Tuple[bool, int, int]:
         """
         Check if a request is allowed.
@@ -64,6 +65,7 @@ class InMemoryRateLimiter:
             key: Unique identifier (IP or user ID)
             limit: Maximum requests allowed
             window_seconds: Time window in seconds
+            block_duration_seconds: How long to block after limit exceeded
 
         Returns:
             Tuple of (allowed, remaining, retry_after_seconds)
@@ -96,8 +98,8 @@ class InMemoryRateLimiter:
 
         if current_count >= limit:
             # Block the key
-            self._blocked[key] = now + settings.RATE_LIMIT_PER_MINUTE
-            return False, 0, settings.RATE_LIMIT_PER_MINUTE
+            self._blocked[key] = now + block_duration_seconds
+            return False, 0, block_duration_seconds
 
         # Add new request
         self._requests[key].append((now, 1))
@@ -311,7 +313,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         except Exception:
             # Fallback to in-memory limiter
             allowed, remaining, retry_after = self._memory_limiter.is_allowed(
-                rate_key, limit, window
+                rate_key,
+                limit,
+                window,
+                block_duration_seconds=self._config.block_duration_seconds,
             )
 
         if not allowed:

@@ -95,18 +95,18 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             </div>
 
             <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              Hiba tortent
+              Hiba történt
             </h2>
 
             <p className="text-gray-600 mb-4">
-              Sajnos varatlan hiba tortent az alkalmazasban. Kerem, probalkozzon ujra,
-              vagy terjen vissza a fooldara.
+              Sajnos váratlan hiba történt az alkalmazásban. Kérem, próbálkozzon újra,
+              vagy térjen vissza a főoldalra.
             </p>
 
             {import.meta.env.DEV && this.state.error && (
               <details className="mb-4 text-left">
                 <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
-                  Technikai reszletek
+                  Technikai részletek
                 </summary>
                 <div className="mt-2 p-3 bg-gray-100 rounded text-xs font-mono text-red-600 overflow-auto max-h-32">
                   <p className="font-bold">{this.state.error.name}:</p>
@@ -126,7 +126,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
               >
                 <RefreshCw className="w-4 h-4" />
-                Ujraprobalas
+                Újrapróbálás
               </button>
 
               <button
@@ -134,7 +134,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 <Home className="w-4 h-4" />
-                Foodalra
+                Főoldalra
               </button>
             </div>
           </div>

@@ -288,6 +288,22 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         result = await self.db.execute(select(DTCCode).where(DTCCode.code == code.upper()))
         return result.scalar_one_or_none()
 
+    async def get_by_codes(self, codes: List[str]) -> List[DTCCode]:
+        """
+        Get multiple DTCs by code strings in a single query.
+
+        Args:
+            codes: List of DTC codes to search for.
+
+        Returns:
+            List of matching DTCCode objects.
+        """
+        if not codes:
+            return []
+        upper_codes = [c.upper() for c in codes]
+        result = await self.db.execute(select(DTCCode).where(DTCCode.code.in_(upper_codes)))
+        return list(result.scalars().all())
+
     async def search(
         self,
         query: str,

@@ -413,17 +413,8 @@ export default function DiagnosisPage() {
 
             {/* Művelet sáv */}
             <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-6 border-t border-slate-200">
-              <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-                <Clock className="h-4 w-4" aria-hidden="true" />
-                <span>Automatikusan mentve 2 perce</span>
-              </div>
+              <div />
               <div className="flex w-full md:w-auto gap-4">
-                <button
-                  type="button"
-                  className="flex-1 md:flex-none h-14 px-8 rounded-xl border-2 border-slate-300 text-slate-700 font-bold hover:bg-slate-50 transition-colors"
-                >
-                  Piszkozat mentése
-                </button>
                 <button
                   type="submit"
                   disabled={analyzeDiagnosis.isPending}

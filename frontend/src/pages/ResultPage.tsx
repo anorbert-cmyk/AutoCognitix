@@ -162,6 +162,8 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                   src={vehicleImage}
                   alt={`${result.vehicle_make} ${result.vehicle_model}`}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="lazy"
+                  decoding="async"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent"></div>
                 <div className="absolute bottom-5 left-6 text-white">
@@ -288,7 +290,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
 
             {/* Parts & Prices Section */}
             <SectionErrorBoundary sectionName="Alkatrészek és árak">
-            {result.parts_with_prices && result.parts_with_prices.length > 0 && (
+            {result.parts_with_prices && result.parts_with_prices.length > 0 ? (
               <section>
                 <div className="flex items-center gap-4 mb-10">
                   <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Alkatrészek és Árak</h3>
@@ -398,6 +400,13 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                   </div>
                 )}
               </section>
+            ) : (
+              <section>
+                <div className="bg-blue-50 rounded-2xl p-8 border border-blue-100 flex items-center gap-4">
+                  <MaterialIcon name="info" className="text-3xl text-blue-400 flex-shrink-0" />
+                  <p className="text-blue-700 font-medium">Alkatrész árinformáció nem elérhető ehhez a diagnosztikához.</p>
+                </div>
+              </section>
             )}
             </SectionErrorBoundary>
           </div>
@@ -412,7 +421,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
             className="w-full sm:w-auto px-6 py-3.5 rounded-lg border border-slate-600 text-slate-200 font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-sm"
           >
             <MaterialIcon name="picture_as_pdf" className="text-xl" />
-            Jelentés mentése PDF-ként
+            Nyomtatás / PDF
           </button>
           <button
             onClick={handlePrintWorksheet}

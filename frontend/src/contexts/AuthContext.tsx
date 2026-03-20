@@ -13,6 +13,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react'
+import { Navigate } from 'react-router-dom'
 import {
   User,
   LoginCredentials,
@@ -234,8 +235,7 @@ export function ProtectedRoute({
 
   if (!isAuthenticated) {
     // Redirect to login
-    window.location.href = '/login'
-    return null
+    return <Navigate to="/login" replace />
   }
 
   // Check role requirements

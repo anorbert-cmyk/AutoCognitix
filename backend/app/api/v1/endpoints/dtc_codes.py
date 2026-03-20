@@ -298,6 +298,17 @@ async def _get_neo4j_relationships(code: str) -> Dict[str, Any]:
         return {}
 
 
+def _compute_text_relevance(dtc: DTCCodeModel, query_lower: str) -> float:
+    """Compute text relevance score for a DTC against a search query."""
+    if query_lower in dtc.code.lower():
+        return 0.9
+    if dtc.description_hu and query_lower in dtc.description_hu.lower():
+        return 0.7
+    if query_lower in dtc.description_en.lower():
+        return 0.6
+    return 0.5
+
+
 def _dtc_model_to_search_result(
     dtc: DTCCodeModel, relevance_score: Optional[float] = None
 ) -> DTCSearchResult:
@@ -452,18 +463,10 @@ async def search_dtc_codes(
 
     # Add text results (avoid duplicates)
     existing_codes = {r.code for r in results}
+    query_lower = query.lower()
     for dtc in text_results:
         if dtc.code not in existing_codes:
-            # Calculate simple relevance score
-            relevance = 0.5
-            query_lower = query.lower()
-            if query_lower in dtc.code.lower():
-                relevance = 0.9
-            elif dtc.description_hu and query_lower in dtc.description_hu.lower():
-                relevance = 0.7
-            elif query_lower in dtc.description_en.lower():
-                relevance = 0.6
-
+            relevance = _compute_text_relevance(dtc, query_lower)
             results.append(_dtc_model_to_search_result(dtc, relevance_score=relevance))
             existing_codes.add(dtc.code)
 
@@ -481,21 +484,24 @@ async def search_dtc_codes(
                 category=category_filter,
             )
 
-            # Merge semantic results
+            # Collect codes and scores from semantic results
+            code_score_map: Dict[str, float] = {}
             for result in semantic_results:
                 payload = result.get("payload", {})
                 code = payload.get("code", "")
-
                 if code and code not in existing_codes:
-                    # Fetch full details from PostgreSQL
-                    semantic_dtc = await repository.get_by_code(code)
-                    if semantic_dtc:
-                        results.append(
-                            _dtc_model_to_search_result(
-                                semantic_dtc, relevance_score=result.get("score", 0.5)
-                            )
+                    code_score_map[code] = result.get("score", 0.5)
+
+            # Batch fetch all codes in a single query
+            if code_score_map:
+                semantic_dtcs = await repository.get_by_codes(list(code_score_map.keys()))
+                for semantic_dtc in semantic_dtcs:
+                    results.append(
+                        _dtc_model_to_search_result(
+                            semantic_dtc, relevance_score=code_score_map.get(semantic_dtc.code, 0.5)
                         )
-                        existing_codes.add(code)
+                    )
+                    existing_codes.add(semantic_dtc.code)
 
         except Exception as e:
             logger.warning(f"Semantic search failed, using text results only: {e}")
@@ -850,7 +856,7 @@ async def create_dtc_code(
 @router.post(
     "/bulk",
     response_model=Dict[str, Any],
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     responses=BULK_IMPORT_RESPONSES,
     summary="Bulk import DTC codes",
     description="""
@@ -890,42 +896,50 @@ async def bulk_import_dtc_codes(
     skipped = 0
     errors = []
 
-    for dtc_data in import_data.codes:
-        try:
-            code = dtc_data.code.upper()
-            existing = await repository.get_by_code(code)
+    try:
+        for dtc_data in import_data.codes:
+            try:
+                code = dtc_data.code.upper()
+                existing = await repository.get_by_code(code)
 
-            data = {
-                "code": code,
-                "description_en": dtc_data.description_en,
-                "description_hu": dtc_data.description_hu,
-                "category": dtc_data.category.value,
-                "severity": dtc_data.severity.value,
-                "is_generic": dtc_data.is_generic,
-                "system": dtc_data.system,
-                "symptoms": dtc_data.symptoms,
-                "possible_causes": dtc_data.possible_causes,
-                "diagnostic_steps": dtc_data.diagnostic_steps,
-                "related_codes": dtc_data.related_codes,
-            }
+                data = {
+                    "code": code,
+                    "description_en": dtc_data.description_en,
+                    "description_hu": dtc_data.description_hu,
+                    "category": dtc_data.category.value,
+                    "severity": dtc_data.severity.value,
+                    "is_generic": dtc_data.is_generic,
+                    "system": dtc_data.system,
+                    "symptoms": dtc_data.symptoms,
+                    "possible_causes": dtc_data.possible_causes,
+                    "diagnostic_steps": dtc_data.diagnostic_steps,
+                    "related_codes": dtc_data.related_codes,
+                }
 
-            if existing:
-                if import_data.overwrite_existing:
-                    await repository.update(existing.id, data)
-                    updated += 1
+                if existing:
+                    if import_data.overwrite_existing:
+                        await repository.update(existing.id, data)
+                        updated += 1
+                    else:
+                        skipped += 1
                 else:
-                    skipped += 1
-            else:
-                await repository.create(data)
-                created += 1
+                    await repository.create(data)
+                    created += 1
 
-        except Exception as e:
-            errors.append({"code": dtc_data.code, "error": str(e)})
-            logger.error(
-                f"Error importing DTC {sanitize_log(dtc_data.code)}: {sanitize_log(str(e))}"
-            )
+            except Exception as e:
+                errors.append({"code": dtc_data.code, "error": str(e)})
+                logger.error(
+                    f"Error importing DTC {sanitize_log(dtc_data.code)}: {sanitize_log(str(e))}"
+                )
 
-    await db.commit()
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Bulk import transaction failed, rolled back: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bulk import failed, all changes rolled back.",
+        )
 
     logger.info(f"Bulk import complete: {created} created, {updated} updated, {skipped} skipped")
 
