@@ -10,6 +10,10 @@ import {
   LogOut,
   LogIn,
   UserPlus,
+  ClipboardCheck,
+  Calculator,
+  MessageSquare,
+  MapPin,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +31,10 @@ const navigationItems: NavItem[] = [
   { label: 'Új diagnosztika', href: '/diagnosis', icon: <Plus className="h-4 w-4" /> },
   { label: 'Előzmények', href: '/history', icon: <History className="h-4 w-4" />, requiresAuth: true },
   { label: 'Beállítások', href: '/settings', icon: <Settings className="h-4 w-4" /> },
+  { label: 'Műszaki Vizsga', href: '/inspection', icon: <ClipboardCheck className="h-4 w-4" /> },
+  { label: 'Kalkulátor', href: '/calculator', icon: <Calculator className="h-4 w-4" /> },
+  { label: 'AI Chat', href: '/chat', icon: <MessageSquare className="h-4 w-4" /> },
+  { label: 'Szervizek', href: '/services', icon: <MapPin className="h-4 w-4" /> },
 ];
 
 export default function Layout() {

@@ -6,7 +6,7 @@
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Calculator, MessageSquare, MapPin } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
 import { DiagnosisResponse, PartWithPrice } from '../services/api';
@@ -409,6 +409,33 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               </section>
             )}
             </SectionErrorBoundary>
+          </div>
+        </div>
+
+        {/* Cross-link Actions */}
+        <div className="max-w-7xl mx-auto px-4 md:px-8 lg:px-10 mt-10 mb-6 print:hidden">
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to={`/calculator?diagnosis_id=${result.id}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
+            >
+              <Calculator className="h-4 w-4" />
+              Megéri megjavítani?
+            </Link>
+            <Link
+              to={`/chat?diagnosis_id=${result.id}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Kérdezz az AI-tól
+            </Link>
+            <Link
+              to="/services"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
+            >
+              <MapPin className="h-4 w-4" />
+              Szerviz keresése
+            </Link>
           </div>
         </div>
       </main>
