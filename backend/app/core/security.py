@@ -350,3 +350,33 @@ def generate_secure_token(length: int = 32) -> str:
         A URL-safe base64 encoded token string
     """
     return secrets.token_urlsafe(length)
+
+
+def generate_csrf_token() -> str:
+    """
+    Generate a CSRF token for cookie-based auth protection.
+
+    Returns a cryptographically secure token that should be returned
+    in the login response body (NOT in a cookie) and sent by the
+    frontend as an X-CSRF-Token header on state-changing requests.
+
+    Returns:
+        A URL-safe base64 encoded CSRF token string
+    """
+    return secrets.token_urlsafe(32)
+
+
+def verify_csrf_token(token: Optional[str]) -> bool:
+    """
+    Verify that a CSRF token is present and non-empty.
+
+    The token is validated for presence only since we use a per-session
+    token stored in-memory on the frontend (not accessible to attackers).
+
+    Args:
+        token: The CSRF token from X-CSRF-Token header
+
+    Returns:
+        True if token is present and non-empty
+    """
+    return bool(token and len(token) >= 16)

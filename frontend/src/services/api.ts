@@ -12,6 +12,7 @@ export const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 30000, // 30 second timeout
+  withCredentials: true, // Send httpOnly cookies with every request
 })
 
 // =============================================================================
@@ -102,15 +103,29 @@ export class ApiError extends Error {
 }
 
 // =============================================================================
+// CSRF Token Storage (in-memory only - not accessible to XSS)
+// =============================================================================
+
+let csrfToken: string | null = null
+
+export function setCsrfToken(token: string | null) {
+  csrfToken = token
+}
+
+export function getCsrfToken(): string | null {
+  return csrfToken
+}
+
+// =============================================================================
 // Request Interceptors
 // =============================================================================
 
-// Add auth token to requests
+// Add CSRF token header for state-changing requests (cookies are sent automatically)
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    // Attach CSRF token for state-changing methods
+    if (csrfToken && config.method && ['post', 'put', 'patch', 'delete'].includes(config.method)) {
+      config.headers['X-CSRF-Token'] = csrfToken
     }
     return config
   },
@@ -128,34 +143,27 @@ api.interceptors.response.use(
   async (error: AxiosError<ApiErrorDetail>) => {
     const originalRequest = error.config as typeof error.config & { _retry?: boolean }
 
-    // Handle 401 errors (token expired)
+    // Handle 401 errors (token expired) - attempt silent refresh via cookie
     if (error.response?.status === 401 && !originalRequest?._retry) {
       originalRequest._retry = true
 
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (refreshToken) {
-        try {
-          const response = await api.post('/auth/refresh', {
-            refresh_token: refreshToken,
-          })
-          const { access_token, refresh_token: newRefreshToken } = response.data
+      try {
+        // Refresh token is sent automatically via httpOnly cookie
+        const response = await api.post('/auth/refresh')
+        const { csrf_token } = response.data
 
-          localStorage.setItem('access_token', access_token)
-          localStorage.setItem('refresh_token', newRefreshToken)
-
-          if (originalRequest) {
-            originalRequest.headers.Authorization = `Bearer ${access_token}`
-            return api(originalRequest)
-          }
-        } catch (refreshError) {
-          // Refresh failed, clear tokens and redirect to login
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
+        // Update CSRF token in memory
+        if (csrf_token) {
+          setCsrfToken(csrf_token)
         }
-      } else {
-        // No refresh token, redirect to login
-        localStorage.removeItem('access_token')
+
+        // Retry the original request (cookies are updated automatically)
+        if (originalRequest) {
+          return api(originalRequest)
+        }
+      } catch (refreshError) {
+        // Refresh failed, clear CSRF token and redirect to login
+        setCsrfToken(null)
         window.location.href = '/login'
       }
     }
@@ -390,6 +398,7 @@ export interface LoginResponse {
   access_token: string
   refresh_token: string
   token_type: string
+  csrf_token?: string
 }
 
 export interface RefreshTokenRequest {

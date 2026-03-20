@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,7 @@ from app.core.security import (
     create_password_reset_token,
     create_refresh_token,
     decode_token,
+    generate_csrf_token,
     get_password_hash,
     verify_password,
 )
@@ -47,7 +48,54 @@ from app.db.postgres.session import get_db
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+# =============================================================================
+# Cookie Helpers
+# =============================================================================
+
+
+def _set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    """Set httpOnly secure cookies for access and refresh tokens."""
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/api/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path="/api/v1/auth/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Clear httpOnly auth cookies on logout."""
+    response.delete_cookie(
+        key="access_token",
+        path="/api/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/api/v1/auth/",
+        domain=settings.COOKIE_DOMAIN,
+    )
 
 
 # =============================================================================
@@ -56,14 +104,21 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 async def get_current_user_from_token(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
     Dependency to get the current authenticated user from JWT token.
 
+    Supports dual auth: checks httpOnly cookie first, then falls back
+    to the Authorization header for API clients.
+
     Args:
-        token: JWT access token from Authorization header
+        request: The incoming request
+        token: JWT access token from Authorization header (optional)
+        access_token_cookie: JWT access token from httpOnly cookie (optional)
         db: Database session
 
     Returns:
@@ -79,7 +134,14 @@ async def get_current_user_from_token(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = await decode_token(token)
+    # Resolve token: cookie first, then Authorization header
+    resolved_token = access_token_cookie or token
+
+    if not resolved_token:
+        logger.warning("No token provided (cookie or header)")
+        raise credentials_exception
+
+    payload = await decode_token(resolved_token)
 
     if not payload:
         logger.warning("Invalid token provided")
@@ -116,21 +178,28 @@ async def get_current_user_from_token(
 
 
 async def get_optional_current_user(
-    token: Optional[str] = Depends(
-        OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
-    ),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """
     Optional dependency to get current user (returns None if not authenticated).
 
+    Supports dual auth: checks httpOnly cookie first, then Authorization header.
     Useful for endpoints that work differently for authenticated vs anonymous users.
     """
-    if not token:
+    resolved_token = access_token_cookie or token
+    if not resolved_token:
         return None
 
     try:
-        return await get_current_user_from_token(token, db)
+        return await get_current_user_from_token(
+            request=request,
+            token=token,
+            access_token_cookie=access_token_cookie,
+            db=db,
+        )
     except HTTPException:
         return None
 
@@ -396,6 +465,7 @@ Authorization: Bearer <access_token>
     """,
 )
 async def login(
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
@@ -478,12 +548,20 @@ async def login(
     )
     refresh_token = create_refresh_token(subject=str(user.id))
 
+    # Generate CSRF token for cookie-based auth protection
+    csrf_token = generate_csrf_token()
+
+    # Set httpOnly secure cookies for browser clients
+    _set_auth_cookies(response, access_token, refresh_token)
+
     logger.info(f"User logged in: {user.email}")
 
+    # Return tokens in body for backward compatibility (API clients)
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
+        csrf_token=csrf_token,
     )
 
 
@@ -507,7 +585,9 @@ anélkül, hogy a felhasználónak újra be kellene jelentkeznie.
     """,
 )
 async def refresh_tokens(
-    token_data: TokenRefresh,
+    response: Response,
+    token_data: Optional[TokenRefresh] = None,
+    refresh_token_cookie: Optional[str] = Cookie(default=None, alias="refresh_token"),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
     """
@@ -516,8 +596,12 @@ async def refresh_tokens(
     Validates the refresh token and issues new access and refresh tokens.
     The old refresh token should be discarded after this call.
 
+    Supports dual auth: checks httpOnly cookie first, then request body.
+
     Args:
-        token_data: Refresh token data
+        response: The response object for setting new cookies
+        token_data: Refresh token data from request body (optional)
+        refresh_token_cookie: Refresh token from httpOnly cookie (optional)
         db: Database session
 
     Returns:
@@ -526,7 +610,19 @@ async def refresh_tokens(
     Raises:
         401: Invalid refresh token
     """
-    payload = await decode_token(token_data.refresh_token)
+    # Resolve refresh token: cookie first, then request body
+    resolved_refresh_token = refresh_token_cookie
+    if not resolved_refresh_token and token_data:
+        resolved_refresh_token = token_data.refresh_token
+
+    if not resolved_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Érvénytelen refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = await decode_token(resolved_refresh_token)
 
     if not payload or payload.get("type") != "refresh":
         logger.warning("Invalid refresh token provided")
@@ -555,7 +651,7 @@ async def refresh_tokens(
         )
 
     # Blacklist old refresh token - log failure as security event
-    if not await blacklist_token(token_data.refresh_token):
+    if not await blacklist_token(resolved_refresh_token):
         logger.error(
             f"Failed to blacklist old refresh token for user {user_id} - potential token reuse"
         )
@@ -567,12 +663,19 @@ async def refresh_tokens(
     )
     new_refresh_token = create_refresh_token(subject=user_id)
 
+    # Generate new CSRF token
+    csrf_token = generate_csrf_token()
+
+    # Set new httpOnly cookies for browser clients
+    _set_auth_cookies(response, access_token, new_refresh_token)
+
     logger.info(f"Tokens refreshed for user: {user.email}")
 
     return Token(
         access_token=access_token,
         refresh_token=new_refresh_token,
         token_type="bearer",
+        csrf_token=csrf_token,
     )
 
 
@@ -590,30 +693,42 @@ Felhasználó kijelentkeztetése és tokenek érvénytelenítése.
     """,
 )
 async def logout(
+    response: Response,
     logout_data: Optional[LogoutRequest] = None,
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
+    refresh_token_cookie: Optional[str] = Cookie(default=None, alias="refresh_token"),
 ) -> LogoutResponse:
     """
     Logout user and invalidate tokens.
 
+    Supports dual auth: reads tokens from cookies and/or request body/header.
+    Clears httpOnly cookies on logout.
+
     Args:
+        response: The response object for clearing cookies
         logout_data: Optional logout request with refresh token
-        token: Access token from header
+        token: Access token from Authorization header (optional)
+        access_token_cookie: Access token from httpOnly cookie (optional)
+        refresh_token_cookie: Refresh token from httpOnly cookie (optional)
 
     Returns:
         Logout confirmation
     """
-    # Blacklist access token - log failure as security event
-    if not await blacklist_token(token):
+    # Blacklist access token (cookie or header) - log failure as security event
+    resolved_access = access_token_cookie or token
+    if resolved_access and not await blacklist_token(resolved_access):
         logger.error("Failed to blacklist access token during logout - token may remain valid")
 
-    # Blacklist refresh token if provided
-    if (
-        logout_data
-        and logout_data.refresh_token
-        and not await blacklist_token(logout_data.refresh_token)
-    ):
+    # Blacklist refresh token (cookie or request body)
+    resolved_refresh = refresh_token_cookie
+    if not resolved_refresh and logout_data and logout_data.refresh_token:
+        resolved_refresh = logout_data.refresh_token
+    if resolved_refresh and not await blacklist_token(resolved_refresh):
         logger.error("Failed to blacklist refresh token during logout")
+
+    # Clear httpOnly auth cookies
+    _clear_auth_cookies(response)
 
     logger.info("User logged out")
 
