@@ -104,7 +104,7 @@ export function ChatInput({
                 ? 'text-gray-300 cursor-not-allowed'
                 : 'text-gray-500 hover:text-primary-600 hover:bg-primary-50'
             )}
-            title="Diktalaas"
+            title="Diktalas"
             aria-label="Beszedfelismeres inditasa"
           >
             <Mic className="h-5 w-5" aria-hidden="true" />

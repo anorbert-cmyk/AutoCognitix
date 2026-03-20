@@ -4,7 +4,7 @@
  * User messages: right-aligned blue. AI messages: left-aligned gray with optional sources.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Bot, User } from 'lucide-react'
 import type { ChatMessage, ChatSource } from '../../../services/chatService'
 import { cn } from '@/lib/utils'
@@ -94,9 +94,17 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  // Re-render relative time every 60 seconds
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 60_000)
+    return () => clearInterval(interval)
+  }, [])
+
   const relativeTime = useMemo(
     () => formatRelativeTime(message.timestamp),
-    [message.timestamp]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [message.timestamp, tick]
   )
 
   return (

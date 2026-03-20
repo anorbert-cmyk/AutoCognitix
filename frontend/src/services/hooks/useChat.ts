@@ -102,7 +102,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           onSuggestion: (suggestion: string) => {
             newSuggestions.push(suggestion)
           },
-          onComplete: () => {
+          onComplete: (serverConversationId: string) => {
             const assistantMessage: ChatMessage = {
               id: generateMessageId(),
               role: 'assistant',
@@ -122,9 +122,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
               setSuggestions(newSuggestions)
             }
 
-            // Extract conversation_id from first response if not set
-            if (!conversationId) {
-              setConversationId(`conv_${Date.now()}`)
+            // Use server-provided conversation_id for multi-turn context
+            if (serverConversationId) {
+              setConversationId(serverConversationId)
             }
           },
           onError: (error) => {
