@@ -202,6 +202,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     SENSITIVE_ENDPOINTS = {
         "/api/v1/auth/login": (10, 60),  # 10 per minute
         "/api/v1/auth/register": (5, 60),  # 5 per minute
+        "/api/v1/diagnosis/analyze/stream": (5, 60),  # 5 per minute (long-lived SSE)
         "/api/v1/diagnosis/analyze": (20, 60),  # 20 per minute (expensive)
     }
 
