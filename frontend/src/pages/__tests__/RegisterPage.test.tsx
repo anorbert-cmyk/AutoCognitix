@@ -119,18 +119,18 @@ describe('RegisterPage', () => {
     const user = userEvent.setup();
     render(<RegisterPage />);
 
-    // Requirements should not be visible initially
-    expect(screen.queryByText('Jelszo kovetelmenyei:')).not.toBeInTheDocument();
+    // Requirements should not be visible initially (meter returns null for empty password)
+    expect(screen.queryByText('Legalább 8 karakter')).not.toBeInTheDocument();
 
-    // Focus the password field
-    await user.click(screen.getByLabelText('Jelszo'));
+    // Type a character to trigger the PasswordStrengthMeter
+    await user.type(screen.getByLabelText('Jelszo'), 'a');
 
-    expect(screen.getByText('Jelszo kovetelmenyei:')).toBeInTheDocument();
-    expect(screen.getByText('Legalabb 8 karakter')).toBeInTheDocument();
-    expect(screen.getByText('Legalabb egy nagybetu')).toBeInTheDocument();
-    expect(screen.getByText('Legalabb egy kisbetu')).toBeInTheDocument();
-    expect(screen.getByText('Legalabb egy szam')).toBeInTheDocument();
-    expect(screen.getByText('Legalabb egy specialis karakter')).toBeInTheDocument();
+    // PasswordStrengthMeter shows requirements checklist
+    expect(screen.getByText('Legalább 8 karakter')).toBeInTheDocument();
+    expect(screen.getByText('Nagybetű (A-Z)')).toBeInTheDocument();
+    expect(screen.getByText('Kisbetű (a-z)')).toBeInTheDocument();
+    expect(screen.getByText('Szám (0-9)')).toBeInTheDocument();
+    expect(screen.getByText(/Speciális karakter/)).toBeInTheDocument();
   });
 
   it('should show error when password does not meet requirements', async () => {
