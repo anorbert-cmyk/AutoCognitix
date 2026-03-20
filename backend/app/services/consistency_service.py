@@ -40,13 +40,20 @@ class ConsistencyService:
         """
         report = ConsistencyReport(checked_at=datetime.now(timezone.utc).isoformat())
 
-        # Gather counts from all databases in parallel
-        pg_codes, neo4j_codes, qdrant_count = await asyncio.gather(
-            self._get_pg_dtc_codes(),
-            self._get_neo4j_dtc_codes(),
-            self._get_qdrant_vector_count(),
-            return_exceptions=True,
-        )
+        # Gather counts from all databases in parallel (30s overall timeout)
+        try:
+            pg_codes, neo4j_codes, qdrant_count = await asyncio.wait_for(
+                asyncio.gather(
+                    self._get_pg_dtc_codes(),
+                    self._get_neo4j_dtc_codes(),
+                    self._get_qdrant_vector_count(),
+                    return_exceptions=True,
+                ),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            report.errors.append("Overall consistency check timed out after 30s")
+            return report
 
         # Handle errors from each database
         if isinstance(pg_codes, Exception):

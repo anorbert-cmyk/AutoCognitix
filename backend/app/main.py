@@ -248,13 +248,13 @@ For API support, visit the [project repository](https://github.com/autocognitix)
     # Cache-Control headers middleware
     application.add_middleware(CacheControlMiddleware)
 
-    # Rate limiting middleware (must be added first to process before other middleware)
-    application.add_middleware(RateLimitMiddleware)
-
-    # Idempotency-Key middleware (after CORS, before rate limiting in execution order)
+    # Idempotency-Key middleware (caches duplicate POST/PUT responses)
     from app.core.idempotency import IdempotencyMiddleware
 
     application.add_middleware(IdempotencyMiddleware)
+
+    # Rate limiting middleware (LIFO: added last = executes first, before idempotency)
+    application.add_middleware(RateLimitMiddleware)
 
     # Metrics collection middleware (collects request metrics for Prometheus)
     application.add_middleware(MetricsMiddleware)

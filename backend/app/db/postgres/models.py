@@ -238,7 +238,7 @@ class DiagnosisArchive(Base):
     )
     original_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     session_data: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    dtc_codes: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    dtc_codes: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     vehicle_info: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
 

@@ -33,13 +33,16 @@ class ArchiveService:
         """
         Archive diagnosis sessions older than age_days.
 
+        Uses SELECT FOR UPDATE to prevent concurrent archival of same sessions.
+        Each session is archived atomically via savepoint.
+
         Returns the number of sessions archived.
         """
         from app.db.postgres.models import DiagnosisArchive, DiagnosisSession
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=age_days)
 
-        # Find old sessions not already soft-deleted
+        # Lock rows to prevent concurrent archival race condition
         result = await self.db.execute(
             select(DiagnosisSession)
             .where(
@@ -48,6 +51,7 @@ class ArchiveService:
                     DiagnosisSession.is_deleted.is_(False),
                 )
             )
+            .with_for_update(skip_locked=True)
             .limit(batch_size)
         )
         sessions = result.scalars().all()
@@ -57,6 +61,8 @@ class ArchiveService:
 
         archived_count = 0
         for session in sessions:
+            # Use savepoint so one failure doesn't roll back entire batch
+            savepoint = await self.db.begin_nested()
             try:
                 archive = DiagnosisArchive(
                     id=uuid4(),
@@ -87,12 +93,15 @@ class ArchiveService:
                 # Soft delete the original
                 session.is_deleted = True
                 session.deleted_at = datetime.now(timezone.utc)
+
+                await savepoint.commit()
                 archived_count += 1
             except Exception:
+                await savepoint.rollback()
                 logger.exception("Failed to archive session %s", session.id)
                 continue
 
-        await self.db.flush()
+        logger.info("Archived %d/%d diagnosis sessions", archived_count, len(sessions))
         return archived_count
 
     async def get_archived_session(self, original_id: UUID) -> Optional[dict]:
