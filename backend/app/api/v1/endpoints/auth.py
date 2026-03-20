@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,6 +296,7 @@ ME_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
 )
 async def register(
     user_data: UserCreate,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """
@@ -357,6 +358,8 @@ async def register(
         )
     except Exception as e:
         logger.warning(f"Failed to send welcome email to {user.email}: {e}")
+
+    response.headers["Location"] = f"/api/v1/auth/users/{user.id}"
 
     return UserResponse(
         id=str(user.id),

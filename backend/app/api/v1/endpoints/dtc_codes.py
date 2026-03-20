@@ -17,7 +17,7 @@ Performance optimizations:
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.schemas.dtc import (
@@ -789,6 +789,7 @@ Optional fields:
 )
 async def create_dtc_code(
     dtc_data: DTCCreate,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -835,6 +836,8 @@ async def create_dtc_code(
 
     logger.info(f"Created DTC code: {sanitize_log(dtc.code)}")
 
+    response.headers["Location"] = f"/api/v1/dtc/{dtc.code}"
+
     return DTCCode(
         code=dtc.code,
         description_en=dtc.description_en,
@@ -867,6 +870,7 @@ Response includes:
 )
 async def bulk_import_dtc_codes(
     import_data: DTCBulkImport,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -924,6 +928,8 @@ async def bulk_import_dtc_codes(
     await db.commit()
 
     logger.info(f"Bulk import complete: {created} created, {updated} updated, {skipped} skipped")
+
+    response.headers["Location"] = "/api/v1/dtc/"
 
     return {
         "created": created,

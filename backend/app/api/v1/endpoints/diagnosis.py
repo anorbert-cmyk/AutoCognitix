@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,6 +201,7 @@ This endpoint performs comprehensive AI-powered diagnosis:
 )
 async def analyze_vehicle(
     request: DiagnosisRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -229,6 +230,7 @@ async def analyze_vehicle(
         user_id = UUID(str(current_user.id)) if current_user else None
         async with DiagnosisService(db) as service:
             result = await service.analyze_vehicle(request, user_id=user_id)
+            response.headers["Location"] = f"/api/v1/diagnosis/{result.id}"
             return result
 
     except DTCValidationError as e:
