@@ -225,6 +225,23 @@ class DiagnosisSession(Base):
     user = relationship("User", back_populates="diagnosis_sessions")
 
 
+class DiagnosisArchive(Base):
+    """Archived diagnosis sessions stored as JSONB for space efficiency."""
+
+    __tablename__ = "diagnosis_archive"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    original_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    original_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    session_data: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    dtc_codes: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    vehicle_info: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+
 class VehicleEngine(Base):
     """Vehicle engine specifications model."""
 
