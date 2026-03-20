@@ -251,9 +251,9 @@ def get_client_key(request: Request) -> str:
         client_ip = ips[-1]
     else:
         # Fall back to direct client IP
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = str(request.client.host) if request.client else "unknown"
 
-    return client_ip
+    return str(client_ip)
 
 
 async def check_rate_limit(

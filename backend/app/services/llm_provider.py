@@ -505,7 +505,7 @@ class OllamaProvider(BaseLLMProvider):
             import httpx
 
             response = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=2.0)
-            return response.status_code == 200
+            return bool(response.status_code == 200)
         except Exception:
             return False
 
