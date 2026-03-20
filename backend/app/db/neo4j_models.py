@@ -38,23 +38,29 @@ config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_U
 # Neo4j health check with caching
 _neo4j_available: bool = True
 _neo4j_last_check: float = 0.0
+_neo4j_check_lock: asyncio.Lock = asyncio.Lock()
 NEO4J_CHECK_INTERVAL = 30.0  # seconds
 
 
 async def is_neo4j_available() -> bool:
-    """Check if Neo4j is reachable, with 30s cache."""
+    """Check if Neo4j is reachable, with 30s cache and lock to prevent thundering herd."""
     global _neo4j_available, _neo4j_last_check
     now = time.time()
     if now - _neo4j_last_check < NEO4J_CHECK_INTERVAL:
         return _neo4j_available
-    try:
-        await asyncio.to_thread(lambda: db.cypher_query("RETURN 1"))
-        _neo4j_available = True
-    except Exception:
-        _neo4j_available = False
-        logger.warning("Neo4j unavailable - using PostgreSQL-only fallback")
-    _neo4j_last_check = now
-    return _neo4j_available
+    async with _neo4j_check_lock:
+        # Double-check after acquiring lock (another coroutine may have updated)
+        now = time.time()
+        if now - _neo4j_last_check < NEO4J_CHECK_INTERVAL:
+            return _neo4j_available
+        try:
+            await asyncio.to_thread(lambda: db.cypher_query("RETURN 1"))
+            _neo4j_available = True
+        except Exception:
+            _neo4j_available = False
+            logger.warning("Neo4j unavailable - using PostgreSQL-only fallback")
+        _neo4j_last_check = now
+        return _neo4j_available
 
 
 # Relationship models
@@ -342,7 +348,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     Returns a graph of related symptoms, components, repairs, and parts.
     Returns empty structure when Neo4j is unavailable (graceful degradation).
     """
-    _empty_result = {"symptoms": [], "components": [], "repairs": [], "parts": []}
+    _empty_result: Dict[str, Any] = {"dtc": None, "symptoms": [], "components": [], "repairs": []}
 
     if not await is_neo4j_available():
         return _empty_result

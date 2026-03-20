@@ -932,8 +932,10 @@ async def delete_user_account(
         from app.db.redis_cache import get_cache_service
 
         cache = await get_cache_service()
-        await cache.delete_pattern(f"user:{user_id}:*")
-        await cache.delete_pattern(f"diagnosis:user:{user_id}:*")
+        # Match actual CachePrefix patterns (api:user:, api:diagnosis:, ratelimit:)
+        await cache.delete_pattern(f"api:user:{user_id}:*")
+        await cache.delete_pattern(f"api:diagnosis:*")
+        await cache.delete_pattern(f"ratelimit:{user_id}*")
     except Exception:
         pass  # Cache cleanup is best-effort
 

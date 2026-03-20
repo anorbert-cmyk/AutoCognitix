@@ -20,6 +20,13 @@ Minden sprint után 4 specialist párhuzamosan vizsgálja a kódot (Security, Da
 5. **defaultdict phantom entries** (`rate_limit.py`): `defaultdict(list)` read access-nél is entry-t hoz létre → unbounded memory growth. **Javítás:** Regular dict + `.get()` + `.setdefault()`.
 6. **Circuit breaker hasattr fragility** (`security.py`): `hasattr(cache, "_circuit_open")` private attribute access. **Javítás:** `is_circuit_open()` public method.
 
+### Database Specialist kiegészítő találatok (2. kör):
+1. **CRITICAL: Neo4j health check race condition** → `asyncio.Lock` double-check pattern hozzáadva
+2. **HIGH: GDPR cache key mismatch** → `user:{id}:*` nem egyezik `api:user:{id}:*` prefix-szel → javítva
+3. **HIGH: Model version filter hides 35k+ old vectors** → version filter opt-in lett (default: no filter)
+4. **HIGH: Qdrant score_threshold falsy check** → `if score_threshold:` → `if score_threshold is not None:`
+5. **MEDIUM: Neo4j empty_result shape inconsistency** → `_empty_result` most tartalmazza `dtc: None`-t
+
 ### MEDIUM-LOW (dokumentált, jövőbeni sprintekre):
 - X-Forwarded-For spoofing (TRUSTED_PROXY_COUNT config szükséges)
 - In-memory rate limiter nem shared across workers (Redis-based fallback)
@@ -27,6 +34,10 @@ Minden sprint után 4 specialist párhuzamosan vizsgálja a kódot (Security, Da
 - MD5 cache key collisions (sha256 javasolt)
 - Neo4j thread pool exhaustion (single Cypher query javasolt)
 - Prometheus `_value._value` private API access
+- Qdrant sync client blocking event loop (AsyncQdrantClient migration szükséges)
+- Neomodel thread safety (dedicated single-thread executor javasolt)
+- Redis INCR+EXPIRE window extension (Lua script javasolt)
+- soft_delete ownership check optional (privilege escalation risk)
 
 ---
 

@@ -184,19 +184,17 @@ class QdrantService:
         Returns:
             List of search results with scores and payloads
         """
-        if model_version is None:
-            model_version = self.EMBEDDING_MODEL_VERSION
-
         # Build the must filter list
         must_conditions: List[qdrant_models.FieldCondition] = []
 
-        # Add version filter
-        must_conditions.append(
-            qdrant_models.FieldCondition(
-                key="_embedding_model_version",
-                match=qdrant_models.MatchValue(value=model_version),
+        # Only filter by version when explicitly requested (avoids hiding pre-existing vectors)
+        if model_version is not None:
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="_embedding_model_version",
+                    match=qdrant_models.MatchValue(value=model_version),
+                )
             )
-        )
 
         # Add user-supplied filter conditions
         if filter_conditions:
@@ -216,7 +214,7 @@ class QdrantService:
             "query_filter": qdrant_models.Filter(must=must_conditions),
         }
 
-        if score_threshold:
+        if score_threshold is not None:
             search_params["score_threshold"] = score_threshold
 
         try:
