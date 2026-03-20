@@ -251,6 +251,11 @@ For API support, visit the [project repository](https://github.com/autocognitix)
     # Rate limiting middleware (must be added first to process before other middleware)
     application.add_middleware(RateLimitMiddleware)
 
+    # Idempotency-Key middleware (after CORS, before rate limiting in execution order)
+    from app.core.idempotency import IdempotencyMiddleware
+
+    application.add_middleware(IdempotencyMiddleware)
+
     # Metrics collection middleware (collects request metrics for Prometheus)
     application.add_middleware(MetricsMiddleware)
 
@@ -271,8 +276,9 @@ For API support, visit the [project repository](https://github.com/autocognitix)
             "X-Requested-With",
             "X-Request-ID",
             "X-CSRF-Token",
+            "Idempotency-Key",
         ],
-        expose_headers=["X-Request-ID", "X-Correlation-ID"],
+        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Idempotent-Replayed"],
     )
 
     # Security headers middleware - protect against common web vulnerabilities
