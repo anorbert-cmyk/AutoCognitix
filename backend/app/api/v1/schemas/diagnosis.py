@@ -239,6 +239,17 @@ class DiagnosisResponse(BaseModel):
     model_used: Optional[str] = Field(None, description="AI model used for diagnosis")
     used_fallback: bool = Field(False, description="Whether fallback diagnosis was used")
 
+    # AI disclaimer (EU AI Act + liability protection)
+    ai_disclaimer: str = Field(
+        default=(
+            "Ez az elemzés mesterséges intelligencia által készült, tájékoztató jellegű. "
+            "NEM helyettesíti a szakképzett szerelő véleményét. "
+            "Minden javítás előtt kérjen szakemberi diagnózist. "
+            "Az AutoCognitix nem vállal felelősséget az AI alapú ajánlások alapján végzett munkákért."
+        ),
+        description="AI-generated diagnosis disclaimer (EU AI Act compliance)",
+    )
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("confidence_score")

@@ -5,6 +5,7 @@ This module provides a service class for interacting with Qdrant vector database
 supporting both local and cloud deployments with Hungarian error messages.
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
@@ -83,11 +84,13 @@ class QdrantService:
     async def _create_collection_if_not_exists(self, collection_name: str) -> None:
         """Create a collection if it doesn't exist."""
         try:
-            collections = self.client.get_collections().collections
+            collections_response = await asyncio.to_thread(self.client.get_collections)
+            collections = collections_response.collections
             exists = any(c.name == collection_name for c in collections)
 
             if not exists:
-                self.client.create_collection(
+                await asyncio.to_thread(
+                    self.client.create_collection,
                     collection_name=collection_name,
                     vectors_config=qdrant_models.VectorParams(
                         size=self.vector_size,
@@ -156,7 +159,8 @@ class QdrantService:
             for id_, vector, payload in zip(ids, vectors, resolved_payloads)
         ]
 
-        self.client.upsert(
+        await asyncio.to_thread(
+            self.client.upsert,
             collection_name=collection_name,
             points=points,
         )
@@ -218,7 +222,7 @@ class QdrantService:
             search_params["score_threshold"] = score_threshold
 
         try:
-            results = self.client.search(**search_params)
+            results = await asyncio.to_thread(lambda: self.client.search(**search_params))
 
             return [
                 {
@@ -421,7 +425,8 @@ class QdrantService:
             self.ISSUE_COLLECTION,
         ]:
             try:
-                self.client.delete(
+                await asyncio.to_thread(
+                    self.client.delete,
                     collection_name=collection,
                     points_selector=qdrant_models.FilterSelector(
                         filter=qdrant_models.Filter(
@@ -441,12 +446,12 @@ class QdrantService:
 
     async def delete_collection(self, collection_name: str) -> None:
         """Delete a collection."""
-        self.client.delete_collection(collection_name=collection_name)
+        await asyncio.to_thread(self.client.delete_collection, collection_name=collection_name)
         logger.info(f"Deleted collection: {collection_name}")
 
-    def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
+    async def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """Get information about a collection."""
-        info = self.client.get_collection(collection_name=collection_name)
+        info = await asyncio.to_thread(self.client.get_collection, collection_name=collection_name)
         return {
             "name": collection_name,
             "vectors_count": getattr(
@@ -468,7 +473,7 @@ class QdrantService:
         stats: Dict[str, Any] = {}
         for collection in all_collections:
             try:
-                info = self.get_collection_info(collection)
+                info = await self.get_collection_info(collection)
                 if info:
                     stats[collection] = info
             except Exception:

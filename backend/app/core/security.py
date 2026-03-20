@@ -170,6 +170,7 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
+            leeway=30,
         )
 
         # Check if token is blacklisted

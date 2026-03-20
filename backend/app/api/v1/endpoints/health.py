@@ -17,7 +17,7 @@ Endpoints:
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -388,7 +388,7 @@ async def liveness_check():
     """
     return LivenessResponse(
         status="alive",
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -439,7 +439,7 @@ async def readiness_check():
     return ReadinessResponse(
         status="ready",
         checks=checks,
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -543,7 +543,7 @@ async def detailed_health_check():
         environment=settings.ENVIRONMENT,
         uptime_seconds=round(uptime, 2),
         services=services,
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -578,5 +578,5 @@ async def database_stats():
         "redis": redis_health.details
         if not isinstance(redis_health, Exception)
         else {"error": str(redis_health)},
-        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
     }
