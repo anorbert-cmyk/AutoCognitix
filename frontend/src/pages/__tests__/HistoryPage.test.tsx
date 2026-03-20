@@ -54,7 +54,7 @@ describe('HistoryPage', () => {
       'Keresés rendszám, alvázszám vagy tünet alapján...',
     );
     fireEvent.change(searchInput, { target: { value: 'nonexistent-query-xyz' } });
-    expect(screen.getByText('Nincs találat')).toBeInTheDocument();
+    expect(screen.getByText('A keresés nem hozott eredményt. Próbáljon más szűrőfeltételeket!')).toBeInTheDocument();
   });
 
   it('should render history items with vehicle info when data is available (mock fallback)', () => {

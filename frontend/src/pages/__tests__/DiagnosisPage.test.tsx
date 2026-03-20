@@ -149,11 +149,11 @@ describe('DiagnosisPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('should render the draft save button', () => {
+  it('should not render the draft save button (removed)', () => {
     render(<DiagnosisPage />);
     expect(
-      screen.getByText('Piszkozat mentése'),
-    ).toBeInTheDocument();
+      screen.queryByText('Piszkozat mentése'),
+    ).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -571,10 +571,10 @@ describe('DiagnosisPage', () => {
   // Auto-save indicator
   // ---------------------------------------------------------------------------
 
-  it('should display the auto-save indicator', () => {
+  it('should not display the misleading auto-save indicator (removed)', () => {
     render(<DiagnosisPage />);
     expect(
-      screen.getByText('Automatikusan mentve 2 perce'),
-    ).toBeInTheDocument();
+      screen.queryByText('Automatikusan mentve 2 perce'),
+    ).not.toBeInTheDocument();
   });
 });

@@ -282,7 +282,7 @@ describe('ResultPage', () => {
 
     it('renders AI disclaimer', () => {
       render(<ResultPage />);
-      expect(screen.getByText('AI-alapú diagnosztikai javaslat')).toBeInTheDocument();
+      expect(screen.getByText(/AI Diagnosztikai Eszköz/)).toBeInTheDocument();
     });
   });
 
@@ -405,7 +405,7 @@ describe('ResultPage', () => {
 
     it('calls window.print when PDF save button is clicked', () => {
       render(<ResultPage />);
-      fireEvent.click(screen.getByText('Jelentés mentése PDF-ként'));
+      fireEvent.click(screen.getByText('Nyomtatás / PDF'));
       expect(window.print).toHaveBeenCalledOnce();
       expect(mockToastInfo).toHaveBeenCalledWith('PDF mentés elindítva...');
     });
