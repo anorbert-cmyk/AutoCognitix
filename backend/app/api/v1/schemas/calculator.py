@@ -74,7 +74,8 @@ class CalculatorRequest(BaseModel):
     diagnosis_id: Optional[str] = Field(
         None,
         max_length=36,
-        description="Korabbi diagnosztika azonositoja",
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        description="Korabbi diagnosztika azonositoja (UUID formatum)",
     )
     fuel_type: Optional[str] = Field(
         None,
@@ -136,7 +137,7 @@ class CalculatorResponse(BaseModel):
     ratio: float = Field(
         ...,
         ge=0.0,
-        le=10.0,
+        le=100.0,
         description="Javitasi koltseg / jarmu ertek arany",
     )
     recommendation: RecommendationType = Field(

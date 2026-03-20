@@ -189,7 +189,7 @@ async def get_shop_by_id(
         if shop is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"A szerviz nem található: {shop_id}",
+                detail="A keresett szerviz nem található.",
             )
 
         return ServiceShop(**shop)

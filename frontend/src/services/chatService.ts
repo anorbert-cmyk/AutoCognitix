@@ -65,9 +65,12 @@ function parseChatSSEEvents(buffer: string): {
     if (!trimmed) continue
 
     let dataLine: string | null = null
+    let eventType: string | null = null
     for (const line of trimmed.split('\n')) {
       if (line.startsWith('data: ')) {
         dataLine = line.slice(6)
+      } else if (line.startsWith('event: ')) {
+        eventType = line.slice(7).trim()
       }
     }
 
@@ -75,6 +78,10 @@ function parseChatSSEEvents(buffer: string): {
 
     try {
       const parsed = JSON.parse(dataLine) as ChatSSEEvent
+      // Prefer event: field from SSE if present, otherwise use event_type from JSON body
+      if (eventType && !parsed.event_type) {
+        parsed.event_type = eventType
+      }
       events.push(parsed)
     } catch {
       // Skip malformed JSON lines
@@ -205,8 +212,8 @@ export function streamChatMessage(
               callbacks.onStart?.()
               break
             case 'token': {
-              const token = (event.data?.token as string) || ''
-              callbacks.onToken?.(token)
+              const content = (event.data?.content as string) || ''
+              callbacks.onToken?.(content)
               break
             }
             case 'source': {
@@ -215,13 +222,16 @@ export function streamChatMessage(
               break
             }
             case 'suggestion': {
-              const suggestion = (event.data?.text as string) || ''
-              callbacks.onSuggestion?.(suggestion)
+              const suggestions = (event.data?.suggestions as string[]) || []
+              for (const s of suggestions) {
+                callbacks.onSuggestion?.(s)
+              }
               break
             }
             case 'complete': {
-              const fullContent = (event.data?.content as string) || ''
-              callbacks.onComplete?.(fullContent)
+              const convId = (event.data?.conversation_id as string) || ''
+              // Complete event doesn't carry full content; use accumulated tokens
+              callbacks.onComplete?.(convId)
               break
             }
             case 'error': {
@@ -239,9 +249,9 @@ export function streamChatMessage(
         const { events } = parseChatSSEEvents(buffer + '\n\n')
         for (const event of events) {
           if (event.event_type === 'token') {
-            callbacks.onToken?.((event.data?.token as string) || '')
+            callbacks.onToken?.((event.data?.content as string) || '')
           } else if (event.event_type === 'complete') {
-            callbacks.onComplete?.((event.data?.content as string) || '')
+            callbacks.onComplete?.('')
           } else if (event.event_type === 'error') {
             const errorMsg =
               (event.data?.message as string) || 'Ismeretlen streaming hiba'

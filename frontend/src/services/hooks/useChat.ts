@@ -4,7 +4,7 @@
  * Does NOT use React Query - manages message history in local state.
  */
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   streamChatMessage,
   type ChatMessage,
@@ -45,6 +45,17 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   const abortControllerRef = useRef<AbortController | null>(null)
   const currentSourcesRef = useRef<ChatSource[]>([])
+  const currentResponseRef = useRef('')
+
+  // Cleanup on unmount — abort any ongoing stream
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+    }
+  }, [])
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -65,6 +76,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
       // Reset streaming state
       setCurrentResponse('')
+      currentResponseRef.current = ''
       setIsStreaming(true)
       currentSourcesRef.current = []
 
@@ -81,7 +93,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             // Streaming started, state already set
           },
           onToken: (token: string) => {
-            setCurrentResponse((prev) => prev + token)
+            currentResponseRef.current += token
+            setCurrentResponse(currentResponseRef.current)
           },
           onSource: (source: ChatSource) => {
             currentSourcesRef.current = [...currentSourcesRef.current, source]
@@ -89,11 +102,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           onSuggestion: (suggestion: string) => {
             newSuggestions.push(suggestion)
           },
-          onComplete: (fullContent: string) => {
+          onComplete: () => {
             const assistantMessage: ChatMessage = {
               id: generateMessageId(),
               role: 'assistant',
-              content: fullContent || currentResponse,
+              content: currentResponseRef.current,
               timestamp: new Date().toISOString(),
               sources:
                 currentSourcesRef.current.length > 0
@@ -131,7 +144,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
       abortControllerRef.current = controller
     },
-    [isStreaming, conversationId, vehicleContext, diagnosisId, currentResponse]
+    [isStreaming, conversationId, vehicleContext, diagnosisId]
   )
 
   const clearMessages = useCallback(() => {

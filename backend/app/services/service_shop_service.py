@@ -26,7 +26,7 @@ REGIONS: List[Dict[str, Any]] = [
     {"id": "baranya", "name": "Baranya megye", "county": "Baranya", "lat": 46.07, "lng": 18.23},
     {
         "id": "bacs_kiskun",
-        "name": "Bács-Kiskun megye",
+        "name": "Bács-Kiskun",
         "county": "Bács-Kiskun",
         "lat": 46.60,
         "lng": 19.66,
@@ -34,14 +34,14 @@ REGIONS: List[Dict[str, Any]] = [
     {"id": "bekes", "name": "Békés megye", "county": "Békés", "lat": 46.67, "lng": 21.08},
     {
         "id": "borsod",
-        "name": "Borsod-Abaúj-Zemplén megye",
+        "name": "Borsod-Abaúj-Zemplén",
         "county": "Borsod-Abaúj-Zemplén",
         "lat": 48.10,
         "lng": 20.78,
     },
     {
         "id": "csongrad",
-        "name": "Csongrád-Csanád megye",
+        "name": "Csongrád-Csanád",
         "county": "Csongrád-Csanád",
         "lat": 46.42,
         "lng": 20.42,
@@ -49,14 +49,14 @@ REGIONS: List[Dict[str, Any]] = [
     {"id": "fejer", "name": "Fejér megye", "county": "Fejér", "lat": 47.19, "lng": 18.41},
     {
         "id": "gyor_moson_sopron",
-        "name": "Győr-Moson-Sopron megye",
+        "name": "Győr-Moson-Sopron",
         "county": "Győr-Moson-Sopron",
         "lat": 47.68,
         "lng": 17.63,
     },
     {
         "id": "hajdu_bihar",
-        "name": "Hajdú-Bihar megye",
+        "name": "Hajdú-Bihar",
         "county": "Hajdú-Bihar",
         "lat": 47.53,
         "lng": 21.63,
@@ -64,14 +64,14 @@ REGIONS: List[Dict[str, Any]] = [
     {"id": "heves", "name": "Heves megye", "county": "Heves", "lat": 47.90, "lng": 20.37},
     {
         "id": "jasz_nagykun_szolnok",
-        "name": "Jász-Nagykun-Szolnok megye",
+        "name": "Jász-Nagykun-Szolnok",
         "county": "Jász-Nagykun-Szolnok",
         "lat": 47.17,
         "lng": 20.18,
     },
     {
         "id": "komarom_esztergom",
-        "name": "Komárom-Esztergom megye",
+        "name": "Komárom-Esztergom",
         "county": "Komárom-Esztergom",
         "lat": 47.73,
         "lng": 18.64,
@@ -80,14 +80,20 @@ REGIONS: List[Dict[str, Any]] = [
     {"id": "somogy", "name": "Somogy megye", "county": "Somogy", "lat": 46.35, "lng": 17.80},
     {
         "id": "szabolcs",
-        "name": "Szabolcs-Szatmár-Bereg megye",
+        "name": "Szabolcs-Szatmár-Bereg",
         "county": "Szabolcs-Szatmár-Bereg",
         "lat": 48.10,
         "lng": 21.95,
     },
     {"id": "tolna", "name": "Tolna megye", "county": "Tolna", "lat": 46.43, "lng": 18.70},
     {"id": "vas", "name": "Vas megye", "county": "Vas", "lat": 47.23, "lng": 16.62},
-    {"id": "veszprem", "name": "Veszprém megye", "county": "Veszprém", "lat": 47.09, "lng": 17.91},
+    {
+        "id": "veszprem",
+        "name": "Veszprém megye",
+        "county": "Veszprém",
+        "lat": 47.09,
+        "lng": 17.91,
+    },
     {"id": "zala", "name": "Zala megye", "county": "Zala", "lat": 46.84, "lng": 16.84},
 ]
 
@@ -742,14 +748,14 @@ class ServiceShopService:
         Returns:
             Distance in kilometers.
         """
-        r = 6371.0
+        R = 6371.0
         dlat = math.radians(lat2 - lat1)
         dlng = math.radians(lng2 - lng1)
         a = (
             math.sin(dlat / 2) ** 2
             + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
         )
-        return r * 2 * math.asin(math.sqrt(a))
+        return R * 2 * math.asin(math.sqrt(a))
 
     def search_shops(
         self,
@@ -768,7 +774,8 @@ class ServiceShopService:
             region: Filter by region ID.
             vehicle_make: Filter by accepted vehicle make.
             service_type: Filter by service type.
-            sort_by: Sort field (rating, distance, name).
+            sort_by: Sort field (rating, distance,
+                price_asc, price_desc, name).
             lat: User latitude for distance calculation.
             lng: User longitude for distance calculation.
             limit: Max results to return.
@@ -801,18 +808,16 @@ class ServiceShopService:
 
         # Calculate distances if coordinates provided
         if lat is not None and lng is not None:
-            for shop in filtered:
-                shop = dict(shop)
-                shop["distance_km"] = round(
-                    self._haversine_distance(lat, lng, shop["lat"], shop["lng"]),
-                    1,
-                )
-            # Recalculate with distance
             enriched: List[Dict[str, Any]] = []
             for shop in filtered:
                 shop_copy = dict(shop)
                 shop_copy["distance_km"] = round(
-                    self._haversine_distance(lat, lng, shop_copy["lat"], shop_copy["lng"]),
+                    self._haversine_distance(
+                        lat,
+                        lng,
+                        shop_copy["lat"],
+                        shop_copy["lng"],
+                    ),
                     1,
                 )
                 enriched.append(shop_copy)
@@ -823,11 +828,21 @@ class ServiceShopService:
         # Sort
         if sort_by == "distance" and lat is not None and lng is not None:
             filtered.sort(key=lambda s: s.get("distance_km", 9999))
+        elif sort_by in ("price", "price_asc"):
+            filtered.sort(key=lambda s: s["price_level"])
+        elif sort_by == "price_desc":
+            filtered.sort(
+                key=lambda s: s["price_level"],
+                reverse=True,
+            )
         elif sort_by == "name":
             filtered.sort(key=lambda s: s["name"])
         else:
             # Default: sort by rating descending
-            filtered.sort(key=lambda s: s["rating"], reverse=True)
+            filtered.sort(
+                key=lambda s: s["rating"],
+                reverse=True,
+            )
 
         # Paginate
         filtered = filtered[offset : offset + limit]

@@ -47,6 +47,35 @@ CHAT_LLM_CONFIG = LLMConfig(
 )
 
 
+MAX_CONVERSATIONS = 500  # Prevent unbounded memory growth
+
+# Blocklist for prompt injection detection
+_INJECTION_BLOCKLIST = [
+    "SYSTEM:",
+    "IGNORE",
+    "OVERRIDE",
+    "FORGET ALL",
+    "IGNORE PREVIOUS",
+    "DISREGARD",
+    "NEW INSTRUCTIONS",
+    "JAILBREAK",
+    "DAN:",
+    "PROMPT:",
+]
+
+
+def _sanitize_input(text: str) -> str:
+    """Strip dangerous markers from user input."""
+    sanitized = text
+    for marker in _INJECTION_BLOCKLIST:
+        # Case-insensitive removal
+        idx = sanitized.upper().find(marker.upper())
+        while idx != -1:
+            sanitized = sanitized[:idx] + sanitized[idx + len(marker) :]
+            idx = sanitized.upper().find(marker.upper())
+    return sanitized.strip()
+
+
 class ChatService:
     """AI Chat assistant service with SSE streaming support."""
 
@@ -90,9 +119,20 @@ class ChatService:
         }
 
         try:
+            # Sanitize user input against prompt injection
+            safe_message = _sanitize_input(message)
+
             # Build context-enriched prompt
             system_prompt = CHAT_SYSTEM_PROMPT
-            user_prompt = await self._build_user_prompt(message, vehicle_context, diagnosis_id)
+            user_prompt = await self._build_user_prompt(safe_message, vehicle_context, diagnosis_id)
+
+            # Evict oldest conversations if at capacity
+            if (
+                conversation_id not in self._conversations
+                and len(self._conversations) >= MAX_CONVERSATIONS
+            ):
+                oldest_key = next(iter(self._conversations))
+                del self._conversations[oldest_key]
 
             # Store conversation history
             if conversation_id not in self._conversations:
@@ -119,6 +159,10 @@ class ChatService:
                     "conversation_id": conversation_id,
                     "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
+                # Store fallback response in conversation history
+                self._conversations[conversation_id].append(
+                    {"role": "assistant", "content": fallback_content}
+                )
             else:
                 llm = get_llm_provider()
                 full_response = ""
@@ -332,7 +376,7 @@ class ChatService:
         for msg in previous:
             role_label = "Felhasznalo" if msg["role"] == "user" else "Asszisztens"
             # Truncate long messages in history
-            content = msg["content"][:300]
+            content = _sanitize_input(msg["content"][:300])
             lines.append(f"{role_label}: {content}")
 
         return "\n".join(lines)

@@ -6,7 +6,7 @@
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMemo } from 'react';
-import { Loader2, Calculator, MessageSquare, MapPin } from 'lucide-react';
+import { Loader2, Calculator, MessageSquare, MapPin, ClipboardCheck } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
 import { DiagnosisResponse, PartWithPrice } from '../services/api';
@@ -415,6 +415,13 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
         {/* Cross-link Actions */}
         <div className="max-w-7xl mx-auto px-4 md:px-8 lg:px-10 mt-10 mb-6 print:hidden">
           <div className="flex flex-wrap gap-3">
+            <Link
+              to={`/inspection?make=${encodeURIComponent(result.vehicle_make || '')}&model=${encodeURIComponent(result.vehicle_model || '')}&year=${result.vehicle_year || ''}&dtc=${(result.dtc_codes || []).join(',')}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
+            >
+              <ClipboardCheck className="h-4 w-4" />
+              Műszaki vizsga kockázat
+            </Link>
             <Link
               to={`/calculator?diagnosis_id=${result.id}`}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
