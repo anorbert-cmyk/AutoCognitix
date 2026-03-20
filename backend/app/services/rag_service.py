@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 # Python 3.9 compatible string enum
@@ -54,6 +54,10 @@ from app.services.llm_provider import (
 )
 
 logger = get_logger(__name__)
+
+# Maximum estimated tokens for the prompt sent to the LLM.
+# Rough estimation: 1 token ≈ 4 characters.
+MAX_PROMPT_TOKENS = 8000
 
 
 # =============================================================================
@@ -209,7 +213,7 @@ class DiagnosisResult:
     sources: List[Dict[str, Any]] = field(default_factory=list)
 
     # Metadata
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     model_used: str = ""
     provider_used: str = ""
     processing_time_ms: int = 0
@@ -726,15 +730,30 @@ class RAGService:
             ),
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("RAG retrieval timed out after 30s")
+            results = []
 
         # Process results - narrow types from gather with return_exceptions=True
-        qdrant_dtc_items: List[RetrievedItem] = results[0] if isinstance(results[0], list) else []
-        qdrant_symptom_items: List[RetrievedItem] = (
-            results[1] if isinstance(results[1], list) else []
+        qdrant_dtc_items: List[RetrievedItem] = (
+            results[0] if len(results) > 0 and isinstance(results[0], list) else []
         )
-        neo4j_result = results[2] if not isinstance(results[2], BaseException) else ([], {})
-        postgres_items: List[RetrievedItem] = results[3] if isinstance(results[3], list) else []
+        qdrant_symptom_items: List[RetrievedItem] = (
+            results[1] if len(results) > 1 and isinstance(results[1], list) else []
+        )
+        neo4j_result = (
+            results[2]
+            if len(results) > 2 and not isinstance(results[2], BaseException)
+            else ([], {})
+        )
+        postgres_items: List[RetrievedItem] = (
+            results[3] if len(results) > 3 and isinstance(results[3], list) else []
+        )
 
         neo4j_items: List[RetrievedItem]
         graph_data: Dict[str, Any]
@@ -870,8 +889,9 @@ class RAGService:
             score += 0.1
             factors += 0.1
 
-        # Normalize score
+        # Normalize score and clamp to [0.0, 1.0]
         normalized_score = min(1.0, score / factors) if factors > 0 else 0.1
+        normalized_score = max(0.0, min(1.0, normalized_score))
 
         # Determine confidence level
         if normalized_score >= 0.75:
@@ -930,6 +950,22 @@ class RAGService:
         )
 
         user_prompt = build_diagnosis_prompt(prompt_context)
+
+        # Estimate token count and truncate if necessary
+        estimated_tokens = len(user_prompt) // 4
+        if estimated_tokens > MAX_PROMPT_TOKENS:
+            max_chars = MAX_PROMPT_TOKENS * 4
+            logger.warning(
+                f"Prompt too large: ~{estimated_tokens} tokens estimated, "
+                f"truncating to ~{MAX_PROMPT_TOKENS} tokens ({max_chars} chars)"
+            )
+            # Truncate at section boundary to avoid breaking structured content
+            truncated = user_prompt[:max_chars]
+            last_section = truncated.rfind("\n##")
+            if last_section > max_chars // 2:
+                truncated = truncated[:last_section]
+            truncated += "\n\n[Kontextus rövidítve a mérethatár miatt.]"
+            user_prompt = truncated
 
         # Check if LLM is available
         if not is_llm_available():
@@ -1111,12 +1147,13 @@ class RAGService:
 
         processing_time = int((time.time() - start_time) * 1000)
 
-        # Combine confidence from context and diagnosis
+        # Combine confidence from context and diagnosis, clamped to [0.0, 1.0]
         final_confidence = (
             max(confidence_score, diagnosis.confidence_score)
             if diagnosis.probable_causes
             else confidence_score
         )
+        final_confidence = max(0.0, min(1.0, final_confidence))
 
         result = DiagnosisResult(
             dtc_codes=dtc_codes,

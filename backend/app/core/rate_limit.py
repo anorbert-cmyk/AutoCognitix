@@ -36,10 +36,10 @@ DEFAULT_CONFIG = RateLimitConfig(
 
 # Auth-specific stricter limits
 AUTH_CONFIG = RateLimitConfig(
-    requests_per_minute=10,  # 10 auth requests per minute
-    requests_per_hour=100,  # 100 auth requests per hour
-    lockout_threshold=20,  # Lock after 20 failed attempts
-    lockout_duration_seconds=600,  # 10 minute lockout
+    requests_per_minute=5,
+    requests_per_hour=30,
+    lockout_threshold=5,
+    lockout_duration_seconds=900,
 )
 
 

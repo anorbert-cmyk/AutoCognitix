@@ -12,7 +12,7 @@ Performance Optimizations:
 - Full-text search using PostgreSQL GIN indexes
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Generic, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 from uuid import UUID
 
@@ -126,7 +126,7 @@ class UserRepository(BaseRepository[User]):
             return False
 
         # Check if lockout period has expired
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if user.locked_until <= now:
             # Lockout expired, reset the counter
             user.locked_until = None
@@ -149,11 +149,13 @@ class UserRepository(BaseRepository[User]):
         from datetime import timedelta
 
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        user.last_failed_login = datetime.utcnow()
+        user.last_failed_login = datetime.now(timezone.utc)
 
         # Lock account if max attempts exceeded
         if user.failed_login_attempts >= self.MAX_FAILED_ATTEMPTS:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=self.LOCKOUT_DURATION_MINUTES)
+            user.locked_until = datetime.now(timezone.utc) + timedelta(
+                minutes=self.LOCKOUT_DURATION_MINUTES
+            )
             await self.db.flush()
             return True
 
@@ -169,7 +171,7 @@ class UserRepository(BaseRepository[User]):
         """
         user.failed_login_attempts = 0
         user.locked_until = None
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         await self.db.flush()
 
     async def update_password(self, user: User, hashed_password: str) -> None:
@@ -196,7 +198,7 @@ class UserRepository(BaseRepository[User]):
         from datetime import timedelta
 
         user.password_reset_token = token
-        user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+        user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         await self.db.flush()
 
     async def verify_email(self, user: User) -> None:
@@ -499,7 +501,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             return False
 
         session.is_deleted = True
-        session.deleted_at = datetime.utcnow()
+        session.deleted_at = datetime.now(timezone.utc)
         await self.db.flush()
         return True
 

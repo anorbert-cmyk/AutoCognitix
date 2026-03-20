@@ -104,6 +104,9 @@ class RedisCacheService:
     _pool: Optional[ConnectionPool] = None
     _initialized: bool = False
 
+    # Circuit breaker cooldown in seconds (configurable)
+    CIRCUIT_BREAKER_COOLDOWN = 30
+
     def __new__(cls) -> "RedisCacheService":
         """Singleton pattern for shared connection pool."""
         if cls._instance is None:
@@ -179,6 +182,30 @@ class RedisCacheService:
         self._connected = False
         logger.info("Disconnected from Redis")
 
+    async def warmup(self) -> bool:
+        """Pre-initialize Redis connection pool during startup."""
+        try:
+            await self.connect()
+            # Verify connection with ping
+            if self._client:
+                await self._client.ping()
+                logger.info("Redis connection pool warmed up successfully")
+                return True
+        except Exception as e:
+            logger.warning(f"Redis warmup failed (non-fatal): {e}")
+        return False
+
+    async def invalidate_diagnosis_cache(self, session_id: str, user_id: str) -> int:
+        """Invalidate all cache entries related to a diagnosis session."""
+        deleted = 0
+        patterns = [
+            f"api:diagnosis:{session_id}*",
+            f"api:user:{user_id}:history*",
+        ]
+        for pattern in patterns:
+            deleted += await self.delete_pattern(pattern)
+        return deleted
+
     async def _check_circuit(self) -> bool:
         """
         Circuit breaker pattern - prevent cascading failures.
@@ -195,12 +222,12 @@ class RedisCacheService:
             self._circuit_open = True
             logger.warning("Redis circuit breaker opened due to failures")
 
-            # Schedule circuit reset after 30 seconds
+            # Schedule circuit reset after cooldown period
             self._reset_task = asyncio.create_task(self._reset_circuit())
 
     async def _reset_circuit(self) -> None:
         """Reset the circuit breaker after cooldown period."""
-        await asyncio.sleep(30)
+        await asyncio.sleep(self.CIRCUIT_BREAKER_COOLDOWN)
         self._circuit_open = False
         self._failure_count = 0
         logger.info("Redis circuit breaker reset")

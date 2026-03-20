@@ -13,7 +13,7 @@ Author: AutoCognitix Team
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -222,13 +222,20 @@ class DiagnosisService:
                 parts_data=parts_data,
             )
 
-            # Step 7: Save to database
-            await self._save_diagnosis_session(
+            # Step 7: Save to database (must succeed before returning ID)
+            save_ok = await self._save_diagnosis_session(
                 diagnosis_id=diagnosis_id,
                 request=request,
                 response=response,
                 user_id=user_id,
             )
+
+            if not save_ok:
+                # Save failed - strip ID so client doesn't reference a non-existent record
+                logger.warning(
+                    f"Diagnosis {diagnosis_id} save failed, returning result without persisted ID"
+                )
+                response = response.model_copy(update={"id": None})
 
             logger.info(
                 f"Diagnosis {diagnosis_id} completed with confidence "
@@ -576,7 +583,7 @@ class DiagnosisService:
                     }
                     for repair in result.repair_recommendations
                 ],
-                "confidence_score": result.confidence_score,
+                "confidence_score": max(0.0, min(1.0, result.confidence_score)),
                 "sources": [
                     {
                         "type": source.get("type", "database"),
@@ -1038,7 +1045,7 @@ class DiagnosisService:
             parts_with_prices=parts_with_prices,
             total_cost_estimate=total_cost_estimate,
             root_cause_analysis=root_cause_analysis,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
     def _determine_urgency(
@@ -1094,7 +1101,7 @@ class DiagnosisService:
         request: DiagnosisRequest,
         response: DiagnosisResponse,
         user_id: Optional[UUID],
-    ) -> None:
+    ) -> bool:
         """
         Save diagnosis session to database.
 
@@ -1103,6 +1110,9 @@ class DiagnosisService:
             request: Original request.
             response: Generated response.
             user_id: Optional user ID.
+
+        Returns:
+            True if save succeeded, False otherwise.
         """
         try:
             # Check if session is still valid
@@ -1111,7 +1121,7 @@ class DiagnosisService:
                     "Database session expired, skipping diagnosis session save. "
                     "Session will be recreated by dependency injection on next request."
                 )
-                return
+                return False
 
             session_data = {
                 "id": diagnosis_id,
@@ -1129,10 +1139,12 @@ class DiagnosisService:
 
             await self.diagnosis_repository.create(session_data)
             logger.debug(f"Saved diagnosis session {diagnosis_id}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to save diagnosis session: {sanitize_log(str(e))}", exc_info=True)
             # Don't raise - diagnosis should still be returned even if save fails
+            return False
 
     async def get_diagnosis_by_id(
         self, diagnosis_id: UUID, user_id: Optional[UUID] = None

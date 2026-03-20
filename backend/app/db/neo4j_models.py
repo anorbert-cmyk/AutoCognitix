@@ -3,6 +3,7 @@ Neo4j graph database models using Neomodel.
 """
 
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 
 from neomodel import (
@@ -18,8 +19,11 @@ from neomodel import (
     UniqueIdProperty,
     config,
 )
+from neomodel.exceptions import DoesNotExist, MultipleNodesReturned, NeomodelException
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Configure Neo4j connection
 # Handle both bolt:// and neo4j+s:// URI schemes (Aura uses neo4j+s://)
@@ -292,7 +296,18 @@ async def create_dtc_symptom_relationship(
 
         await asyncio.to_thread(dtc.causes.connect, symptom, {"confidence": confidence})
         return True
+    except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
+        logger.error(
+            "Neomodel error creating DTC-symptom relationship (%s -> %s): %s",
+            dtc_code,
+            symptom_name,
+            e,
+        )
+        return False
     except Exception:
+        logger.exception(
+            "Unexpected error creating DTC-symptom relationship (%s -> %s)", dtc_code, symptom_name
+        )
         return False
 
 
@@ -302,73 +317,84 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
 
     Returns a graph of related symptoms, components, repairs, and parts.
     """
-    dtc = DTCNode.nodes.get_or_none(code=dtc_code)
-    if not dtc:
-        return {}
+    try:
+        dtc = await asyncio.to_thread(DTCNode.nodes.get_or_none, code=dtc_code)
+        if not dtc:
+            return {}
 
-    result: Dict[str, Any] = {
-        "dtc": {
-            "code": dtc.code,
-            "description": dtc.description_hu or dtc.description_en,
-            "severity": dtc.severity,
-        },
-        "symptoms": [],
-        "components": [],
-        "repairs": [],
-    }
-
-    # Get symptoms
-    for symptom in dtc.causes.all():
-        rel = dtc.causes.relationship(symptom)
-        result["symptoms"].append(
-            {
-                "name": symptom.name,
-                "description": symptom.description_hu or symptom.description,
-                "confidence": rel.confidence,
-            }
-        )
-
-    # Get components
-    for component in dtc.indicates_failure_of.all():
-        rel = dtc.indicates_failure_of.relationship(component)
-        comp_data = {
-            "name": component.name_hu or component.name,
-            "system": component.system,
-            "failure_mode": rel.failure_mode,
+        result: Dict[str, Any] = {
+            "dtc": {
+                "code": dtc.code,
+                "description": dtc.description_hu or dtc.description_en,
+                "severity": dtc.severity,
+            },
+            "symptoms": [],
+            "components": [],
             "repairs": [],
         }
 
-        # Get repairs for this component
-        for repair in component.repaired_by.all():
-            repair_rel = component.repaired_by.relationship(repair)
-            repair_data = {
-                "name": repair.name,
-                "description": repair.description_hu or repair.description,
-                "difficulty": repair_rel.difficulty,
-                "estimated_time_minutes": repair_rel.estimated_time_minutes,
-                "estimated_cost_min": repair.estimated_cost_min,
-                "estimated_cost_max": repair.estimated_cost_max,
-                "parts": [],
+        # Get symptoms
+        symptoms = await asyncio.to_thread(lambda: list(dtc.causes.all()))
+        for symptom in symptoms:
+            rel = await asyncio.to_thread(dtc.causes.relationship, symptom)
+            result["symptoms"].append(
+                {
+                    "name": symptom.name,
+                    "description": symptom.description_hu or symptom.description,
+                    "confidence": rel.confidence,
+                }
+            )
+
+        # Get components
+        components = await asyncio.to_thread(lambda: list(dtc.indicates_failure_of.all()))
+        for component in components:
+            rel = await asyncio.to_thread(dtc.indicates_failure_of.relationship, component)
+            comp_data = {
+                "name": component.name_hu or component.name,
+                "system": component.system,
+                "failure_mode": rel.failure_mode,
+                "repairs": [],
             }
 
-            # Get parts for this repair
-            for part in repair.uses_parts.all():
-                part_rel = repair.uses_parts.relationship(part)
-                repair_data["parts"].append(
-                    {
-                        "name": part.name_hu or part.name,
-                        "part_number": part.part_number,
-                        "price_range": f"{part.price_min}-{part.price_max} {part.currency}",
-                        "quantity": part_rel.quantity,
-                    }
-                )
+            # Get repairs for this component
+            repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))
+            for repair in repairs:
+                repair_rel = await asyncio.to_thread(component.repaired_by.relationship, repair)
+                repair_data = {
+                    "name": repair.name,
+                    "description": repair.description_hu or repair.description,
+                    "difficulty": repair_rel.difficulty,
+                    "estimated_time_minutes": repair_rel.estimated_time_minutes,
+                    "estimated_cost_min": repair.estimated_cost_min,
+                    "estimated_cost_max": repair.estimated_cost_max,
+                    "parts": [],
+                }
 
-            comp_data["repairs"].append(repair_data)
-            result["repairs"].append(repair_data)
+                # Get parts for this repair
+                parts = await asyncio.to_thread(lambda r=repair: list(r.uses_parts.all()))
+                for part in parts:
+                    part_rel = await asyncio.to_thread(repair.uses_parts.relationship, part)
+                    repair_data["parts"].append(
+                        {
+                            "name": part.name_hu or part.name,
+                            "part_number": part.part_number,
+                            "price_range": f"{part.price_min}-{part.price_max} {part.currency}",
+                            "quantity": part_rel.quantity,
+                        }
+                    )
 
-        result["components"].append(comp_data)
+                comp_data["repairs"].append(repair_data)
+                result["repairs"].append(repair_data)
 
-    return result
+            result["components"].append(comp_data)
+
+        return result
+    except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
+        logger.error("Neomodel error getting diagnostic path for DTC %s: %s", dtc_code, e)
+        return {}
+    except Exception:
+        logger.exception("Unexpected error getting diagnostic path for DTC %s", dtc_code)
+        return {}
 
 
 async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] = None) -> dict:
@@ -383,73 +409,90 @@ async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] =
     Returns:
         Dictionary with common DTCs, repairs, and components for the vehicle.
     """
-    vehicle = VehicleNode.nodes.filter(make=make, model=model).first_or_none()
-    if not vehicle:
-        return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
+    try:
+        vehicle = await asyncio.to_thread(
+            lambda: VehicleNode.nodes.filter(make=make, model=model).first_or_none()
+        )
+        if not vehicle:
+            return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
 
-    result: Dict[str, Any] = {
-        "vehicle": {
-            "make": vehicle.make,
-            "model": vehicle.model,
-            "year_start": vehicle.year_start,
-            "year_end": vehicle.year_end,
-            "platform": vehicle.platform,
-            "engine_codes": vehicle.engine_codes or [],
-        },
-        "common_dtcs": [],
-        "common_repairs": [],
-    }
-
-    # Get common DTC issues
-    for dtc in vehicle.has_common_issue.all():
-        rel = vehicle.has_common_issue.relationship(dtc)
-
-        # Filter by year if specified
-        if year:
-            rel_year_start = rel.year_start or vehicle.year_start
-            rel_year_end = rel.year_end or vehicle.year_end or 2030
-            if not (rel_year_start <= year <= rel_year_end):
-                continue
-
-        dtc_data = {
-            "code": dtc.code,
-            "description": dtc.description_hu or dtc.description_en,
-            "severity": dtc.severity,
-            "frequency": rel.frequency,
-            "occurrence_count": rel.occurrence_count,
+        result: Dict[str, Any] = {
+            "vehicle": {
+                "make": vehicle.make,
+                "model": vehicle.model,
+                "year_start": vehicle.year_start,
+                "year_end": vehicle.year_end,
+                "platform": vehicle.platform,
+                "engine_codes": vehicle.engine_codes or [],
+            },
+            "common_dtcs": [],
+            "common_repairs": [],
         }
 
-        # Get repair recommendations for this DTC
-        dtc_data["recommended_repairs"] = []
-        for component in dtc.indicates_failure_of.all():
-            for repair in component.repaired_by.all():
-                component.repaired_by.relationship(repair)
-                dtc_data["recommended_repairs"].append(
-                    {
-                        "name": repair.description_hu or repair.name,
-                        "difficulty": repair.difficulty,
-                        "estimated_time_minutes": repair.estimated_time_minutes,
-                        "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
-                    }
-                )
+        # Get common DTC issues
+        dtcs = await asyncio.to_thread(lambda: list(vehicle.has_common_issue.all()))
+        for dtc in dtcs:
+            rel = await asyncio.to_thread(vehicle.has_common_issue.relationship, dtc)
 
-        result["common_dtcs"].append(dtc_data)
+            # Filter by year if specified
+            if year:
+                rel_year_start = rel.year_start or vehicle.year_start
+                rel_year_end = rel.year_end or vehicle.year_end or 2030
+                if not (rel_year_start <= year <= rel_year_end):
+                    continue
 
-    # Get common repairs directly linked to vehicle
-    for repair in vehicle.common_repair.all():
-        rel = vehicle.common_repair.relationship(repair)
-        result["common_repairs"].append(
-            {
-                "name": repair.description_hu or repair.name,
-                "difficulty": repair.difficulty,
-                "confidence": rel.confidence,
-                "is_primary_fix": bool(rel.is_primary_fix),
-                "estimated_time_minutes": repair.estimated_time_minutes,
-                "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+            dtc_data = {
+                "code": dtc.code,
+                "description": dtc.description_hu or dtc.description_en,
+                "severity": dtc.severity,
+                "frequency": rel.frequency,
+                "occurrence_count": rel.occurrence_count,
             }
-        )
 
-    return result
+            # Get repair recommendations for this DTC
+            dtc_data["recommended_repairs"] = []
+            components = await asyncio.to_thread(lambda d=dtc: list(d.indicates_failure_of.all()))
+            for component in components:
+                repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))
+                for repair in repairs:
+                    await asyncio.to_thread(component.repaired_by.relationship, repair)
+                    dtc_data["recommended_repairs"].append(
+                        {
+                            "name": repair.description_hu or repair.name,
+                            "difficulty": repair.difficulty,
+                            "estimated_time_minutes": repair.estimated_time_minutes,
+                            "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+                        }
+                    )
+
+            result["common_dtcs"].append(dtc_data)
+
+        # Get common repairs directly linked to vehicle
+        common_repairs = await asyncio.to_thread(lambda: list(vehicle.common_repair.all()))
+        for repair in common_repairs:
+            rel = await asyncio.to_thread(vehicle.common_repair.relationship, repair)
+            result["common_repairs"].append(
+                {
+                    "name": repair.description_hu or repair.name,
+                    "difficulty": repair.difficulty,
+                    "confidence": rel.confidence,
+                    "is_primary_fix": bool(rel.is_primary_fix),
+                    "estimated_time_minutes": repair.estimated_time_minutes,
+                    "estimated_cost": f"{repair.estimated_cost_min}-{repair.estimated_cost_max} HUF",
+                }
+            )
+
+        return result
+    except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
+        logger.error(
+            "Neomodel error getting common issues for %s %s (year=%s): %s", make, model, year, e
+        )
+        return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
+    except Exception:
+        logger.exception(
+            "Unexpected error getting common issues for %s %s (year=%s)", make, model, year
+        )
+        return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
 
 
 async def get_engine_common_issues(engine_code: str) -> dict:
@@ -462,51 +505,60 @@ async def get_engine_common_issues(engine_code: str) -> dict:
     Returns:
         Dictionary with engine info and common DTCs.
     """
-    engine = EngineNode.nodes.get_or_none(code=engine_code)
-    if not engine:
+    try:
+        engine = await asyncio.to_thread(EngineNode.nodes.get_or_none, code=engine_code)
+        if not engine:
+            return {"engine": None, "common_dtcs": [], "vehicles_using": []}
+
+        result: Dict[str, Any] = {
+            "engine": {
+                "code": engine.code,
+                "name": engine.name,
+                "family": engine.family,
+                "manufacturer": engine.manufacturer,
+                "displacement_l": engine.displacement_l,
+                "fuel_type": engine.fuel_type,
+                "power_hp": engine.power_hp,
+                "torque_nm": engine.torque_nm,
+            },
+            "common_dtcs": [],
+            "vehicles_using": [],
+        }
+
+        # Get common DTC issues
+        dtcs = await asyncio.to_thread(lambda: list(engine.common_issues.all()))
+        for dtc in dtcs:
+            rel = await asyncio.to_thread(engine.common_issues.relationship, dtc)
+            result["common_dtcs"].append(
+                {
+                    "code": dtc.code,
+                    "description": dtc.description_hu or dtc.description_en,
+                    "severity": dtc.severity,
+                    "frequency": rel.frequency,
+                }
+            )
+
+        # Get vehicles using this engine
+        vehicles = await asyncio.to_thread(lambda: list(engine.used_in.all()))
+        for vehicle in vehicles:
+            rel = await asyncio.to_thread(engine.used_in.relationship, vehicle)
+            result["vehicles_using"].append(
+                {
+                    "make": vehicle.make,
+                    "model": vehicle.model,
+                    "year_start": rel.year_start or vehicle.year_start,
+                    "year_end": rel.year_end or vehicle.year_end,
+                    "variant": rel.variant_name,
+                }
+            )
+
+        return result
+    except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
+        logger.error("Neomodel error getting common issues for engine %s: %s", engine_code, e)
         return {"engine": None, "common_dtcs": [], "vehicles_using": []}
-
-    result: Dict[str, Any] = {
-        "engine": {
-            "code": engine.code,
-            "name": engine.name,
-            "family": engine.family,
-            "manufacturer": engine.manufacturer,
-            "displacement_l": engine.displacement_l,
-            "fuel_type": engine.fuel_type,
-            "power_hp": engine.power_hp,
-            "torque_nm": engine.torque_nm,
-        },
-        "common_dtcs": [],
-        "vehicles_using": [],
-    }
-
-    # Get common DTC issues
-    for dtc in engine.common_issues.all():
-        rel = engine.common_issues.relationship(dtc)
-        result["common_dtcs"].append(
-            {
-                "code": dtc.code,
-                "description": dtc.description_hu or dtc.description_en,
-                "severity": dtc.severity,
-                "frequency": rel.frequency,
-            }
-        )
-
-    # Get vehicles using this engine
-    for vehicle in engine.used_in.all():
-        rel = engine.used_in.relationship(vehicle)
-        result["vehicles_using"].append(
-            {
-                "make": vehicle.make,
-                "model": vehicle.model,
-                "year_start": rel.year_start or vehicle.year_start,
-                "year_end": rel.year_end or vehicle.year_end,
-                "variant": rel.variant_name,
-            }
-        )
-
-    return result
+    except Exception:
+        logger.exception("Unexpected error getting common issues for engine %s", engine_code)
+        return {"engine": None, "common_dtcs": [], "vehicles_using": []}
 
 
 async def find_similar_vehicles(make: str, model: str) -> list:
@@ -520,21 +572,33 @@ async def find_similar_vehicles(make: str, model: str) -> list:
     Returns:
         List of similar vehicles sharing the same platform.
     """
-    vehicle = VehicleNode.nodes.filter(make=make, model=model).first_or_none()
-    if not vehicle or not vehicle.platform:
-        return []
-
-    similar = []
-    for other_vehicle in vehicle.shares_platform_with.all():
-        rel = vehicle.shares_platform_with.relationship(other_vehicle)
-        similar.append(
-            {
-                "make": other_vehicle.make,
-                "model": other_vehicle.model,
-                "platform": rel.platform_code,
-                "year_start": other_vehicle.year_start,
-                "year_end": other_vehicle.year_end,
-            }
+    try:
+        vehicle = await asyncio.to_thread(
+            lambda: VehicleNode.nodes.filter(make=make, model=model).first_or_none()
         )
+        if not vehicle or not vehicle.platform:
+            return []
 
-    return similar
+        similar = []
+        platform_vehicles = await asyncio.to_thread(
+            lambda: list(vehicle.shares_platform_with.all())
+        )
+        for other_vehicle in platform_vehicles:
+            rel = await asyncio.to_thread(vehicle.shares_platform_with.relationship, other_vehicle)
+            similar.append(
+                {
+                    "make": other_vehicle.make,
+                    "model": other_vehicle.model,
+                    "platform": rel.platform_code,
+                    "year_start": other_vehicle.year_start,
+                    "year_end": other_vehicle.year_end,
+                }
+            )
+
+        return similar
+    except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
+        logger.error("Neomodel error finding similar vehicles for %s %s: %s", make, model, e)
+        return []
+    except Exception:
+        logger.exception("Unexpected error finding similar vehicles for %s %s", make, model)
+        return []

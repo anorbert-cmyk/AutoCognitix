@@ -253,7 +253,7 @@ jobs:
           alembic upgrade head
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        continue-on-error: true
+        continue-on-error: false
 
   # ============================================
   # Smoke Tests after deployment

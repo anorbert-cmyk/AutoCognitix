@@ -23,6 +23,12 @@ logger = get_logger(__name__)
 class QdrantService:
     """Service for interacting with Qdrant vector database."""
 
+    # Embedding model version tracking
+    EMBEDDING_MODEL_VERSION = "hubert-base-cc-v1"
+
+    # Expected vector dimension for validation
+    EXPECTED_DIMENSION = 768
+
     # Collection names - Hungarian versions with huBERT embeddings (768-dim)
     DTC_COLLECTION = "dtc_embeddings_hu"
     SYMPTOM_COLLECTION = "symptom_embeddings_hu"
@@ -125,13 +131,26 @@ class QdrantService:
             vectors: List of embedding vectors
             payloads: Optional list of metadata payloads
         """
+        # Validate vector dimensions
+        for i, vec in enumerate(vectors):
+            if len(vec) != self.EXPECTED_DIMENSION:
+                raise ValueError(
+                    f"Vector dimension mismatch at index {i}: "
+                    f"expected {self.EXPECTED_DIMENSION}, got {len(vec)}"
+                )
+
+        # Inject embedding model version into each payload
+        resolved_payloads = list(payloads) if payloads else [{} for _ in ids]
+        for payload in resolved_payloads:
+            payload["_embedding_model_version"] = self.EMBEDDING_MODEL_VERSION
+
         points = [
             qdrant_models.PointStruct(
                 id=id_,
                 vector=vector,
-                payload=payload if payloads else {},
+                payload=payload,
             )
-            for id_, vector, payload in zip(ids, vectors, payloads or [{}] * len(ids))
+            for id_, vector, payload in zip(ids, vectors, resolved_payloads)
         ]
 
         self.client.upsert(
@@ -344,6 +363,25 @@ class QdrantService:
             "points_count": info.points_count,
             "status": info.status,
         }
+
+    async def get_storage_stats(self) -> Dict[str, Any]:
+        """Get storage statistics for all collections."""
+        all_collections = [
+            self.DTC_COLLECTION,
+            self.SYMPTOM_COLLECTION,
+            self.COMPONENT_COLLECTION,
+            self.REPAIR_COLLECTION,
+            self.ISSUE_COLLECTION,
+        ]
+        stats: Dict[str, Any] = {}
+        for collection in all_collections:
+            try:
+                info = self.get_collection_info(collection)
+                if info:
+                    stats[collection] = info
+            except Exception:
+                stats[collection] = {"error": "unavailable"}
+        return stats
 
 
 # Global instance

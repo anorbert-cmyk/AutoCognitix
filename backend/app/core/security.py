@@ -245,10 +245,8 @@ async def is_token_blacklisted(jti: str) -> bool:
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.error(f"Failed to check token blacklist: {e}")
-        # Fail open - if Redis is unavailable, allow the token
-        # The token will still be validated for expiration and signature
-        return False
+        logger.critical(f"Token blacklist check failed - rejecting token for safety: {e}")
+        return True
 
 
 def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
