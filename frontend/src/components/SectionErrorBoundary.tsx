@@ -30,6 +30,9 @@ class SectionErrorBoundary extends Component<Props, State> {
           <p className="text-red-600 font-medium">
             Hiba történt a(z) {this.props.sectionName} betöltésekor
           </p>
+          {this.state.error && (
+            <p className="mt-1 text-xs text-red-500">{this.state.error.message}</p>
+          )}
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
             className="mt-2 text-sm text-blue-600 hover:underline"

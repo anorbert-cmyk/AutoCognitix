@@ -16,6 +16,10 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage'))
 const DTCDetailPage = lazy(() => import('./pages/DTCDetailPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const DemoResultPage = lazy(() => import('./pages/DemoResultPage'))
+const InspectionPage = lazy(() => import('./pages/InspectionPage'))
+const CalculatorPage = lazy(() => import('./pages/CalculatorPage'))
+const ChatPage = lazy(() => import('./pages/ChatPage'))
+const ServiceComparisonPage = lazy(() => import('./pages/ServiceComparisonPage'))
 
 // Auth pages
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -71,6 +75,10 @@ function App() {
                   }
                 />
                 <Route path="demo" element={<DemoResultPage />} />
+                <Route path="inspection" element={<InspectionPage />} />
+                <Route path="calculator" element={<CalculatorPage />} />
+                <Route path="chat" element={<ChatPage />} />
+                <Route path="services" element={<ServiceComparisonPage />} />
                 <Route path="dtc/:code" element={<DTCDetailPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

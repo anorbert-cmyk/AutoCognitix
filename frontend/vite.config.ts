@@ -71,6 +71,8 @@ export default defineConfig(({ mode }) => ({
           'vendor-ui': ['clsx', 'tailwind-merge', 'lucide-react'],
           // HTTP client
           'vendor-http': ['axios'],
+          // Map libraries
+          'vendor-map': ['leaflet', 'react-leaflet'],
         },
         // Asset file naming for better caching
         assetFileNames: (assetInfo) => {
