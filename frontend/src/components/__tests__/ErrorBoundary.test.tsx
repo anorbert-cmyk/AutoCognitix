@@ -44,7 +44,7 @@ describe('ErrorBoundary', () => {
     )
 
     expect(screen.queryByText('Child content rendered')).not.toBeInTheDocument()
-    expect(screen.getByText('Hiba tortent')).toBeInTheDocument()
+    expect(screen.getByText('Hiba történt')).toBeInTheDocument()
   })
 
   it('displays Hungarian error message in the fallback', () => {
@@ -54,28 +54,28 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
 
-    expect(screen.getByText(/Sajnos varatlan hiba tortent/)).toBeInTheDocument()
-    expect(screen.getByText(/probalkozzon ujra/)).toBeInTheDocument()
+    expect(screen.getByText(/Sajnos váratlan hiba történt/)).toBeInTheDocument()
+    expect(screen.getByText(/próbálkozzon újra/)).toBeInTheDocument()
   })
 
-  it('shows retry button (Ujraprobalas)', () => {
+  it('shows retry button (Újrapróbálás)', () => {
     render(
       <ErrorBoundary>
         <ThrowingComponent />
       </ErrorBoundary>
     )
 
-    expect(screen.getByRole('button', { name: /Ujraprobalas/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Újrapróbálás/i })).toBeInTheDocument()
   })
 
-  it('shows go home button (Foodalra)', () => {
+  it('shows go home button (Főoldalra)', () => {
     render(
       <ErrorBoundary>
         <ThrowingComponent />
       </ErrorBoundary>
     )
 
-    expect(screen.getByRole('button', { name: /Foodalra/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Főoldalra/i })).toBeInTheDocument()
   })
 
   it('retry resets error state and re-renders children', () => {
@@ -96,17 +96,17 @@ describe('ErrorBoundary', () => {
     )
 
     // Should be in error state
-    expect(screen.getByText('Hiba tortent')).toBeInTheDocument()
+    expect(screen.getByText('Hiba történt')).toBeInTheDocument()
 
     // Stop throwing before retry
     shouldThrow = false
 
     // Click retry
-    fireEvent.click(screen.getByRole('button', { name: /Ujraprobalas/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Újrapróbálás/i }))
 
     // Should now render children again
     expect(screen.getByText('Recovery successful')).toBeInTheDocument()
-    expect(screen.queryByText('Hiba tortent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Hiba történt')).not.toBeInTheDocument()
   })
 
   it('renders custom fallback when provided', () => {
@@ -117,7 +117,7 @@ describe('ErrorBoundary', () => {
     )
 
     expect(screen.getByText('Custom fallback UI')).toBeInTheDocument()
-    expect(screen.queryByText('Hiba tortent')).not.toBeInTheDocument()
+    expect(screen.queryByText('Hiba történt')).not.toBeInTheDocument()
   })
 
   it('calls onError callback when error is caught', () => {
@@ -155,7 +155,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /Foodalra/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Főoldalra/i }))
 
     // The handleGoHome sets window.location.href = '/'
     // In happy-dom this may or may not work, but we verify the button is clickable
@@ -176,7 +176,7 @@ describe('ErrorBoundary', () => {
 
       render(<WrappedThrowing />)
 
-      expect(screen.getByText('Hiba tortent')).toBeInTheDocument()
+      expect(screen.getByText('Hiba történt')).toBeInTheDocument()
       expect(screen.queryByText('Child content rendered')).not.toBeInTheDocument()
     })
 

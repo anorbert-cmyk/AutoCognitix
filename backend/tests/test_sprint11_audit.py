@@ -89,9 +89,7 @@ class TestDiagnosisServiceFixes:
             '"model_used"',
         ]
         for key in required_keys:
-            assert key in method_body, (
-                f"_fallback_diagnosis return dict must contain {key}"
-            )
+            assert key in method_body, f"_fallback_diagnosis return dict must contain {key}"
 
     def test_no_hasattr_on_repair_objects(self):
         """diagnosis_service.py should use getattr() instead of hasattr() on repair objects."""
@@ -185,7 +183,9 @@ class TestFrontendFixes:
 
         if onclick_divs:
             # At least one clickable div should have role="button"
-            has_role_button = any('role="button"' in div or "role='button'" in div for div in onclick_divs)
+            has_role_button = any(
+                'role="button"' in div or "role='button'" in div for div in onclick_divs
+            )
             assert has_role_button, (
                 "DiagnosisPage.tsx has clickable <div onClick=...> elements "
                 "without role='button' - add role='button' for accessibility"

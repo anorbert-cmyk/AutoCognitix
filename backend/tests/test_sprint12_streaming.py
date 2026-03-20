@@ -109,9 +109,7 @@ class TestStreamingEndpoint:
         assert gen_start > 0, "generate_events generator not found"
         gen_body = self.diagnosis_source[gen_start:]
 
-        assert "DTCValidationError" in gen_body, (
-            "generate_events must catch DTCValidationError"
-        )
+        assert "DTCValidationError" in gen_body, "generate_events must catch DTCValidationError"
 
     def test_streaming_handles_vin_decode_error(self):
         """Streaming generator must handle VINDecodeError."""
@@ -119,9 +117,7 @@ class TestStreamingEndpoint:
         assert gen_start > 0
         gen_body = self.diagnosis_source[gen_start:]
 
-        assert "VINDecodeError" in gen_body, (
-            "generate_events must catch VINDecodeError"
-        )
+        assert "VINDecodeError" in gen_body, "generate_events must catch VINDecodeError"
 
     def test_streaming_handles_generic_exception(self):
         """Streaming generator must catch generic Exception as fallback."""
@@ -129,9 +125,7 @@ class TestStreamingEndpoint:
         assert gen_start > 0
         gen_body = self.diagnosis_source[gen_start:]
 
-        assert "except Exception" in gen_body, (
-            "generate_events must catch generic Exception"
-        )
+        assert "except Exception" in gen_body, "generate_events must catch generic Exception"
 
     def test_format_sse_event_function_exists(self):
         """_format_sse_event helper must exist for SSE formatting."""
@@ -181,17 +175,22 @@ class TestStreamingSchemas:
 
     def test_streaming_event_type_has_all_values(self):
         """StreamingEventType must define all required event types."""
-        required = ["START", "CONTEXT", "ANALYSIS", "CAUSE", "REPAIR", "WARNING", "COMPLETE", "ERROR"]
+        required = [
+            "START",
+            "CONTEXT",
+            "ANALYSIS",
+            "CAUSE",
+            "REPAIR",
+            "WARNING",
+            "COMPLETE",
+            "ERROR",
+        ]
         for name in required:
-            assert f'{name} = ' in self.source, (
-                f"StreamingEventType must define {name}"
-            )
+            assert f"{name} = " in self.source, f"StreamingEventType must define {name}"
 
     def test_streaming_event_model_exists(self):
         """StreamingEvent Pydantic model must be defined."""
-        assert "class StreamingEvent(BaseModel)" in self.source, (
-            "StreamingEvent model not found"
-        )
+        assert "class StreamingEvent(BaseModel)" in self.source, "StreamingEvent model not found"
 
     def test_streaming_event_has_progress_field(self):
         """StreamingEvent must have a progress field."""
@@ -203,9 +202,7 @@ class TestStreamingSchemas:
             next_cls = len(self.source)
         cls_body = self.source[cls_start:next_cls]
 
-        assert "progress" in cls_body, (
-            "StreamingEvent must have a 'progress' field"
-        )
+        assert "progress" in cls_body, "StreamingEvent must have a 'progress' field"
 
     def test_streaming_event_has_diagnosis_id_field(self):
         """StreamingEvent must have a diagnosis_id field."""
@@ -216,9 +213,7 @@ class TestStreamingSchemas:
             next_cls = len(self.source)
         cls_body = self.source[cls_start:next_cls]
 
-        assert "diagnosis_id" in cls_body, (
-            "StreamingEvent must have a 'diagnosis_id' field"
-        )
+        assert "diagnosis_id" in cls_body, "StreamingEvent must have a 'diagnosis_id' field"
 
     def test_streaming_event_has_timestamp_field(self):
         """StreamingEvent must have a timestamp field."""
@@ -229,9 +224,7 @@ class TestStreamingSchemas:
             next_cls = len(self.source)
         cls_body = self.source[cls_start:next_cls]
 
-        assert "timestamp" in cls_body, (
-            "StreamingEvent must have a 'timestamp' field"
-        )
+        assert "timestamp" in cls_body, "StreamingEvent must have a 'timestamp' field"
 
     def test_diagnosis_stream_request_model_exists(self):
         """DiagnosisStreamRequest model must be defined."""
@@ -268,9 +261,7 @@ class TestEmailAuthIntegration:
 
     def test_email_service_imported_in_auth(self):
         """Auth endpoint must import from email_service."""
-        assert "email_service" in self.auth_source, (
-            "auth.py must import from email_service"
-        )
+        assert "email_service" in self.auth_source, "auth.py must import from email_service"
 
     def test_send_password_reset_email_imported(self):
         """send_password_reset_email must be imported in auth.py."""
@@ -280,9 +271,7 @@ class TestEmailAuthIntegration:
 
     def test_send_welcome_email_imported(self):
         """send_welcome_email must be imported in auth.py."""
-        assert "send_welcome_email" in self.auth_source, (
-            "auth.py must import send_welcome_email"
-        )
+        assert "send_welcome_email" in self.auth_source, "auth.py must import send_welcome_email"
 
     def test_forgot_password_endpoint_exists(self):
         """forgot_password endpoint must be defined."""
@@ -450,12 +439,8 @@ class TestPasswordStrength:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "errors" in fn_body, (
-            "validate_password_strength must collect errors"
-        )
-        assert "return" in fn_body, (
-            "validate_password_strength must return validation result"
-        )
+        assert "errors" in fn_body, "validate_password_strength must collect errors"
+        assert "return" in fn_body, "validate_password_strength must return validation result"
 
     def test_checks_maximum_length(self):
         """Must check for maximum password length to prevent DoS."""
@@ -505,9 +490,7 @@ class TestJWTClaimProtection:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert '"jti"' in fn_body, (
-            "create_access_token must include JTI claim for blacklisting"
-        )
+        assert '"jti"' in fn_body, "create_access_token must include JTI claim for blacklisting"
 
     def test_token_blacklist_fail_closed(self):
         """is_token_blacklisted must fail closed (return True) when Redis is unavailable."""

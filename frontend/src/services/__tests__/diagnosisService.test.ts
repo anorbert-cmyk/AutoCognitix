@@ -37,37 +37,6 @@ function createMockSSEStream(
   });
 }
 
-/**
- * Create a mock ReadableStream that emits events with a delay (for abort testing).
- */
-function createSlowMockSSEStream(
-  events: Array<{
-    event_type: string;
-    data: Record<string, unknown>;
-    progress: number;
-  }>,
-  delayMs = 100
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    async start(controller) {
-      for (const event of events) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        const payload = {
-          event_type: event.event_type,
-          data: event.data,
-          progress: event.progress,
-          diagnosis_id: 'test-diag-123',
-          timestamp: '2026-03-20T10:00:00Z',
-        };
-        const line = `data: ${JSON.stringify(payload)}\n\n`;
-        controller.enqueue(encoder.encode(line));
-      }
-      controller.close();
-    },
-  });
-}
-
 /** Valid diagnosis form data for tests */
 const validFormData = {
   vehicleMake: 'Volkswagen',
