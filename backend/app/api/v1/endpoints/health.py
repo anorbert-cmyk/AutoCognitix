@@ -115,8 +115,10 @@ async def check_postgres_health() -> ServiceHealth:
             result.fetchone()
 
             # Get table counts for key tables
+            # Whitelist of allowed table names to prevent SQL injection
+            ALLOWED_TABLES = {"dtc_codes", "vehicle_makes", "vehicle_models", "users"}
             table_counts = {}
-            for table in ["dtc_codes", "vehicle_makes", "vehicle_models", "users"]:
+            for table in ALLOWED_TABLES:
                 try:
                     count_result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
                     row = count_result.fetchone()
@@ -180,8 +182,10 @@ async def check_neo4j_health() -> ServiceHealth:
             result.single()
 
             # Get node counts by label
+            # Whitelist of allowed Neo4j labels to prevent Cypher injection
+            ALLOWED_LABELS = {"DTCCode", "Symptom", "Component", "Repair"}
             node_counts = {}
-            for label in ["DTCCode", "Symptom", "Component", "Repair"]:
+            for label in ALLOWED_LABELS:
                 try:
                     count_result = session.run(f"MATCH (n:{label}) RETURN COUNT(n) AS count")
                     record = count_result.single()

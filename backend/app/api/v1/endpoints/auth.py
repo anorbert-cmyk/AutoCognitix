@@ -957,8 +957,12 @@ async def delete_user_account(
         await cache.delete_pattern(f"api:user:{user_id}:*")
         await cache.delete_pattern(f"api:diagnosis:*")
         await cache.delete_pattern(f"ratelimit:{user_id}*")
-    except Exception:
-        pass  # Cache cleanup is best-effort
+    except Exception as e:
+        # Log cache cleanup failure for GDPR audit trail (best-effort but tracked)
+        logger.warning(
+            "GDPR cache cleanup failed (best-effort)",
+            extra={"user_id": str(user_id), "error_type": type(e).__name__},
+        )
 
     logger.info(f"GDPR deletion completed for user {user_id}")
 

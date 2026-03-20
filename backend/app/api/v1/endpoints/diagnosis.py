@@ -430,7 +430,7 @@ async def get_diagnosis_history(
         )
 
     except Exception as e:
-        logger.exception(f"Error retrieving diagnosis history: {e}")
+        logger.exception("Error retrieving diagnosis history", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while retrieving diagnosis history.",
@@ -495,7 +495,9 @@ async def delete_diagnosis(
         raise
 
     except Exception as e:
-        logger.exception(f"Error deleting diagnosis {diagnosis_id}: {e}")
+        logger.exception(
+            "Error deleting diagnosis", extra={"diagnosis_id": str(diagnosis_id), "error": str(e)}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the diagnosis.",
@@ -565,7 +567,7 @@ async def get_diagnosis_stats(
         )
 
     except Exception as e:
-        logger.exception(f"Error retrieving diagnosis stats: {e}")
+        logger.exception("Error retrieving diagnosis stats", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while retrieving diagnosis statistics.",
@@ -658,7 +660,7 @@ async def quick_analyze(
         raise
 
     except Exception as e:
-        logger.exception(f"Error in quick analyze: {e}")
+        logger.exception("Error in quick analyze", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during quick analysis.",
@@ -1091,22 +1093,28 @@ async def analyze_vehicle_stream(  # noqa: PLR0915
     async def _timeout_wrapper():
         """Enforce stream timeout to prevent Slowloris attacks."""
         deadline = asyncio.get_event_loop().time() + STREAM_TIMEOUT_SECONDS
-        async for event in generate_events():
-            if asyncio.get_event_loop().time() > deadline:
-                logger.warning(f"Stream timeout reached for diagnosis {diagnosis_id}")
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="error",
-                        data={
-                            "error_type": "timeout",
-                            "message": "A diagnosztika tullepte a maximalis idokeretet.",
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=0.0,
+        gen = generate_events()
+        try:
+            async for event in gen:
+                if asyncio.get_event_loop().time() > deadline:
+                    logger.warning(f"Stream timeout reached for diagnosis {diagnosis_id}")
+                    yield _format_sse_event(
+                        StreamingEvent(
+                            event_type="error",
+                            data={
+                                "error_type": "timeout",
+                                "message": "A diagnosztika tullepte a maximalis idokeretet.",
+                            },
+                            diagnosis_id=diagnosis_id,
+                            progress=0.0,
+                        )
                     )
-                )
-                return
-            yield event
+                    # Cancel the generator to release resources (semaphore, DB session)
+                    await gen.aclose()
+                    return
+                yield event
+        except GeneratorExit:
+            await gen.aclose()
 
     return StreamingResponse(
         _timeout_wrapper(),

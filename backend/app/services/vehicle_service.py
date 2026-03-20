@@ -12,6 +12,7 @@ from neomodel import db as neomodel_db
 from sqlalchemy import func, select
 
 from app.core.logging import get_logger
+from app.core.sql_utils import escape_ilike
 from app.db.postgres.models import VehicleMake, VehicleModel as VehicleModelDB
 from app.db.postgres.session import async_session_maker
 
@@ -113,8 +114,9 @@ class VehicleService:
             count_stmt = select(func.count(VehicleMake.id))
 
             if search:
-                stmt = stmt.where(VehicleMake.name.ilike(f"%{search}%"))
-                count_stmt = count_stmt.where(VehicleMake.name.ilike(f"%{search}%"))
+                escaped_search = escape_ilike(search)
+                stmt = stmt.where(VehicleMake.name.ilike(f"%{escaped_search}%"))
+                count_stmt = count_stmt.where(VehicleMake.name.ilike(f"%{escaped_search}%"))
 
             stmt = stmt.order_by(VehicleMake.name).offset(offset).limit(limit)
 
@@ -240,7 +242,7 @@ class VehicleService:
         async with async_session_maker() as session:
             make_obj_result = await session.execute(
                 select(VehicleMake).where(
-                    (VehicleMake.id == make_id) | (VehicleMake.name.ilike(make))
+                    (VehicleMake.id == make_id) | (VehicleMake.name.ilike(escape_ilike(make)))
                 )
             )
             make_obj = make_obj_result.scalar_one_or_none()
@@ -253,8 +255,9 @@ class VehicleService:
             )
 
             if search:
-                stmt = stmt.where(VehicleModelDB.name.ilike(f"%{search}%"))
-                count_stmt = count_stmt.where(VehicleModelDB.name.ilike(f"%{search}%"))
+                escaped_search = escape_ilike(search)
+                stmt = stmt.where(VehicleModelDB.name.ilike(f"%{escaped_search}%"))
+                count_stmt = count_stmt.where(VehicleModelDB.name.ilike(f"%{escaped_search}%"))
 
             stmt = stmt.order_by(VehicleModelDB.name).offset(offset).limit(limit)
 
@@ -311,7 +314,8 @@ class VehicleService:
                 async with async_session_maker() as session:
                     make_id = make.lower().replace(" ", "_").replace("-", "_")
                     stmt = select(VehicleModelDB).where(
-                        (VehicleModelDB.make_id == make_id) & (VehicleModelDB.name.ilike(model))
+                        (VehicleModelDB.make_id == make_id)
+                        & (VehicleModelDB.name.ilike(escape_ilike(model)))
                     )
                     result = await session.execute(stmt)
                     for m in result.scalars().all():

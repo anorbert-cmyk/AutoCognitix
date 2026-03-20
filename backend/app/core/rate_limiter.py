@@ -148,7 +148,9 @@ class RedisRateLimiter:
         """
         redis_client = await self._get_redis()
         if not redis_client:
-            return True, limit, 0  # Allow if Redis unavailable
+            # Fail-closed: deny requests when Redis unavailable (security policy)
+            logger.warning("Redis unavailable - rate limiter denying request (fail-closed)")
+            return False, 0, 60
 
         now = time.time()
         window_start = now - window_seconds
@@ -187,7 +189,8 @@ class RedisRateLimiter:
 
         except Exception as e:
             logger.error(f"Redis rate limit error: {e}")
-            return True, limit, 0  # Allow on error
+            # Fail-closed: deny on error to prevent bypass during Redis failures
+            return False, 0, 60
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -204,6 +207,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         "/api/v1/auth/register": (5, 60),  # 5 per minute
         "/api/v1/diagnosis/analyze/stream": (5, 60),  # 5 per minute (long-lived SSE)
         "/api/v1/diagnosis/analyze": (20, 60),  # 20 per minute (expensive)
+        "/api/v1/auth/forgot-password": (5, 60),  # 5 per minute (brute-force protection)
+        "/api/v1/auth/reset-password": (5, 300),  # 5 per 5 minutes (token brute-force)
     }
 
     # Endpoints exempt from rate limiting
@@ -233,8 +238,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check X-Forwarded-For header (for proxied requests)
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
-            # Take the first IP (original client)
-            return forwarded_for.split(",")[0].strip()
+            # Take the LAST IP (closest trusted proxy adds client IP at the end)
+            # First IP is client-supplied and easily spoofable
+            ips = [ip.strip() for ip in forwarded_for.split(",")]
+            return ips[-1] if ips else "unknown"
 
         # Check X-Real-IP header
         real_ip = request.headers.get("X-Real-IP")

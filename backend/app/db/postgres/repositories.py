@@ -19,6 +19,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.sql_utils import escape_ilike
 from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
 
 if TYPE_CHECKING:
@@ -306,10 +307,11 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         Returns:
             List of matching DTCCode objects.
         """
+        escaped_query = escape_ilike(query)
         stmt = select(DTCCode).where(
-            (DTCCode.code.ilike(f"%{query}%"))
-            | (DTCCode.description_en.ilike(f"%{query}%"))
-            | (DTCCode.description_hu.ilike(f"%{query}%"))
+            (DTCCode.code.ilike(f"%{escaped_query}%"))
+            | (DTCCode.description_en.ilike(f"%{escaped_query}%"))
+            | (DTCCode.description_hu.ilike(f"%{escaped_query}%"))
         )
 
         if category:
@@ -346,7 +348,7 @@ class VehicleMakeRepository(BaseRepository[VehicleMake]):
     async def search(self, query: str) -> List[VehicleMake]:
         """Search makes by name."""
         result = await self.db.execute(
-            select(VehicleMake).where(VehicleMake.name.ilike(f"%{query}%"))
+            select(VehicleMake).where(VehicleMake.name.ilike(f"%{escape_ilike(query)}%"))
         )
         return list(result.scalars().all())
 
@@ -440,10 +442,14 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         ]
 
         if vehicle_make:
-            conditions.append(DiagnosisSession.vehicle_make.ilike(f"%{vehicle_make}%"))
+            conditions.append(
+                DiagnosisSession.vehicle_make.ilike(f"%{escape_ilike(vehicle_make)}%")
+            )
 
         if vehicle_model:
-            conditions.append(DiagnosisSession.vehicle_model.ilike(f"%{vehicle_model}%"))
+            conditions.append(
+                DiagnosisSession.vehicle_model.ilike(f"%{escape_ilike(vehicle_model)}%")
+            )
 
         if vehicle_year:
             conditions.append(DiagnosisSession.vehicle_year == vehicle_year)
