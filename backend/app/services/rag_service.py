@@ -296,7 +296,7 @@ class HybridRanker:
                     item_objects[item_key] = item
 
         # Sort by combined score
-        sorted_keys = sorted(item_scores.keys(), key=lambda k: item_scores[k], reverse=True)
+        sorted_keys = sorted(item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True)
 
         # Update item scores and return
         result = []
@@ -310,7 +310,7 @@ class HybridRanker:
     def _get_item_key(self, item: RetrievedItem) -> str:
         """Generate unique key for an item."""
         content_str = str(item.content)
-        return hashlib.md5(content_str.encode()).hexdigest()
+        return hashlib.sha256(content_str.encode()).hexdigest()
 
     def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
         """Normalize scores to 0-1 range."""
@@ -345,7 +345,7 @@ class ContextCache:
 
     def _make_key(self, *args) -> str:
         """Create cache key from arguments."""
-        return hashlib.md5(str(args).encode()).hexdigest()
+        return hashlib.sha256(str(args).encode()).hexdigest()
 
     def get(self, *args) -> Optional[Any]:
         """Get item from cache if not expired."""
@@ -1295,9 +1295,6 @@ class RAGService:
 # =============================================================================
 
 
-_rag_service: Optional[RAGService] = None
-
-
 def get_rag_service() -> RAGService:
     """
     Get the global RAG service instance.
@@ -1305,10 +1302,7 @@ def get_rag_service() -> RAGService:
     Returns:
         RAGService: The singleton RAG service instance.
     """
-    global _rag_service
-    if _rag_service is None:
-        _rag_service = RAGService()
-    return _rag_service
+    return RAGService()
 
 
 async def diagnose(

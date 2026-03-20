@@ -5,7 +5,7 @@
  */
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
@@ -14,38 +14,16 @@ import { MaterialIcon } from '../components/ui/MaterialIcon';
 import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
 import { RepairStep } from '../components/features/diagnosis/RepairStep';
 
-// Autó kép URL - Unsplash vagy fallback
+// Autó kép URL - placehold.co placeholder
 function getVehicleImageUrl(make: string, model: string): string {
-  const searchQuery = encodeURIComponent(`${make} ${model} car professional photo`);
-  return `https://source.unsplash.com/800x600/?${searchQuery}`;
+  return `https://placehold.co/800x600/1a1a2e/e0e0e0?text=${encodeURIComponent(make + ' ' + model)}`;
 }
-
-const fallbackImages: Record<string, string> = {
-  'Toyota': 'https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=800&h=600&fit=crop',
-  'Honda': 'https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?w=800&h=600&fit=crop',
-  'Ford': 'https://images.unsplash.com/photo-1551830820-330a71b99659?w=800&h=600&fit=crop',
-  'BMW': 'https://images.unsplash.com/photo-1555215695-3004980ad54e?w=800&h=600&fit=crop',
-  'Mercedes-Benz': 'https://images.unsplash.com/photo-1618843479619-f3d0d81e4d10?w=800&h=600&fit=crop',
-  'Mercedes': 'https://images.unsplash.com/photo-1618843479619-f3d0d81e4d10?w=800&h=600&fit=crop',
-  'Audi': 'https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?w=800&h=600&fit=crop',
-  'Volkswagen': 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?w=800&h=600&fit=crop',
-  'Tesla': 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=800&h=600&fit=crop',
-  'Skoda': 'https://images.unsplash.com/photo-1609521263047-f8f205293f24?w=800&h=600&fit=crop',
-  'Opel': 'https://images.unsplash.com/photo-1612825173281-9a193378527e?w=800&h=600&fit=crop',
-  'default': 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=800&h=600&fit=crop',
-};
 
 function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const toast = useToast();
-  const [imageError, setImageError] = useState(false);
-
   // Autó kép URL generálása
   const vehicleImage = useMemo(() => {
-    const make = result.vehicle_make || 'default';
-    if (fallbackImages[make]) {
-      return fallbackImages[make];
-    }
-    return getVehicleImageUrl(result.vehicle_make, result.vehicle_model);
+    return getVehicleImageUrl(result.vehicle_make || 'Auto', result.vehicle_model || '');
   }, [result.vehicle_make, result.vehicle_model]);
 
   const licensePlate = 'N/A';
@@ -179,10 +157,9 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               {/* Vehicle Image */}
               <div className="relative h-56 bg-slate-100 group">
                 <img
-                  src={imageError ? fallbackImages['default'] : vehicleImage}
+                  src={vehicleImage}
                   alt={`${result.vehicle_make} ${result.vehicle_model}`}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  onError={() => setImageError(true)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent"></div>
                 <div className="absolute bottom-5 left-6 text-white">

@@ -3,15 +3,17 @@ import { render, screen, waitFor } from '../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import LoginPage from '../LoginPage';
 
-// Mock AuthContext
+// Mock AuthContext - dynamic mock values
 const mockLogin = vi.fn();
 const mockClearError = vi.fn();
+let mockIsLoading = false;
+let mockError: string | null = null;
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     login: mockLogin,
-    isLoading: false,
-    error: null,
+    isLoading: mockIsLoading,
+    error: mockError,
     clearError: mockClearError,
   }),
 }));
@@ -30,6 +32,8 @@ vi.mock('react-router-dom', async () => {
 describe('LoginPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsLoading = false;
+    mockError = null;
   });
 
   it('should render login form with email and password fields', () => {
@@ -42,14 +46,21 @@ describe('LoginPage', () => {
   it('should render AutoCognitix branding', () => {
     render(<LoginPage />);
     expect(screen.getByText('AutoCognitix')).toBeInTheDocument();
-    // "Bejelentkezes" appears both in heading and submit button
     expect(screen.getByRole('heading', { name: /bejelentkezes/i })).toBeInTheDocument();
   });
 
-  it('should render registration and forgot password links', () => {
+  it('should have a link to the register page', () => {
     render(<LoginPage />);
-    expect(screen.getByText('Regisztraljon most')).toBeInTheDocument();
-    expect(screen.getByText('Elfelejtett jelszo?')).toBeInTheDocument();
+    const registerLink = screen.getByText('Regisztraljon most');
+    expect(registerLink).toBeInTheDocument();
+    expect(registerLink.closest('a')).toHaveAttribute('href', '/register');
+  });
+
+  it('should have a link to forgot password', () => {
+    render(<LoginPage />);
+    const forgotLink = screen.getByText('Elfelejtett jelszo?');
+    expect(forgotLink).toBeInTheDocument();
+    expect(forgotLink.closest('a')).toHaveAttribute('href', '/forgot-password');
   });
 
   it('should have required attribute on email and password fields', () => {
@@ -64,7 +75,41 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText('Jelszo')).toHaveAttribute('type', 'password');
   });
 
-  it('should call login with credentials on valid submit', async () => {
+  it('should show validation error when email is empty on submit', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    // Type only password, leave email empty
+    await user.type(screen.getByLabelText('Jelszo'), 'password123');
+    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Kerem adja meg az email cimet')).toBeInTheDocument();
+    });
+    expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  it('should show validation error when password is empty on submit', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await user.type(screen.getByLabelText('Email cim'), 'test@example.com');
+    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Kerem adja meg a jelszot')).toBeInTheDocument();
+    });
+    expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  it('should show error message on failed login from AuthContext', () => {
+    mockError = 'Hibas email vagy jelszo';
+    render(<LoginPage />);
+
+    expect(screen.getByText('Hibas email vagy jelszo')).toBeInTheDocument();
+  });
+
+  it('should call login with correct credentials on valid submit', async () => {
     mockLogin.mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(<LoginPage />);
@@ -95,6 +140,21 @@ describe('LoginPage', () => {
     });
   });
 
+  it('should not navigate when login fails', async () => {
+    mockLogin.mockRejectedValue(new Error('Login failed'));
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await user.type(screen.getByLabelText('Email cim'), 'test@example.com');
+    await user.type(screen.getByLabelText('Jelszo'), 'wrongpassword');
+    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalled();
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('should toggle password visibility', async () => {
     const user = userEvent.setup();
     render(<LoginPage />);
@@ -102,7 +162,6 @@ describe('LoginPage', () => {
     const passwordInput = screen.getByLabelText('Jelszo');
     expect(passwordInput).toHaveAttribute('type', 'password');
 
-    // Click the toggle button (eye icon)
     const toggleButton = passwordInput.parentElement?.querySelector('button');
     expect(toggleButton).toBeTruthy();
     await user.click(toggleButton!);
@@ -117,6 +176,28 @@ describe('LoginPage', () => {
     const emailInput = screen.getByLabelText('Email cim');
     await user.type(emailInput, 'hello@test.com');
     expect(emailInput).toHaveValue('hello@test.com');
+  });
+
+  it('should disable submit button when loading', () => {
+    mockIsLoading = true;
+    render(<LoginPage />);
+
+    const submitButton = screen.getByRole('button', { name: /bejelentkezes/i });
+    expect(submitButton).toBeDisabled();
+  });
+
+  it('should clear error on form submit', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue(undefined);
+    render(<LoginPage />);
+
+    await user.type(screen.getByLabelText('Email cim'), 'test@example.com');
+    await user.type(screen.getByLabelText('Jelszo'), 'password123');
+    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+
+    await waitFor(() => {
+      expect(mockClearError).toHaveBeenCalled();
+    });
   });
 
   it('should not call login without user interaction', () => {

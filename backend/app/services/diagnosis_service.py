@@ -573,13 +573,9 @@ class DiagnosisService:
                         if repair.parts
                         else [],
                         "estimated_time_minutes": repair.estimated_time_minutes,
-                        "tools_needed": repair.tools_needed
-                        if hasattr(repair, "tools_needed")
-                        else [],
-                        "expert_tips": repair.expert_tips if hasattr(repair, "expert_tips") else [],
-                        "root_cause_explanation": repair.root_cause_explanation
-                        if hasattr(repair, "root_cause_explanation")
-                        else None,
+                        "tools_needed": getattr(repair, "tools_needed", []),
+                        "expert_tips": getattr(repair, "expert_tips", []),
+                        "root_cause_explanation": getattr(repair, "root_cause_explanation", None),
                     }
                     for repair in result.repair_recommendations
                 ],
@@ -794,6 +790,12 @@ class DiagnosisService:
             "recommended_repairs": recommended_repairs,
             "confidence_score": min(0.8, confidence),
             "sources": sources,
+            "used_fallback": True,
+            "safety_warnings": [],
+            "diagnostic_steps": [],
+            "processing_time_ms": 0,
+            "model_used": "fallback",
+            "root_cause_analysis": None,
         }
 
     # =========================================================================
@@ -1138,6 +1140,7 @@ class DiagnosisService:
             }
 
             await self.diagnosis_repository.create(session_data)
+            await self.db.commit()
             logger.debug(f"Saved diagnosis session {diagnosis_id}")
             return True
 
