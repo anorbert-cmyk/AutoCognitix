@@ -434,9 +434,13 @@ export function streamDiagnosis(
         error: undefined, // Handled separately
       }
 
-      while (true) {
+      let streamDone = false
+      while (!streamDone) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          streamDone = true
+          continue
+        }
 
         buffer += decoder.decode(value, { stream: true })
         const { events, remaining } = parseSSEEvents(buffer)

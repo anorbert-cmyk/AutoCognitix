@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '../../../../test/test-utils';
 import { PartStoreCard, PartStoreCardGrid } from '../PartStoreCard';
-import type { DemoPartWithStores, StorePricing } from '../../../../data/demoData';
+import type { DemoPartWithStores } from '../../../../data/demoData';
 import { demoParts } from '../../../../data/demoData';
 
 // Helper to create a minimal part for isolated tests
