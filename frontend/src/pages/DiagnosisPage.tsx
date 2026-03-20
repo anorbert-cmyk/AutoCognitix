@@ -141,7 +141,7 @@ export default function DiagnosisPage() {
   }, [vehicleMake, vehicleModel, vehicleYear, dtcCode, ownerComplaints, mechanicNotes, toast]);
 
   // Fallback: non-streaming diagnosis when streaming fails
-  const handleStreamingError = useCallback(async () => {
+  const handleStreamingError = useCallback(async (_error?: string) => {
     const request = pendingRequestRef.current;
     if (!request) {
       setCurrentStep('input');
@@ -193,6 +193,7 @@ export default function DiagnosisPage() {
         diagnosisId={diagnosisId || undefined}
         onCancel={handleCancelAnalysis}
         onComplete={handleAnalysisComplete}
+        onError={handleStreamingError}
         vehicleInfo={
           vehicleMake
             ? {
@@ -203,6 +204,8 @@ export default function DiagnosisPage() {
               }
             : undefined
         }
+        streamingEnabled={true}
+        diagnosisRequest={pendingRequestRef.current || undefined}
       />
     );
   }
