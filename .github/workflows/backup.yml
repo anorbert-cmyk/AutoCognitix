@@ -34,6 +34,23 @@ jobs:
         run: |
           python scripts/backup_data.py --all --output-dir ./backups
 
+      - name: Verify backup integrity
+        run: |
+          echo "Checking backup output..."
+          ls -la ./backups/
+          file_count=$(find ./backups/ -type f | wc -l)
+          if [ "$file_count" -eq 0 ]; then
+            echo "::error::No backup files produced!"
+            exit 1
+          fi
+          for f in ./backups/*; do
+            if [ ! -s "$f" ]; then
+              echo "::error::Empty backup file: $f"
+              exit 1
+            fi
+          done
+          echo "Backup verification passed: $file_count files"
+
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
         with:

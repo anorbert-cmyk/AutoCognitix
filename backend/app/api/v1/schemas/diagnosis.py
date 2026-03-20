@@ -3,6 +3,7 @@ Diagnosis schemas - core diagnostic request/response models.
 """
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
@@ -177,7 +178,7 @@ class RelatedComplaint(BaseModel):
         return max(0.0, min(1.0, v))
 
 
-class UrgencyLevel(str):
+class UrgencyLevel(str, Enum):
     """Urgency level for diagnosis."""
 
     LOW = "low"
@@ -385,7 +386,7 @@ class DeleteResponse(BaseModel):
 # =============================================================================
 
 
-class StreamingEventType(str):
+class StreamingEventType(str, Enum):
     """Types of streaming events."""
 
     START = "start"

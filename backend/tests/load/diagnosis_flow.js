@@ -19,8 +19,35 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+const TEST_EMAIL = __ENV.TEST_EMAIL || 'loadtest@autocognitix.hu';
+const TEST_PASSWORD = __ENV.TEST_PASSWORD || 'LoadTest123!';
 
-export default function () {
+// One-time setup: login and obtain auth token
+export function setup() {
+  const loginRes = http.post(
+    `${BASE_URL}/api/v1/auth/login`,
+    `username=${encodeURIComponent(TEST_EMAIL)}&password=${encodeURIComponent(TEST_PASSWORD)}`,
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+
+  const success = check(loginRes, {
+    'login status 200': (r) => r.status === 200,
+  });
+
+  if (!success) {
+    console.error(`Login failed (status ${loginRes.status}). Set TEST_EMAIL and TEST_PASSWORD env vars.`);
+    return { token: null };
+  }
+
+  const body = JSON.parse(loginRes.body);
+  return { token: body.access_token };
+}
+
+export default function (data) {
+  const authHeaders = data.token
+    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${data.token}` }
+    : { 'Content-Type': 'application/json' };
+
   // 1. Health check
   const healthRes = http.get(`${BASE_URL}/health/live`);
   check(healthRes, {
@@ -47,14 +74,14 @@ export default function () {
     `${BASE_URL}/api/v1/diagnosis/analyze`,
     diagnosisPayload,
     {
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       tags: { name: 'diagnosis' },
     }
   );
 
   diagnosisLatency.add(diagnosisRes.timings.duration);
   check(diagnosisRes, {
-    'diagnosis status 2xx': (r) => r.status >= 200 && r.status < 300,
+    'diagnosis status 200': (r) => r.status === 200,
   });
   errorRate.add(diagnosisRes.status >= 400);
 

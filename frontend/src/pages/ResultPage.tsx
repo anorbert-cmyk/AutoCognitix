@@ -54,7 +54,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const engineInfo = 'N/A';
 
   // Elsődleges DTC kód
-  const primaryDTC = result.dtc_codes[0] || 'P0303';
+  const primaryDTC = result.dtc_codes?.[0] || 'P0303';
   const dtcDescription = result.probable_causes[0]?.title || 'Henger 3 Égéskimaradás';
 
   // Ügyfél panasza
@@ -76,7 +76,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
         description: repair.description,
         tools: (repair.tools_needed?.length > 0)
           ? repair.tools_needed.map(t => ({ icon: t.icon_hint || 'handyman', name: t.name }))
-          : repair.parts_needed.slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
+          : (repair.parts_needed ?? []).slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
         expertTip: repair.expert_tips?.[0] || repair.root_cause_explanation || 'Ellenőrizze a kapcsolódó alkatrészeket is a javítás során.',
       }))
     : [];

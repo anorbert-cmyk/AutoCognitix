@@ -132,7 +132,7 @@ export default function DiagnosisPage() {
       const result = await analyzeDiagnosis.mutateAsync({
         vehicleMake: vehicleMake.trim() || 'Ismeretlen',
         vehicleModel: vehicleModel.trim() || 'Ismeretlen',
-        vehicleYear: vehicleYear ? parseInt(vehicleYear) : currentYear,
+        vehicleYear: vehicleYear ? (parseInt(vehicleYear, 10) || currentYear) : currentYear,
         dtcCodes: [dtcCode.trim().toUpperCase()],
         symptoms: ownerComplaints.trim() || 'Nincs megadva',
         additionalContext: mechanicNotes.trim() || undefined,
