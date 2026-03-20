@@ -3,7 +3,7 @@
  * Teljes wizard flow: Adatbevitel → Elemzés → Jelentés
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useAnalyzeDiagnosis, useDiagnosisHistory } from '../services/hooks';
 import { cn } from '@/lib/utils';
-import { ApiError } from '../services/api';
+import { ApiError, type DiagnosisRequest } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { AnalysisProgress } from '../components/features/diagnosis/AnalysisProgress';
 
@@ -77,6 +77,7 @@ export default function DiagnosisPage() {
   // Wizard állapot
   const [currentStep, setCurrentStep] = useState<WizardStep>('input');
   const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
+  const pendingRequestRef = useRef<DiagnosisRequest | null>(null);
 
   // Űrlap állapot
   const [dtcCode, setDtcCode] = useState('');
@@ -117,7 +118,7 @@ export default function DiagnosisPage() {
     toast.info('Beszéljen most...');
   }, [toast]);
 
-  // Űrlap beküldés - elemzés indítása
+  // Űrlap beküldés - elemzés indítása (streaming-en keresztül)
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dtcCode.trim()) {
@@ -125,21 +126,41 @@ export default function DiagnosisPage() {
       return;
     }
 
-    // Elemzés lépésre váltás
+    // Store request data for AnalysisProgress streaming
+    pendingRequestRef.current = {
+      vehicle_make: vehicleMake.trim() || 'Ismeretlen',
+      vehicle_model: vehicleModel.trim() || 'Ismeretlen',
+      vehicle_year: vehicleYear ? (parseInt(vehicleYear, 10) || currentYear) : currentYear,
+      dtc_codes: [dtcCode.trim().toUpperCase()],
+      symptoms: ownerComplaints.trim() || 'Nincs megadva',
+      additional_context: mechanicNotes.trim() || undefined,
+    };
+
+    // Transition to analysis step - AnalysisProgress handles the streaming call
     setCurrentStep('analysis');
+  }, [vehicleMake, vehicleModel, vehicleYear, dtcCode, ownerComplaints, mechanicNotes, toast]);
+
+  // Fallback: non-streaming diagnosis when streaming fails
+  const handleStreamingError = useCallback(async () => {
+    const request = pendingRequestRef.current;
+    if (!request) {
+      setCurrentStep('input');
+      toast.error('Ismeretlen hiba történt');
+      return;
+    }
 
     try {
       const result = await analyzeDiagnosis.mutateAsync({
-        vehicleMake: vehicleMake.trim() || 'Ismeretlen',
-        vehicleModel: vehicleModel.trim() || 'Ismeretlen',
-        vehicleYear: vehicleYear ? (parseInt(vehicleYear, 10) || currentYear) : currentYear,
-        dtcCodes: [dtcCode.trim().toUpperCase()],
-        symptoms: ownerComplaints.trim() || 'Nincs megadva',
-        additionalContext: mechanicNotes.trim() || undefined,
+        vehicleMake: request.vehicle_make,
+        vehicleModel: request.vehicle_model,
+        vehicleYear: request.vehicle_year,
+        dtcCodes: request.dtc_codes,
+        symptoms: request.symptoms,
+        additionalContext: request.additional_context,
       });
 
       setDiagnosisId(result.id);
-      // Az AnalysisProgress komponens kezeli a navigációt az eredményhez
+      navigate(`/diagnosis/${result.id}`);
     } catch (err) {
       setCurrentStep('input');
       if (err instanceof ApiError) {
@@ -148,16 +169,18 @@ export default function DiagnosisPage() {
         toast.error('Ismeretlen hiba történt');
       }
     }
-  }, [analyzeDiagnosis, vehicleMake, vehicleModel, vehicleYear, dtcCode, ownerComplaints, mechanicNotes, toast]);
+  }, [analyzeDiagnosis, navigate, toast]);
 
   const handleCancelAnalysis = useCallback(() => {
     setCurrentStep('input');
     setDiagnosisId(null);
   }, []);
 
-  const handleAnalysisComplete = useCallback(() => {
-    if (diagnosisId) {
-      navigate(`/diagnosis/${diagnosisId}`);
+  const handleAnalysisComplete = useCallback((result?: { id?: string }) => {
+    const resultId = result?.id || diagnosisId;
+    if (resultId) {
+      setDiagnosisId(resultId);
+      navigate(`/diagnosis/${resultId}`);
     }
   }, [diagnosisId, navigate]);
 
