@@ -304,7 +304,7 @@ class PartsPriceCache:
     def _make_key(self, *args) -> str:
         """Generate cache key."""
         key_data = ":".join(str(a).lower() for a in args)
-        return f"{self.CACHE_PREFIX}{hashlib.md5(key_data.encode()).hexdigest()}"
+        return f"{self.CACHE_PREFIX}{hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()}"
 
     async def get(self, *args) -> Optional[str]:
         """Get value from cache."""

@@ -209,13 +209,13 @@ class HungarianEmbeddingService:
 
         try:
             # Load tokenizer with fast implementation
-            self._tokenizer = AutoTokenizer.from_pretrained(
+            self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B614
                 settings.HUBERT_MODEL,
                 use_fast=True,  # Use fast tokenizer implementation
             )
 
             # Load model with optimizations
-            self._model = AutoModel.from_pretrained(
+            self._model = AutoModel.from_pretrained(  # nosec B614
                 settings.HUBERT_MODEL,
                 torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
             )

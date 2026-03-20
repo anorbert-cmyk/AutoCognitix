@@ -452,7 +452,7 @@ class RedisCacheService:
     ) -> str:
         """Generate a consistent cache key for search queries."""
         params = f"{query.lower()}:{category or 'all'}:{limit}"
-        hash_val = hashlib.md5(params.encode()).hexdigest()[:12]
+        hash_val = hashlib.md5(params.encode(), usedforsecurity=False).hexdigest()[:12]
         return f"{CachePrefix.DTC_SEARCH}{hash_val}"
 
     async def get_related_codes(self, code: str) -> Optional[List[dict]]:
@@ -527,13 +527,13 @@ class RedisCacheService:
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Get cached embedding vector."""
-        text_hash = hashlib.md5(text.encode()).hexdigest()
+        text_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
         return await self.get(key)
 
     async def set_embedding(self, text: str, embedding: List[float]) -> bool:
         """Cache embedding vector."""
-        text_hash = hashlib.md5(text.encode()).hexdigest()
+        text_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
         return await self.set(key, embedding, CacheTTL.EMBEDDINGS)
 
@@ -542,7 +542,10 @@ class RedisCacheService:
         texts: List[str],
     ) -> List[Optional[List[float]]]:
         """Get multiple cached embeddings."""
-        keys = [f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode()).hexdigest()}" for t in texts]
+        keys = [
+            f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode(), usedforsecurity=False).hexdigest()}"
+            for t in texts
+        ]
         return await self.mget(keys)
 
     # =========================================================================
@@ -678,7 +681,7 @@ def cached(
             else:
                 # Default: hash all arguments
                 arg_str = f"{args}:{kwargs}"
-                key = f"{prefix}{hashlib.md5(arg_str.encode()).hexdigest()[:16]}"
+                key = f"{prefix}{hashlib.md5(arg_str.encode(), usedforsecurity=False).hexdigest()[:16]}"
 
             # Try to get from cache
             try:

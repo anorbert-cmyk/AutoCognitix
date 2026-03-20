@@ -320,7 +320,7 @@ class NHTSAService:
     def _generate_cache_key(self, prefix: str, *args) -> str:
         """Generate a cache key from prefix and arguments."""
         key_data = f"{prefix}:{':'.join(str(a).lower() for a in args)}"
-        return f"nhtsa:{hashlib.md5(key_data.encode()).hexdigest()}"
+        return f"nhtsa:{hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()}"
 
     async def _check_rate_limit(self) -> None:
         """Check and enforce rate limiting."""
