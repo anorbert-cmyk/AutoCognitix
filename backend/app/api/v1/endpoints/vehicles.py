@@ -577,14 +577,12 @@ async def decode_vin(
             )
 
         # Build engine description from available data
-        engine_parts = []
-        if result.engine_displacement_l:
-            engine_parts.append(f"{result.engine_displacement_l}L")
-        if result.engine_cylinders:
-            engine_parts.append(f"{result.engine_cylinders}-cyl")
-        if result.fuel_type_primary:
-            engine_parts.append(result.fuel_type_primary)
-        engine = " ".join(engine_parts) if engine_parts else None
+        engine_parts = [
+            f"{result.engine_displacement_l}L" if result.engine_displacement_l else None,
+            f"{result.engine_cylinders}-cyl" if result.engine_cylinders else None,
+            result.fuel_type_primary if result.fuel_type_primary else None,
+        ]
+        engine = " ".join(filter(None, engine_parts)) or None
 
         # Determine region from first character
         first_char = vin[0]
