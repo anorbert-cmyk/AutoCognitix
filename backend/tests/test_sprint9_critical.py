@@ -206,11 +206,10 @@ class TestRateLimitConfig:
         """Auth rate limit should be max 5 requests per minute."""
         source = _read_source_file("core/rate_limit.py")
         # Parse AUTH_CONFIG definition to check requests_per_minute
-        assert "AUTH_CONFIG = RateLimitConfig(" in source, (
-            "AUTH_CONFIG not found in rate_limit.py"
-        )
+        assert "AUTH_CONFIG = RateLimitConfig(" in source, "AUTH_CONFIG not found in rate_limit.py"
         # Verify the requests_per_minute value in AUTH_CONFIG block
         import re
+
         match = re.search(
             r"AUTH_CONFIG\s*=\s*RateLimitConfig\([^)]*requests_per_minute\s*=\s*(\d+)",
             source,
@@ -224,6 +223,7 @@ class TestRateLimitConfig:
         """Auth lockout should trigger at max 5 failed attempts."""
         source = _read_source_file("core/rate_limit.py")
         import re
+
         match = re.search(
             r"AUTH_CONFIG\s*=\s*RateLimitConfig\([^)]*lockout_threshold\s*=\s*(\d+)",
             source,
@@ -237,6 +237,7 @@ class TestRateLimitConfig:
         """Auth lockout duration should be at least 5 minutes (300 seconds)."""
         source = _read_source_file("core/rate_limit.py")
         import re
+
         match = re.search(
             r"AUTH_CONFIG\s*=\s*RateLimitConfig\([^)]*lockout_duration_seconds\s*=\s*(\d+)",
             source,
@@ -265,6 +266,7 @@ class TestEmbeddingVersionTracking:
         """EMBEDDING_MODEL_VERSION should be assigned a non-empty string."""
         source = _read_source_file("db/qdrant_client.py")
         import re
+
         match = re.search(
             r'EMBEDDING_MODEL_VERSION\s*=\s*["\'](.+?)["\']',
             source,
@@ -277,12 +279,11 @@ class TestEmbeddingVersionTracking:
         """QdrantService should define EXPECTED_DIMENSION as 768."""
         source = _read_source_file("db/qdrant_client.py")
         import re
+
         match = re.search(
             r"EXPECTED_DIMENSION\s*=\s*(\d+)",
             source,
         )
         assert match, "QdrantService must define EXPECTED_DIMENSION class attribute"
         dimension = int(match.group(1))
-        assert dimension == 768, (
-            f"EXPECTED_DIMENSION should be 768, got {dimension}"
-        )
+        assert dimension == 768, f"EXPECTED_DIMENSION should be 768, got {dimension}"

@@ -42,8 +42,8 @@ logger = get_logger(__name__)
 # - pool_timeout: Wait time before raising TimeoutError
 # - pool_pre_ping: Test connections before use (detect stale connections)
 
-POOL_SIZE = int((settings.DEBUG and 5) or 5)  # Conservative for Railway (2 workers x 5 = 10)
-MAX_OVERFLOW = int((settings.DEBUG and 10) or 10)  # Max 15 per worker, 30 total
+POOL_SIZE = int((settings.DEBUG and 5) or 10)  # 10 per worker (2 workers x 10 = 20 baseline)
+MAX_OVERFLOW = int((settings.DEBUG and 10) or 20)  # Max 30 per worker, 60 total
 POOL_RECYCLE = 1800  # Recycle connections every 30 minutes
 POOL_TIMEOUT = 30  # 30 second timeout for acquiring connection
 
@@ -249,6 +249,20 @@ async def get_pool_status() -> Dict[str, Any]:
         "overflow": pool.overflow(),
         "invalid": pool.invalidatedcount() if hasattr(pool, "invalidatedcount") else 0,
     }
+
+
+async def check_pool_health() -> dict:
+    """Check pool health and warn if nearing exhaustion."""
+    status = await get_pool_status()
+    if status:
+        utilization = status.get("checked_out", 0) / max(status.get("pool_size", 1), 1)
+        if utilization > 0.8:
+            logger.warning(
+                f"PostgreSQL pool utilization high: {utilization:.0%} "
+                f"({status.get('checked_out', 0)}/{status.get('pool_size', 0)})"
+            )
+        status["utilization_percent"] = round(utilization * 100, 1)
+    return status or {}
 
 
 async def dispose_engine() -> None:

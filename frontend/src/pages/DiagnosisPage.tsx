@@ -192,7 +192,7 @@ export default function DiagnosisPage() {
         {/* Fejléc szekció */}
         <div className="mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-[#2563eb] text-xs font-bold uppercase tracking-wider mb-4">
-            <AlertTriangle className="h-3.5 w-3.5" />
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
             AI Diagnosztikai Eszköz
           </div>
           <h2 className="text-4xl font-black tracking-tight text-slate-900 mb-3">
@@ -231,14 +231,15 @@ export default function DiagnosisPage() {
           <form onSubmit={handleSubmit} className="p-6 md:p-8 lg:p-10 space-y-10">
             {/* DTC szekció */}
             <section>
-              <label className="block text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
+              <label htmlFor="dtc-code" className="block text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
                 Elsődleges hibakód (DTC)
               </label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-                  <AlertTriangle className="h-6 w-6 text-slate-300 group-focus-within:text-[#2563eb] transition-colors" />
+                  <AlertTriangle className="h-6 w-6 text-slate-300 group-focus-within:text-[#2563eb] transition-colors" aria-hidden="true" />
                 </div>
                 <input
+                  id="dtc-code"
                   type="text"
                   value={dtcCode}
                   onChange={(e) => setDtcCode(e.target.value.toUpperCase())}
@@ -251,7 +252,7 @@ export default function DiagnosisPage() {
                     className="p-2 text-slate-400 hover:text-[#2563eb] transition-colors"
                     title="Szkennelés kamerával"
                   >
-                    <QrCode className="h-6 w-6" />
+                    <QrCode className="h-6 w-6" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -265,15 +266,16 @@ export default function DiagnosisPage() {
             {/* Jármű szekció */}
             <section>
               <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-                <Car className="h-5 w-5 text-[#2563eb]" />
+                <Car className="h-5 w-5 text-[#2563eb]" aria-hidden="true" />
                 Jármű azonosítás
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Gyártó - Legördülő */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Gyártó</label>
+                  <label htmlFor="vehicle-make" className="block text-sm font-bold text-slate-600">Gyártó</label>
                   <div className="relative">
                     <select
+                      id="vehicle-make"
                       value={vehicleMake}
                       onChange={(e) => setVehicleMake(e.target.value)}
                       className="block w-full rounded-xl border-2 border-slate-200 bg-slate-50 text-slate-900 focus:border-[#2563eb] focus:ring-0 focus:bg-white h-14 px-4 font-medium appearance-none cursor-pointer"
@@ -286,15 +288,16 @@ export default function DiagnosisPage() {
                       ))}
                     </select>
                     <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
-                      <ChevronDown className="h-5 w-5 text-slate-400" />
+                      <ChevronDown className="h-5 w-5 text-slate-400" aria-hidden="true" />
                     </div>
                   </div>
                 </div>
 
                 {/* Modell */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Modell</label>
+                  <label htmlFor="vehicle-model" className="block text-sm font-bold text-slate-600">Modell</label>
                   <input
+                    id="vehicle-model"
                     type="text"
                     value={vehicleModel}
                     onChange={(e) => setVehicleModel(e.target.value)}
@@ -305,8 +308,9 @@ export default function DiagnosisPage() {
 
                 {/* Évjárat */}
                 <div className="space-y-2">
-                  <label className="block text-sm font-bold text-slate-600">Évjárat</label>
+                  <label htmlFor="vehicle-year" className="block text-sm font-bold text-slate-600">Évjárat</label>
                   <input
+                    id="vehicle-year"
                     type="number"
                     value={vehicleYear}
                     onChange={(e) => setVehicleYear(e.target.value)}
@@ -324,8 +328,8 @@ export default function DiagnosisPage() {
               {/* Tulajdonos panaszai */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                    <User className="h-4 w-4 text-slate-400" />
+                  <label htmlFor="owner-complaints" className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <User className="h-4 w-4 text-slate-400" aria-hidden="true" />
                     Tulajdonos panaszai
                   </label>
                   <button
@@ -333,11 +337,12 @@ export default function DiagnosisPage() {
                     onClick={handleDictation}
                     className="text-xs text-[#2563eb] font-bold hover:underline flex items-center gap-1"
                   >
-                    <Mic className="h-3.5 w-3.5" />
+                    <Mic className="h-3.5 w-3.5" aria-hidden="true" />
                     Diktálás
                   </button>
                 </div>
                 <textarea
+                  id="owner-complaints"
                   value={ownerComplaints}
                   onChange={(e) => setOwnerComplaints(e.target.value)}
                   placeholder="pl. Az ügyfél reggel egyenetlen alapjáratról számol be, a motorhiba lámpa villog, különösen autópályán gyorsításkor..."
@@ -349,8 +354,8 @@ export default function DiagnosisPage() {
               {/* Szerelői jegyzetek */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                    <Wrench className="h-4 w-4 text-slate-400" />
+                  <label htmlFor="mechanic-notes" className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <Wrench className="h-4 w-4 text-slate-400" aria-hidden="true" />
                     Szerelői jegyzetek / Tesztút
                   </label>
                   <span className="text-xs text-slate-400 font-medium">
@@ -358,6 +363,7 @@ export default function DiagnosisPage() {
                   </span>
                 </div>
                 <textarea
+                  id="mechanic-notes"
                   value={mechanicNotes}
                   onChange={(e) => setMechanicNotes(e.target.value)}
                   placeholder="pl. Megerősített gyújtáskimaradás a 3. hengerben terheléses teszt során. A gyújtógyertyák kopottak, de a tekercsek jól reagálnak..."
@@ -370,7 +376,7 @@ export default function DiagnosisPage() {
             {/* Művelet sáv */}
             <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-6 border-t border-slate-200">
               <div className="flex items-center gap-2 text-slate-400 text-sm font-medium">
-                <Clock className="h-4 w-4" />
+                <Clock className="h-4 w-4" aria-hidden="true" />
                 <span>Automatikusan mentve 2 perce</span>
               </div>
               <div className="flex w-full md:w-auto gap-4">
@@ -388,7 +394,7 @@ export default function DiagnosisPage() {
                     analyzeDiagnosis.isPending && "opacity-70 cursor-not-allowed"
                   )}
                 >
-                  <Sparkles className="h-4 w-4" />
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
                   AI Megoldás Generálása
                 </button>
               </div>
@@ -404,7 +410,7 @@ export default function DiagnosisPage() {
             onClick={() => recentItems[0] && navigate(`/diagnosis/${recentItems[0].id}`)}
           >
             <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
-              <Clock className="h-5 w-5" />
+              <Clock className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
               <h4 className="font-bold text-slate-900">
@@ -428,7 +434,7 @@ export default function DiagnosisPage() {
             onClick={() => recentItems[1] && navigate(`/diagnosis/${recentItems[1].id}`)}
           >
             <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
-              <Clock className="h-5 w-5" />
+              <Clock className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
               <h4 className="font-bold text-slate-900">
@@ -449,7 +455,7 @@ export default function DiagnosisPage() {
           {/* Segítség kártya */}
           <div className="p-5 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
             <div className="text-center">
-              <HelpCircle className="h-8 w-8 text-[#2563eb] mx-auto mb-2" />
+              <HelpCircle className="h-8 w-8 text-[#2563eb] mx-auto mb-2" aria-hidden="true" />
               <p className="text-sm font-bold text-slate-700">
                 Segítségre van szüksége egy kóddal?
               </p>

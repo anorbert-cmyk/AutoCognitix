@@ -9,12 +9,13 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# jose.jwt.encode/decode return Any, so we cast to proper types
+# PyJWT encode returns str, decode returns dict
 # passlib CryptContext.verify/hash also return Any
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             return None
 
         return payload
-    except JWTError:
+    except (InvalidTokenError, ExpiredSignatureError, DecodeError):
         return None
 
 
@@ -223,7 +224,7 @@ async def blacklist_token(token: str) -> bool:
             logger.debug(f"Token already expired, skipping blacklist: {jti[:8]}...")
             return True  # Expired tokens are effectively blacklisted
 
-    except JWTError as e:
+    except (InvalidTokenError, ExpiredSignatureError, DecodeError) as e:
         logger.warning(f"Failed to decode token for blacklisting: {e}")
         return False
 
@@ -242,6 +243,12 @@ async def is_token_blacklisted(jti: str) -> bool:
         from app.db.redis_cache import get_cache_service
 
         cache = await get_cache_service()
+
+        # If circuit breaker is open, fail closed (reject token)
+        if hasattr(cache, "_circuit_open") and cache._circuit_open:
+            logger.critical("Redis circuit breaker open - rejecting token for safety")
+            return True
+
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:

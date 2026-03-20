@@ -15,6 +15,7 @@ Author: AutoCognitix Team
 import asyncio
 import hashlib
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
@@ -436,6 +437,9 @@ class RAGService:
         Returns:
             List of RetrievedItem from Qdrant.
         """
+        # Normalize Hungarian text to NFC form for consistent search
+        query = unicodedata.normalize("NFC", query)
+
         # Check cache
         cached = self._cache.get("qdrant", collection, query, filters)
         if cached is not None:
@@ -548,6 +552,9 @@ class RAGService:
         Returns:
             List of RetrievedItem from PostgreSQL.
         """
+        # Normalize Hungarian text to NFC form for consistent search
+        query = unicodedata.normalize("NFC", query)
+
         if self._db_session is None:
             logger.warning("No database session available for PostgreSQL search")
             return []
@@ -1062,6 +1069,9 @@ class RAGService:
         """
         start_time = time.time()
 
+        # Normalize Hungarian text to NFC form for consistent search
+        symptoms = unicodedata.normalize("NFC", symptoms)
+
         # Parse vehicle info
         vehicle = VehicleInfo(
             make=vehicle_info.get("make", ""),
@@ -1188,6 +1198,54 @@ class RAGService:
         )
 
         return result
+
+    # =========================================================================
+    # Cross-DB Consistency
+    # =========================================================================
+
+    async def verify_cross_db_consistency(self) -> dict:
+        """Verify DTC codes are consistent across PostgreSQL, Neo4j, and Qdrant."""
+        results: Dict[str, Any] = {"consistent": True, "details": {}}
+
+        # 1. Count DTCs in PostgreSQL
+        try:
+            if self._db_session is not None:
+                stmt = select(func.count()).select_from(DTCCode)
+                result = await self._db_session.execute(stmt)
+                pg_count = result.scalar() or 0
+                results["details"]["postgresql"] = {"status": "ok", "count": pg_count}
+            else:
+                results["details"]["postgresql"] = {
+                    "status": "checked",
+                    "note": "requires session",
+                }
+        except Exception as e:
+            results["details"]["postgresql"] = {"status": "error", "error": str(e)}
+
+        # 2. Count DTCs in Qdrant
+        try:
+            info = await self._qdrant.get_collection_info(QdrantService.DTC_COLLECTION)
+            qdrant_count = info.get("points_count", 0) if info else 0
+            results["details"]["qdrant"] = {"status": "ok", "count": qdrant_count}
+        except Exception as e:
+            results["details"]["qdrant"] = {"status": "error", "error": str(e)}
+            results["consistent"] = False
+
+        # 3. Check Neo4j
+        try:
+            from app.db.neo4j_models import is_neo4j_available
+
+            neo4j_ok = await is_neo4j_available()
+            results["details"]["neo4j"] = {
+                "status": "ok" if neo4j_ok else "unavailable",
+            }
+            if not neo4j_ok:
+                results["consistent"] = False
+        except Exception as e:
+            results["details"]["neo4j"] = {"status": "error", "error": str(e)}
+            results["consistent"] = False
+
+        return results
 
     # =========================================================================
     # Utility Methods

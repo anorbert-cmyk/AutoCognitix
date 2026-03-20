@@ -36,6 +36,9 @@ class QdrantService:
     REPAIR_COLLECTION = "repair_embeddings_hu"
     ISSUE_COLLECTION = "known_issue_embeddings_hu"
 
+    # Storage alert threshold (vectors per collection)
+    STORAGE_WARN_THRESHOLD = 50000
+
     # Legacy collection names (English, for backwards compatibility)
     DTC_COLLECTION_LEGACY = "dtc_embeddings"
     SYMPTOM_COLLECTION_LEGACY = "symptom_embeddings"
@@ -165,6 +168,7 @@ class QdrantService:
         limit: int = 10,
         filter_conditions: Optional[dict] = None,
         score_threshold: Optional[float] = None,
+        model_version: Optional[str] = None,
     ) -> List[dict]:
         """
         Search for similar vectors.
@@ -175,27 +179,42 @@ class QdrantService:
             limit: Maximum number of results
             filter_conditions: Optional Qdrant filter conditions
             score_threshold: Minimum similarity score
+            model_version: Filter by embedding model version (defaults to current version)
 
         Returns:
             List of search results with scores and payloads
         """
+        if model_version is None:
+            model_version = self.EMBEDDING_MODEL_VERSION
+
+        # Build the must filter list
+        must_conditions: List[qdrant_models.FieldCondition] = []
+
+        # Add version filter
+        must_conditions.append(
+            qdrant_models.FieldCondition(
+                key="_embedding_model_version",
+                match=qdrant_models.MatchValue(value=model_version),
+            )
+        )
+
+        # Add user-supplied filter conditions
+        if filter_conditions:
+            for key, value in filter_conditions.items():
+                must_conditions.append(
+                    qdrant_models.FieldCondition(
+                        key=key,
+                        match=qdrant_models.MatchValue(value=value),
+                    )
+                )
+
         search_params = {
             "collection_name": collection_name,
             "query_vector": query_vector,
             "limit": limit,
             "with_payload": True,
+            "query_filter": qdrant_models.Filter(must=must_conditions),
         }
-
-        if filter_conditions:
-            search_params["query_filter"] = qdrant_models.Filter(
-                must=[
-                    qdrant_models.FieldCondition(
-                        key=key,
-                        match=qdrant_models.MatchValue(value=value),
-                    )
-                    for key, value in filter_conditions.items()
-                ]
-            )
 
         if score_threshold:
             search_params["score_threshold"] = score_threshold
@@ -237,6 +256,7 @@ class QdrantService:
         limit: int = 10,
         category: Optional[str] = None,
         severity: Optional[str] = None,
+        model_version: Optional[str] = None,
     ) -> List[dict]:
         """
         Search for similar DTC codes.
@@ -246,6 +266,7 @@ class QdrantService:
             limit: Maximum number of results
             category: Filter by DTC category
             severity: Filter by severity level
+            model_version: Filter by embedding model version (defaults to current version)
 
         Returns:
             List of matching DTC codes with similarity scores
@@ -261,6 +282,7 @@ class QdrantService:
             query_vector=query_vector,
             limit=limit,
             filter_conditions=filter_conditions if filter_conditions else None,
+            model_version=model_version,
         )
 
     async def search_similar_symptoms(
@@ -268,6 +290,7 @@ class QdrantService:
         query_vector: List[float],
         limit: int = 10,
         vehicle_make: Optional[str] = None,
+        model_version: Optional[str] = None,
     ) -> List[dict]:
         """
         Search for similar symptom descriptions.
@@ -276,6 +299,7 @@ class QdrantService:
             query_vector: Query embedding vector
             limit: Maximum number of results
             vehicle_make: Filter by vehicle make
+            model_version: Filter by embedding model version (defaults to current version)
 
         Returns:
             List of similar symptoms with scores
@@ -289,6 +313,7 @@ class QdrantService:
             query_vector=query_vector,
             limit=limit,
             filter_conditions=filter_conditions if filter_conditions else None,
+            model_version=model_version,
         )
 
     async def search_components(
@@ -296,6 +321,7 @@ class QdrantService:
         query_vector: List[float],
         limit: int = 10,
         system: Optional[str] = None,
+        model_version: Optional[str] = None,
     ) -> List[dict]:
         """
         Search for similar vehicle components.
@@ -304,6 +330,7 @@ class QdrantService:
             query_vector: Query embedding vector
             limit: Maximum number of results
             system: Filter by vehicle system (engine, transmission, etc.)
+            model_version: Filter by embedding model version (defaults to current version)
 
         Returns:
             List of similar components with scores
@@ -317,6 +344,7 @@ class QdrantService:
             query_vector=query_vector,
             limit=limit,
             filter_conditions=filter_conditions if filter_conditions else None,
+            model_version=model_version,
         )
 
     async def search_repairs(
@@ -324,6 +352,7 @@ class QdrantService:
         query_vector: List[float],
         limit: int = 10,
         difficulty: Optional[str] = None,
+        model_version: Optional[str] = None,
     ) -> List[dict]:
         """
         Search for similar repair procedures.
@@ -332,6 +361,7 @@ class QdrantService:
             query_vector: Query embedding vector
             limit: Maximum number of results
             difficulty: Filter by difficulty level (beginner, intermediate, advanced, professional)
+            model_version: Filter by embedding model version (defaults to current version)
 
         Returns:
             List of similar repairs with scores
@@ -345,7 +375,71 @@ class QdrantService:
             query_vector=query_vector,
             limit=limit,
             filter_conditions=filter_conditions if filter_conditions else None,
+            model_version=model_version,
         )
+
+    async def check_storage_alerts(self) -> List[dict]:
+        """Check if any collection is approaching storage limits.
+
+        Returns:
+            List of alert dicts for collections exceeding STORAGE_WARN_THRESHOLD.
+        """
+        alerts: List[dict] = []
+        stats = await self.get_storage_stats()
+        for collection, info in stats.items():
+            if isinstance(info, dict) and "error" not in info:
+                count = info.get("points_count", 0)
+                if count > self.STORAGE_WARN_THRESHOLD:
+                    alerts.append(
+                        {
+                            "collection": collection,
+                            "count": count,
+                            "threshold": self.STORAGE_WARN_THRESHOLD,
+                            "severity": "warning",
+                            "message": (
+                                f"Collection {collection} has {count} vectors "
+                                f"(threshold: {self.STORAGE_WARN_THRESHOLD})"
+                            ),
+                        }
+                    )
+        return alerts
+
+    async def delete_by_user(self, user_id: str) -> int:
+        """
+        Delete all vectors associated with a user (GDPR Article 17).
+
+        Args:
+            user_id: The user ID whose vectors should be deleted
+
+        Returns:
+            Number of collections processed
+        """
+        collections_processed = 0
+        for collection in [
+            self.DTC_COLLECTION,
+            self.SYMPTOM_COLLECTION,
+            self.COMPONENT_COLLECTION,
+            self.REPAIR_COLLECTION,
+            self.ISSUE_COLLECTION,
+        ]:
+            try:
+                self.client.delete(
+                    collection_name=collection,
+                    points_selector=qdrant_models.FilterSelector(
+                        filter=qdrant_models.Filter(
+                            must=[
+                                qdrant_models.FieldCondition(
+                                    key="user_id",
+                                    match=qdrant_models.MatchValue(value=user_id),
+                                )
+                            ]
+                        )
+                    ),
+                )
+                collections_processed += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete user vectors from {collection}: {e}")
+        return collections_processed
 
     async def delete_collection(self, collection_name: str) -> None:
         """Delete a collection."""
@@ -386,3 +480,8 @@ class QdrantService:
 
 # Global instance
 qdrant_client = QdrantService()
+
+
+async def get_qdrant_service() -> QdrantService:
+    """Get the global Qdrant service instance."""
+    return qdrant_client

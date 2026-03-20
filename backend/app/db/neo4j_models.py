@@ -4,6 +4,7 @@ Neo4j graph database models using Neomodel.
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from neomodel import (
@@ -18,6 +19,7 @@ from neomodel import (
     StructuredRel,
     UniqueIdProperty,
     config,
+    db,
 )
 from neomodel.exceptions import DoesNotExist, MultipleNodesReturned, NeomodelException
 
@@ -31,6 +33,28 @@ _neo4j_host = settings.NEO4J_URI
 for _scheme in ("neo4j+s://", "neo4j+ssc://", "neo4j://", "bolt+s://", "bolt://"):
     _neo4j_host = _neo4j_host.replace(_scheme, "")
 config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"
+
+
+# Neo4j health check with caching
+_neo4j_available: bool = True
+_neo4j_last_check: float = 0.0
+NEO4J_CHECK_INTERVAL = 30.0  # seconds
+
+
+async def is_neo4j_available() -> bool:
+    """Check if Neo4j is reachable, with 30s cache."""
+    global _neo4j_available, _neo4j_last_check
+    now = time.time()
+    if now - _neo4j_last_check < NEO4J_CHECK_INTERVAL:
+        return _neo4j_available
+    try:
+        await asyncio.to_thread(lambda: db.cypher_query("RETURN 1"))
+        _neo4j_available = True
+    except Exception:
+        _neo4j_available = False
+        logger.warning("Neo4j unavailable - using PostgreSQL-only fallback")
+    _neo4j_last_check = now
+    return _neo4j_available
 
 
 # Relationship models
@@ -316,11 +340,17 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
     Get the full diagnostic path for a DTC code.
 
     Returns a graph of related symptoms, components, repairs, and parts.
+    Returns empty structure when Neo4j is unavailable (graceful degradation).
     """
+    _empty_result = {"symptoms": [], "components": [], "repairs": [], "parts": []}
+
+    if not await is_neo4j_available():
+        return _empty_result
+
     try:
         dtc = await asyncio.to_thread(DTCNode.nodes.get_or_none, code=dtc_code)
         if not dtc:
-            return {}
+            return _empty_result
 
         result: Dict[str, Any] = {
             "dtc": {
@@ -391,10 +421,10 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
         return result
     except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
         logger.error("Neomodel error getting diagnostic path for DTC %s: %s", dtc_code, e)
-        return {}
+        return _empty_result
     except Exception:
         logger.exception("Unexpected error getting diagnostic path for DTC %s", dtc_code)
-        return {}
+        return _empty_result
 
 
 async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] = None) -> dict:
@@ -408,7 +438,11 @@ async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] =
 
     Returns:
         Dictionary with common DTCs, repairs, and components for the vehicle.
+        Returns empty dict when Neo4j is unavailable (graceful degradation).
     """
+    if not await is_neo4j_available():
+        return {"vehicle": None, "common_dtcs": [], "common_repairs": []}
+
     try:
         vehicle = await asyncio.to_thread(
             lambda: VehicleNode.nodes.filter(make=make, model=model).first_or_none()
@@ -504,7 +538,11 @@ async def get_engine_common_issues(engine_code: str) -> dict:
 
     Returns:
         Dictionary with engine info and common DTCs.
+        Returns empty list when Neo4j is unavailable (graceful degradation).
     """
+    if not await is_neo4j_available():
+        return {"engine": None, "common_dtcs": [], "vehicles_using": []}
+
     try:
         engine = await asyncio.to_thread(EngineNode.nodes.get_or_none, code=engine_code)
         if not engine:
@@ -571,7 +609,11 @@ async def find_similar_vehicles(make: str, model: str) -> list:
 
     Returns:
         List of similar vehicles sharing the same platform.
+        Returns empty list when Neo4j is unavailable (graceful degradation).
     """
+    if not await is_neo4j_available():
+        return []
+
     try:
         vehicle = await asyncio.to_thread(
             lambda: VehicleNode.nodes.filter(make=make, model=model).first_or_none()
@@ -602,3 +644,39 @@ async def find_similar_vehicles(make: str, model: str) -> list:
     except Exception:
         logger.exception("Unexpected error finding similar vehicles for %s %s", make, model)
         return []
+
+
+async def delete_user_data(user_id: str) -> bool:
+    """
+    Delete all user-associated data from Neo4j (GDPR Article 17).
+
+    Since the current Neo4j schema stores vehicle/DTC/component data (not user-specific),
+    this is a no-op placeholder. If user-specific nodes are added in the future,
+    the deletion logic should be implemented here.
+
+    Args:
+        user_id: The user ID whose data should be deleted
+
+    Returns:
+        True if cleanup succeeded or was unnecessary
+    """
+    if not await is_neo4j_available():
+        logger.warning(f"Neo4j unavailable for GDPR cleanup of user {user_id}")
+        return False
+
+    try:
+        # Currently, Neo4j stores shared reference data (vehicles, DTCs, components)
+        # not user-specific data. If user diagnosis session nodes are added later,
+        # delete them here with: MATCH (n:UserSession {user_id: $uid}) DETACH DELETE n
+        from neomodel import db
+
+        await asyncio.to_thread(
+            db.cypher_query,
+            "MATCH (n {user_id: $uid}) DETACH DELETE n",
+            {"uid": user_id},
+        )
+        logger.info(f"Neo4j GDPR cleanup completed for user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Neo4j GDPR cleanup failed for user {user_id}: {e}")
+        return False

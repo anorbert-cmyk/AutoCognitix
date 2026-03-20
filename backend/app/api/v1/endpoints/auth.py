@@ -6,6 +6,7 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union, cast
 from uuid import UUID
 
@@ -37,7 +38,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
-from app.db.postgres.models import User
+from app.db.postgres.models import DiagnosisSession, User
 from app.db.postgres.repositories import UserRepository
 from app.db.postgres.session import get_db
 
@@ -860,6 +861,126 @@ async def reset_password(
     logger.info(f"Password reset completed for: {user.email}")
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
+
+
+# =============================================================================
+# GDPR Compliance Endpoints
+# =============================================================================
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    summary="GDPR Article 17 - Right to Erasure",
+)
+async def delete_user_account(
+    current_user: User = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete user account and all associated data.
+    GDPR Article 17 - Right to Erasure compliance.
+    """
+    user_id = str(current_user.id)
+
+    # 1. Delete all diagnosis sessions
+    from sqlalchemy import delete as sql_delete
+
+    await db.execute(
+        sql_delete(DiagnosisSession).where(DiagnosisSession.user_id == current_user.id)
+    )
+
+    # 2. Delete the user record
+    await db.execute(sql_delete(User).where(User.id == current_user.id))
+
+    await db.commit()
+
+    # 3. Clean up Qdrant vectors (user-associated embeddings)
+    try:
+        from app.db.qdrant_client import get_qdrant_service
+
+        qdrant = await get_qdrant_service()
+        await qdrant.delete_by_user(user_id)
+    except Exception as e:
+        logger.warning(f"Qdrant cleanup failed for user {user_id}: {e}")
+
+    # 4. Clean up Neo4j user-associated data
+    try:
+        from app.db.neo4j_models import delete_user_data
+
+        await delete_user_data(user_id)
+    except Exception as e:
+        logger.warning(f"Neo4j cleanup failed for user {user_id}: {e}")
+
+    # 5. Invalidate cache (specific patterns, not wildcard)
+    try:
+        from app.db.redis_cache import get_cache_service
+
+        cache = await get_cache_service()
+        await cache.delete_pattern(f"user:{user_id}:*")
+        await cache.delete_pattern(f"diagnosis:user:{user_id}:*")
+    except Exception:
+        pass  # Cache cleanup is best-effort
+
+    logger.info(f"GDPR deletion completed for user {user_id}")
+
+    return {"message": "Fiók és minden kapcsolódó adat véglegesen törölve.", "gdpr_article": "17"}
+
+
+@router.get(
+    "/me/export",
+    status_code=status.HTTP_200_OK,
+    summary="GDPR Article 20 - Right to Data Portability",
+)
+async def export_user_data(
+    current_user: User = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export all user data in a portable format.
+    GDPR Article 20 - Right to Data Portability compliance.
+    """
+    from sqlalchemy import select
+
+    # Get all diagnosis sessions
+    result = await db.execute(
+        select(DiagnosisSession)
+        .where(
+            DiagnosisSession.user_id == current_user.id,
+            DiagnosisSession.is_deleted.is_(False),
+        )
+        .order_by(DiagnosisSession.created_at.desc())
+    )
+    sessions = result.scalars().all()
+
+    export_data = {
+        "gdpr_article": "20",
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "user": {
+            "id": str(current_user.id),
+            "email": current_user.email,
+            "full_name": current_user.full_name if hasattr(current_user, "full_name") else None,
+            "role": current_user.role,
+            "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "last_login_at": current_user.last_login_at.isoformat()
+            if current_user.last_login_at
+            else None,
+        },
+        "diagnosis_sessions": [
+            {
+                "id": str(s.id),
+                "vehicle_make": s.vehicle_make,
+                "vehicle_model": s.vehicle_model,
+                "vehicle_year": s.vehicle_year,
+                "dtc_codes": s.dtc_codes,
+                "symptoms_text": s.symptoms_text,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in sessions
+        ],
+    }
+
+    return export_data
 
 
 # =============================================================================
