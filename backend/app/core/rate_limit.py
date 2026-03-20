@@ -7,7 +7,6 @@ Implements sliding window rate limiting.
 
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -82,8 +81,9 @@ class InMemoryRateLimiter:
 
     def __init__(self):
         # Structure: {client_key: [(timestamp, count), ...]}
-        self._minute_windows: Dict[str, list] = defaultdict(list)
-        self._hour_windows: Dict[str, list] = defaultdict(list)
+        # Use regular dict (not defaultdict) to avoid phantom entries on read access
+        self._minute_windows: Dict[str, list] = {}
+        self._hour_windows: Dict[str, list] = {}
         self._lockouts: Dict[str, float] = {}  # {client_key: lockout_expires_at}
 
     def _clean_old_entries(self, entries: list, window_seconds: int, now: float) -> list:
@@ -151,17 +151,23 @@ class InMemoryRateLimiter:
             )
 
         # Clean old entries
-        self._minute_windows[client_key] = self._clean_old_entries(
-            self._minute_windows[client_key], 60, now
-        )
-        self._hour_windows[client_key] = self._clean_old_entries(
-            self._hour_windows[client_key], 3600, now
-        )
+        minute_entries = self._minute_windows.get(client_key, [])
+        hour_entries = self._hour_windows.get(client_key, [])
+        minute_entries = self._clean_old_entries(minute_entries, 60, now)
+        hour_entries = self._clean_old_entries(hour_entries, 3600, now)
+        if minute_entries:
+            self._minute_windows[client_key] = minute_entries
+        else:
+            self._minute_windows.pop(client_key, None)
+        if hour_entries:
+            self._hour_windows[client_key] = hour_entries
+        else:
+            self._hour_windows.pop(client_key, None)
 
         # Check minute limit
-        minute_count = self._get_request_count(self._minute_windows[client_key])
+        minute_count = self._get_request_count(minute_entries)
         if minute_count >= config.requests_per_minute:
-            retry_after = self._compute_reset_seconds(self._minute_windows[client_key], 60, now)
+            retry_after = self._compute_reset_seconds(minute_entries, 60, now)
             return RateLimitInfo(
                 allowed=False,
                 retry_after=retry_after,
@@ -171,9 +177,9 @@ class InMemoryRateLimiter:
             )
 
         # Check hour limit
-        hour_count = self._get_request_count(self._hour_windows[client_key])
+        hour_count = self._get_request_count(hour_entries)
         if hour_count >= config.requests_per_hour:
-            retry_after = self._compute_reset_seconds(self._hour_windows[client_key], 3600, now)
+            retry_after = self._compute_reset_seconds(hour_entries, 3600, now)
             return RateLimitInfo(
                 allowed=False,
                 retry_after=retry_after,
@@ -196,7 +202,7 @@ class InMemoryRateLimiter:
 
         # Allowed - compute remaining and reset
         remaining = max(0, config.requests_per_minute - minute_count)
-        reset_seconds = self._compute_reset_seconds(self._minute_windows[client_key], 60, now)
+        reset_seconds = self._compute_reset_seconds(minute_entries, 60, now)
 
         return RateLimitInfo(
             allowed=True,
@@ -209,8 +215,8 @@ class InMemoryRateLimiter:
     def record_request(self, client_key: str) -> None:
         """Record a request for the client."""
         now = time.time()
-        self._minute_windows[client_key].append((now, 1))
-        self._hour_windows[client_key].append((now, 1))
+        self._minute_windows.setdefault(client_key, []).append((now, 1))
+        self._hour_windows.setdefault(client_key, []).append((now, 1))
 
     def reset(self, client_key: str) -> None:
         """Reset rate limit counters for a client."""

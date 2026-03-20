@@ -534,8 +534,11 @@ async def refresh_tokens(
             detail="Felhasználó nem található vagy inaktív",
         )
 
-    # Blacklist old refresh token
-    await blacklist_token(token_data.refresh_token)
+    # Blacklist old refresh token - log failure as security event
+    if not await blacklist_token(token_data.refresh_token):
+        logger.error(
+            f"Failed to blacklist old refresh token for user {user_id} - potential token reuse"
+        )
 
     # Create new tokens
     access_token = create_access_token(
@@ -580,12 +583,17 @@ async def logout(
     Returns:
         Logout confirmation
     """
-    # Blacklist access token
-    await blacklist_token(token)
+    # Blacklist access token - log failure as security event
+    if not await blacklist_token(token):
+        logger.error("Failed to blacklist access token during logout - token may remain valid")
 
     # Blacklist refresh token if provided
-    if logout_data and logout_data.refresh_token:
-        await blacklist_token(logout_data.refresh_token)
+    if (
+        logout_data
+        and logout_data.refresh_token
+        and not await blacklist_token(logout_data.refresh_token)
+    ):
+        logger.error("Failed to blacklist refresh token during logout")
 
     logger.info("User logged out")
 
@@ -882,37 +890,44 @@ async def delete_user_account(
     GDPR Article 17 - Right to Erasure compliance.
     """
     user_id = str(current_user.id)
+    cleanup_errors: list = []
 
-    # 1. Delete all diagnosis sessions
-    from sqlalchemy import delete as sql_delete
-
-    await db.execute(
-        sql_delete(DiagnosisSession).where(DiagnosisSession.user_id == current_user.id)
-    )
-
-    # 2. Delete the user record
-    await db.execute(sql_delete(User).where(User.id == current_user.id))
-
-    await db.commit()
-
-    # 3. Clean up Qdrant vectors (user-associated embeddings)
+    # 1. Clean up external databases FIRST (before PostgreSQL commit)
+    # If these fail, we abort - user can retry later
     try:
         from app.db.qdrant_client import get_qdrant_service
 
         qdrant = await get_qdrant_service()
         await qdrant.delete_by_user(user_id)
     except Exception as e:
-        logger.warning(f"Qdrant cleanup failed for user {user_id}: {e}")
+        cleanup_errors.append(f"Qdrant: {e}")
+        logger.error(f"Qdrant cleanup failed for user {user_id}: {e}")
 
-    # 4. Clean up Neo4j user-associated data
     try:
         from app.db.neo4j_models import delete_user_data
 
         await delete_user_data(user_id)
     except Exception as e:
-        logger.warning(f"Neo4j cleanup failed for user {user_id}: {e}")
+        cleanup_errors.append(f"Neo4j: {e}")
+        logger.error(f"Neo4j cleanup failed for user {user_id}: {e}")
 
-    # 5. Invalidate cache (specific patterns, not wildcard)
+    # If external cleanups failed, abort to prevent orphaned data
+    if cleanup_errors:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Az adattörlés részben sikertelen. Kérjük próbálja újra később.",
+        )
+
+    # 2. Delete from PostgreSQL (atomic within this DB)
+    from sqlalchemy import delete as sql_delete
+
+    await db.execute(
+        sql_delete(DiagnosisSession).where(DiagnosisSession.user_id == current_user.id)
+    )
+    await db.execute(sql_delete(User).where(User.id == current_user.id))
+    await db.commit()
+
+    # 3. Invalidate cache (best-effort - PG is already committed)
     try:
         from app.db.redis_cache import get_cache_service
 

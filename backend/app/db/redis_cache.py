@@ -232,6 +232,10 @@ class RedisCacheService:
         self._failure_count = 0
         logger.info("Redis circuit breaker reset")
 
+    def is_circuit_open(self) -> bool:
+        """Public accessor to check if the circuit breaker is open."""
+        return self._circuit_open
+
     # =========================================================================
     # Core Cache Operations
     # =========================================================================
@@ -563,7 +567,9 @@ class RedisCacheService:
             Tuple of (allowed: bool, remaining: int).
         """
         if not self._connected or not await self._check_circuit():
-            return True, limit  # Allow if Redis unavailable
+            # Fail CLOSED - deny requests when Redis unavailable
+            logger.warning("Redis unavailable for rate limiting - denying request (fail-closed)")
+            return False, 0
 
         key = f"{CachePrefix.RATE_LIMIT}{identifier}"
 
@@ -582,7 +588,7 @@ class RedisCacheService:
 
         except Exception as e:
             logger.warning(f"Rate limit check error: {e}")
-            return True, limit
+            return False, 0  # Fail closed
 
     # =========================================================================
     # Statistics

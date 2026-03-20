@@ -56,7 +56,10 @@ def create_access_token(
     }
 
     if additional_claims:
-        to_encode.update(additional_claims)
+        # Prevent overwriting critical JWT claims (sub, exp, iat, type, jti)
+        protected = {"exp", "iat", "sub", "type", "jti"}
+        safe_claims = {k: v for k, v in additional_claims.items() if k not in protected}
+        to_encode.update(safe_claims)
 
     encoded_jwt: str = jwt.encode(
         to_encode,
@@ -245,7 +248,7 @@ async def is_token_blacklisted(jti: str) -> bool:
         cache = await get_cache_service()
 
         # If circuit breaker is open, fail closed (reject token)
-        if hasattr(cache, "_circuit_open") and cache._circuit_open:
+        if cache.is_circuit_open():
             logger.critical("Redis circuit breaker open - rejecting token for safety")
             return True
 

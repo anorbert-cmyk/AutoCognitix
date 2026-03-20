@@ -13,7 +13,9 @@ Author: AutoCognitix Team
 """
 
 import asyncio
+import contextvars
 import hashlib
+import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -43,7 +45,7 @@ from app.prompts.diagnosis_hu import (
     parse_diagnosis_response,
 )
 from app.services.embedding_service import (
-    embed_text,
+    embed_text_async,
     get_embedding_service,
     preprocess_hungarian,
 )
@@ -59,6 +61,17 @@ logger = get_logger(__name__)
 # Maximum estimated tokens for the prompt sent to the LLM.
 # Rough estimation: 1 token ≈ 4 characters.
 MAX_PROMPT_TOKENS = 8000
+
+
+def _escape_ilike(value: str) -> str:
+    """Escape SQL ILIKE special characters (%, _, \\) to prevent wildcard injection."""
+    return re.sub(r"([%_\\])", r"\\\1", value)
+
+
+# ContextVar for request-scoped DB session (thread-safe for singleton RAGService)
+_current_db_session: contextvars.ContextVar[Optional[AsyncSession]] = contextvars.ContextVar(
+    "_current_db_session", default=None
+)
 
 
 # =============================================================================
@@ -398,13 +411,17 @@ class RAGService:
         self._embedding_service = None
         self._ranker = HybridRanker()
         self._cache = ContextCache()
-        self._db_session: Optional[AsyncSession] = None
 
         logger.info("RAGService initialized")
 
     def set_db_session(self, session: AsyncSession) -> None:
-        """Set the database session for PostgreSQL queries."""
-        self._db_session = session
+        """Set the database session for the current request context (thread-safe)."""
+        _current_db_session.set(session)
+
+    @property
+    def _db_session(self) -> Optional[AsyncSession]:
+        """Get the database session for the current request context."""
+        return _current_db_session.get()
 
     def _get_embedding_service(self):
         """Get embedding service instance."""
@@ -445,8 +462,8 @@ class RAGService:
         if cached is not None:
             return cast("List[RetrievedItem]", cached)
 
-        # Generate embedding for query
-        query_embedding = embed_text(query, preprocess=True)
+        # Generate embedding for query (async to avoid blocking event loop)
+        query_embedding = await embed_text_async(query, preprocess=True)
 
         try:
             results = await self._qdrant.search(
@@ -592,13 +609,14 @@ class RAGService:
             if query:
                 # Use ILIKE for simple text matching
                 # In production, use PostgreSQL full-text search with tsvector
+                escaped_query = _escape_ilike(query)
                 search_stmt = (
                     select(DTCCode)
                     .where(
                         or_(
-                            DTCCode.description_en.ilike(f"%{query}%"),
-                            DTCCode.description_hu.ilike(f"%{query}%"),
-                            func.array_to_string(DTCCode.symptoms, " ").ilike(f"%{query}%"),
+                            DTCCode.description_en.ilike(f"%{escaped_query}%"),
+                            DTCCode.description_hu.ilike(f"%{escaped_query}%"),
+                            func.array_to_string(DTCCode.symptoms, " ").ilike(f"%{escaped_query}%"),
                         )
                     )
                     .limit(top_k)
@@ -637,10 +655,11 @@ class RAGService:
 
                 conditions = []
                 if query:
+                    escaped_q = _escape_ilike(query)
                     conditions.append(
                         or_(
-                            KnownIssue.title.ilike(f"%{query}%"),
-                            KnownIssue.description.ilike(f"%{query}%"),
+                            KnownIssue.title.ilike(f"%{escaped_q}%"),
+                            KnownIssue.description.ilike(f"%{escaped_q}%"),
                         )
                     )
                 if vehicle_make:
