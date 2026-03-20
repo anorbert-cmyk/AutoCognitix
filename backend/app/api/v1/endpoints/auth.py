@@ -29,6 +29,7 @@ from app.api.v1.schemas.auth import (
     UserRole,
     UserUpdate,
 )
+from app.core.config import settings
 from app.core.security import (
     blacklist_token,
     create_access_token,
@@ -39,6 +40,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.postgres.models import DiagnosisSession, User
+from app.services.email_service import send_password_reset_email, send_welcome_email
 from app.db.postgres.repositories import UserRepository
 from app.db.postgres.session import get_db
 
@@ -343,6 +345,18 @@ async def register(
     await db.commit()
 
     logger.info(f"User registered: {user.email}")
+
+    # Send welcome email (best-effort, don't block registration)
+    try:
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        login_link = f"{frontend_url}/login"
+        await send_welcome_email(
+            to_email=user.email,
+            name=user.full_name or user.email,
+            login_link=login_link,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send welcome email to {user.email}: {e}")
 
     return UserResponse(
         id=str(user.id),
@@ -794,10 +808,17 @@ async def forgot_password(
         await repository.set_password_reset_token(user, reset_token)
         await db.commit()
 
-        # TODO: Send email with reset link
-        # In production, this would send an email like:
-        # reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
-        # await send_password_reset_email(user.email, reset_link)
+        # Send password reset email (best-effort, don't block the response)
+        try:
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+            reset_link = f"{frontend_url}/reset-password?token={reset_token}"
+            await send_password_reset_email(
+                to_email=user.email,
+                name=user.full_name or user.email,
+                reset_link=reset_link,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send password reset email to {user.email}: {e}")
 
         logger.info(f"Password reset requested for: {user.email}")
 

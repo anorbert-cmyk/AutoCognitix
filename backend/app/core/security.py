@@ -5,6 +5,7 @@ Provides JWT token management, password hashing, and token blacklisting.
 """
 
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -257,6 +258,47 @@ async def is_token_blacklisted(jti: str) -> bool:
     except Exception as e:
         logger.critical(f"Token blacklist check failed - rejecting token for safety: {e}")
         return True
+
+
+def check_password_strength(password: str) -> Dict[str, Any]:
+    """
+    Check password strength and return detailed results.
+
+    Returns a dict with score (0-5), requirement statuses, and Hungarian feedback.
+
+    Args:
+        password: The password to check
+
+    Returns:
+        Dict with is_strong, score, requirements, and feedback_hu
+    """
+    special_chars = re.compile(r"[!@#$%^&*()\\_+\-=\[\]{}|;:,.<>?]")
+
+    requirements = {
+        "min_length": len(password) >= 8,
+        "has_uppercase": bool(re.search(r"[A-Z]", password)),
+        "has_lowercase": bool(re.search(r"[a-z]", password)),
+        "has_digit": bool(re.search(r"[0-9]", password)),
+        "has_special": bool(special_chars.search(password)),
+    }
+
+    score = sum(1 for v in requirements.values() if v)
+
+    feedback_map: Dict[int, str] = {
+        0: "Nagyon gyenge jelszo - egyik kovetelmeny sem teljesul",
+        1: "Gyenge jelszo - tobb kovetelmeny teljesitese szukseges",
+        2: "Gyenge jelszo - legalabb 3 kovetelmeny teljesitese szukseges",
+        3: "Kozepes jelszo - meg erosebb lenne tobb kovetelmeny teljesitesevel",
+        4: "Eros jelszo - majdnem minden kovetelmeny teljesul",
+        5: "Nagyon eros jelszo - minden kovetelmeny teljesul",
+    }
+
+    return {
+        "is_strong": score >= 3,
+        "score": score,
+        "requirements": requirements,
+        "feedback_hu": feedback_map[score],
+    }
 
 
 def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
