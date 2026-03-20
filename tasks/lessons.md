@@ -1,5 +1,46 @@
 # Lessons Learned - AutoCognitix
 
+## Sprint 9/10 Post-Sprint Review Audit - 2026-03-20
+
+### Bevezetett kötelező folyamat: Post-Sprint Review Protocol
+Minden sprint után 4 specialist párhuzamosan vizsgálja a kódot (Security, Database, Performance, Code Quality) mielőtt a következő sprint indulhat.
+
+### Talált és javított hibák:
+
+**CRITICAL (3 db):**
+1. **Non-atomic GDPR deletion** (`auth.py`): PostgreSQL commit ELŐTT futott az external cleanup (Qdrant, Neo4j). Ha PG commit sikeres de Qdrant/Neo4j fail → orphaned data. **Javítás:** External cleanup ELŐSZÖR, abort ha bármelyik fail.
+2. **SQL injection via ILIKE** (`rag_service.py`): User input közvetlenül ILIKE mintába interpolálva (`%`, `_` wildcardok). **Javítás:** `_escape_ilike()` helper, minden ILIKE query escaped inputtal.
+3. **Blacklist write failures silently ignored** (`auth.py`): `blacklist_token()` return value nem volt ellenőrizve → logout/refresh után token továbbra is érvényes. **Javítás:** Return value check + security event logging.
+
+**HIGH (6 db):**
+1. **JWT additional_claims overwrite** (`security.py`): `to_encode.update(additional_claims)` felülírhatta az `exp`, `sub`, `type` claim-eket. **Javítás:** Protected claims set filter.
+2. **Rate limiter fail-open** (`redis_cache.py`): Redis kiesés → `return True, limit` = korlátlan kérések. **Javítás:** `return False, 0` (fail-closed).
+3. **Singleton _db_session race condition** (`rag_service.py`): RAGService singleton mutable `_db_session` → concurrent request-ek egymás session-jét felülírják. **Javítás:** `contextvars.ContextVar`.
+4. **Sync embed_text blocking event loop** (`rag_service.py`): HuBERT inference sync hívás → event loop blokkolva 50-200ms. **Javítás:** `embed_text_async()`.
+5. **defaultdict phantom entries** (`rate_limit.py`): `defaultdict(list)` read access-nél is entry-t hoz létre → unbounded memory growth. **Javítás:** Regular dict + `.get()` + `.setdefault()`.
+6. **Circuit breaker hasattr fragility** (`security.py`): `hasattr(cache, "_circuit_open")` private attribute access. **Javítás:** `is_circuit_open()` public method.
+
+### Database Specialist kiegészítő találatok (2. kör):
+1. **CRITICAL: Neo4j health check race condition** → `asyncio.Lock` double-check pattern hozzáadva
+2. **HIGH: GDPR cache key mismatch** → `user:{id}:*` nem egyezik `api:user:{id}:*` prefix-szel → javítva
+3. **HIGH: Model version filter hides 35k+ old vectors** → version filter opt-in lett (default: no filter)
+4. **HIGH: Qdrant score_threshold falsy check** → `if score_threshold:` → `if score_threshold is not None:`
+5. **MEDIUM: Neo4j empty_result shape inconsistency** → `_empty_result` most tartalmazza `dtc: None`-t
+
+### MEDIUM-LOW (dokumentált, jövőbeni sprintekre):
+- X-Forwarded-For spoofing (TRUSTED_PROXY_COUNT config szükséges)
+- In-memory rate limiter nem shared across workers (Redis-based fallback)
+- Password reset token nem validált stored token ellen
+- MD5 cache key collisions (sha256 javasolt)
+- Neo4j thread pool exhaustion (single Cypher query javasolt)
+- Prometheus `_value._value` private API access
+- Qdrant sync client blocking event loop (AsyncQdrantClient migration szükséges)
+- Neomodel thread safety (dedicated single-thread executor javasolt)
+- Redis INCR+EXPIRE window extension (Lua script javasolt)
+- soft_delete ownership check optional (privilege escalation risk)
+
+---
+
 ## Railway Deployment
 
 ### 2024-02-04 - Frontend Build Failures

@@ -26,7 +26,7 @@ Usage:
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 import psutil
@@ -857,7 +857,7 @@ def get_metrics_summary() -> Dict[str, Any]:
     update_system_metrics()
 
     return {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
         "system": {

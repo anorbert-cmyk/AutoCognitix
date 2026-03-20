@@ -11,6 +11,11 @@ import api, {
   QuickAnalyzeResult,
 } from './api'
 import { isValidDTCFormat } from './dtcService'
+import type {
+  StreamingCallbacks,
+  StreamingEvent,
+  StreamingEventType,
+} from '../types/streaming'
 
 // =============================================================================
 // Types
@@ -263,6 +268,244 @@ export async function quickAnalyze(dtcCodes: string[]): Promise<QuickAnalyzeResu
 }
 
 // =============================================================================
+// Streaming Diagnosis
+// =============================================================================
+
+/**
+ * Parse SSE text buffer into individual events.
+ * Handles the "event: {type}\ndata: {json}\n\n" format from the backend.
+ */
+function parseSSEEvents(buffer: string): { events: StreamingEvent[]; remaining: string } {
+  const events: StreamingEvent[] = []
+  // Split on double newline (SSE event boundary)
+  const parts = buffer.split(/\r?\n\r?\n/)
+  // Last part may be incomplete - keep it as remaining
+  const remaining = parts.pop() || ''
+
+  for (const part of parts) {
+    const trimmed = part.trim()
+    if (!trimmed) continue
+
+    // Extract the data line from the SSE event
+    let dataLine: string | null = null
+    for (const line of trimmed.split('\n')) {
+      if (line.startsWith('data: ')) {
+        dataLine = line.slice(6)
+      }
+    }
+
+    if (!dataLine) continue
+
+    try {
+      const parsed = JSON.parse(dataLine) as StreamingEvent
+      events.push(parsed)
+    } catch {
+      // Skip malformed JSON lines
+    }
+  }
+
+  return { events, remaining }
+}
+
+/**
+ * Stream a diagnosis using Server-Sent Events (SSE).
+ *
+ * Uses fetch() with POST (not EventSource) because the endpoint requires a JSON body.
+ * Reads the response as a ReadableStream and parses SSE events incrementally.
+ *
+ * @param data - Diagnosis form data (same as analyzeDiagnosis)
+ * @param callbacks - Event callbacks for each streaming event type
+ * @returns AbortController to cancel the stream
+ * @throws ApiError on validation failure (before streaming starts)
+ */
+export function streamDiagnosis(
+  data: DiagnosisFormData,
+  callbacks: StreamingCallbacks
+): AbortController {
+  const controller = new AbortController()
+
+  // Validate before sending
+  const validationErrors = validateDiagnosisRequest(data)
+  if (validationErrors.length > 0) {
+    // Call onError asynchronously to maintain consistent behavior
+    queueMicrotask(() => {
+      callbacks.onError?.(
+        new ApiError(
+          validationErrors.join('. '),
+          400,
+          validationErrors.join('. '),
+          'VALIDATION_ERROR'
+        )
+      )
+    })
+    return controller
+  }
+
+  // Build API base URL (same logic as api.ts)
+  const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const url = `${apiBaseUrl}/api/v1/diagnosis/analyze/stream`
+
+  // Build request body matching DiagnosisStreamRequest
+  const requestBody = {
+    vehicle_make: data.vehicleMake.trim(),
+    vehicle_model: data.vehicleModel.trim(),
+    vehicle_year: data.vehicleYear,
+    vehicle_engine: data.vehicleEngine?.trim() || undefined,
+    vin: data.vin?.toUpperCase().trim() || undefined,
+    dtc_codes: data.dtcCodes.map((code) => code.toUpperCase().trim()),
+    symptoms: data.symptoms.trim(),
+    additional_context: data.additionalContext?.trim() || undefined,
+    include_context: true,
+    include_progress: true,
+  }
+
+  // Build headers
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  const token = localStorage.getItem('access_token')
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  // Start streaming in the background
+  const streamPromise = async () => {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+
+    try {
+      let response: Response
+
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        })
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return // User cancelled, no error callback needed
+        }
+        callbacks.onError?.(
+          new ApiError(
+            'Halozati hiba - ellenorizze az internetkapcsolatot',
+            0,
+            'Halozati hiba',
+            'NETWORK_ERROR',
+            undefined,
+            true
+          )
+        )
+        return
+      }
+
+      if (!response.ok) {
+        let detail = `Szerver hiba (${response.status})`
+        try {
+          const errorBody = await response.json()
+          if (errorBody?.detail) {
+            detail = errorBody.detail
+          }
+        } catch {
+          // Ignore JSON parse errors on error response
+        }
+        callbacks.onError?.(new ApiError(detail, response.status, detail))
+        return
+      }
+
+      if (!response.body) {
+        callbacks.onError?.(new ApiError('A szerver nem tamogatja a streaminget', 500))
+        return
+      }
+
+      reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      const callbackMap: Record<StreamingEventType, ((data: Record<string, unknown>) => void) | undefined> = {
+        start: callbacks.onStart,
+        context: callbacks.onContext,
+        analysis: callbacks.onAnalysis,
+        cause: callbacks.onCause,
+        repair: callbacks.onRepair,
+        warning: callbacks.onWarning,
+        complete: callbacks.onComplete,
+        error: undefined, // Handled separately
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const { events, remaining } = parseSSEEvents(buffer)
+        buffer = remaining
+
+        for (const event of events) {
+          // Handle progress callback
+          if (callbacks.onProgress && event.progress != null) {
+            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
+            callbacks.onProgress(event.progress, stepName)
+          }
+
+          // Handle error events specially
+          if (event.event_type === 'error') {
+            const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
+            callbacks.onError?.(new ApiError(errorMsg, 500, errorMsg))
+            return
+          }
+
+          // Dispatch to typed callback
+          const handler = callbackMap[event.event_type]
+          if (handler) {
+            handler(event.data)
+          }
+        }
+      }
+
+      // Process any remaining buffer content
+      if (buffer.trim()) {
+        const { events } = parseSSEEvents(buffer + '\n\n')
+        for (const event of events) {
+          if (callbacks.onProgress && event.progress != null) {
+            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
+            callbacks.onProgress(event.progress, stepName)
+          }
+          if (event.event_type === 'error') {
+            const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
+            callbacks.onError?.(new ApiError(errorMsg, 500, errorMsg))
+            return
+          }
+          const handler = callbackMap[event.event_type]
+          if (handler) {
+            handler(event.data)
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return // User cancelled
+      }
+      const apiErr = err instanceof ApiError ? err : new ApiError(
+        err instanceof Error ? err.message : 'Streaming hiba',
+        500,
+        err instanceof Error ? err.message : 'Streaming hiba'
+      )
+      callbacks.onError?.(apiErr)
+    } finally {
+      if (reader) {
+        reader.releaseLock()
+      }
+    }
+  }
+
+  streamPromise()
+
+  return controller
+}
+
+// =============================================================================
 // Utility Functions
 // =============================================================================
 
@@ -424,6 +667,7 @@ export function formatDate(dateString: string): string {
 
 export const diagnosisService = {
   analyze: analyzeDiagnosis,
+  stream: streamDiagnosis,
   getById: getDiagnosisById,
   getHistory: getDiagnosisHistory,
   delete: deleteDiagnosis,

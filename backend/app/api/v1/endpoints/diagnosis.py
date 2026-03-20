@@ -15,8 +15,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
@@ -53,6 +53,11 @@ from app.services.diagnosis_service import (
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+# Streaming endpoint protection constants
+STREAM_TIMEOUT_SECONDS = 300  # 5-minute max duration per stream
+MAX_CONCURRENT_STREAMS = 10  # Limit concurrent long-running streams
+_stream_semaphore = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
 
 # OpenAPI response examples
 ANALYZE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
@@ -196,6 +201,7 @@ This endpoint performs comprehensive AI-powered diagnosis:
 )
 async def analyze_vehicle(
     request: DiagnosisRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -224,6 +230,17 @@ async def analyze_vehicle(
         user_id = UUID(str(current_user.id)) if current_user else None
         async with DiagnosisService(db) as service:
             result = await service.analyze_vehicle(request, user_id=user_id)
+            response.headers["Location"] = f"/api/v1/diagnosis/{result.id}"
+
+            # Check if this was a duplicate submission
+            duplicate_of = getattr(result, "_duplicate_of", None)
+            if duplicate_of is not None:
+                return JSONResponse(
+                    content=result.model_dump(mode="json"),
+                    status_code=status.HTTP_201_CREATED,
+                    headers={"X-Duplicate-Of": str(duplicate_of)},
+                )
+
             return result
 
     except DTCValidationError as e:
@@ -425,7 +442,7 @@ async def get_diagnosis_history(
         )
 
     except Exception as e:
-        logger.exception(f"Error retrieving diagnosis history: {e}")
+        logger.exception("Error retrieving diagnosis history", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while retrieving diagnosis history.",
@@ -480,6 +497,16 @@ async def delete_diagnosis(
 
         await db.commit()
 
+        # Invalidate cached diagnosis data
+        try:
+            from app.db.redis_cache import get_cache_service
+
+            cache = await get_cache_service()
+            if not cache.is_circuit_open():
+                await cache.delete_pattern(f"api:diagnosis:{diagnosis_id}*")
+        except Exception:
+            pass  # Best-effort cache cleanup
+
         return DeleteResponse(
             success=True,
             message="Diagnosis successfully deleted",
@@ -490,7 +517,9 @@ async def delete_diagnosis(
         raise
 
     except Exception as e:
-        logger.exception(f"Error deleting diagnosis {diagnosis_id}: {e}")
+        logger.exception(
+            "Error deleting diagnosis", extra={"diagnosis_id": str(diagnosis_id), "error": str(e)}
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the diagnosis.",
@@ -560,7 +589,7 @@ async def get_diagnosis_stats(
         )
 
     except Exception as e:
-        logger.exception(f"Error retrieving diagnosis stats: {e}")
+        logger.exception("Error retrieving diagnosis stats", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while retrieving diagnosis statistics.",
@@ -653,7 +682,7 @@ async def quick_analyze(
         raise
 
     except Exception as e:
-        logger.exception(f"Error in quick analyze: {e}")
+        logger.exception("Error in quick analyze", extra={"error": str(e)})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during quick analysis.",
@@ -663,6 +692,65 @@ async def quick_analyze(
 # =============================================================================
 # Streaming Diagnosis Endpoint
 # =============================================================================
+
+
+async def _stream_results(
+    rag_result: Dict[str, Any],
+    diagnosis_id: UUID,
+) -> Any:
+    """Stream probable causes, repairs, and safety warnings as SSE events."""
+    # Probable causes
+    probable_causes = rag_result.get("probable_causes", [])
+    for idx, cause in enumerate(probable_causes[:5]):
+        yield _format_sse_event(
+            StreamingEvent(
+                event_type="cause",
+                data={
+                    "index": idx + 1,
+                    "title": cause.get("title", ""),
+                    "description": cause.get("description", ""),
+                    "confidence": cause.get("confidence", 0.5),
+                    "related_dtc_codes": cause.get("related_dtc_codes", []),
+                    "components": cause.get("components", []),
+                },
+                diagnosis_id=diagnosis_id,
+                progress=0.60 + (0.15 * (idx + 1) / max(len(probable_causes), 1)),
+            )
+        )
+        await asyncio.sleep(0.02)
+
+    # Repair recommendations
+    repairs = rag_result.get("recommended_repairs", [])
+    for idx, repair in enumerate(repairs[:5]):
+        yield _format_sse_event(
+            StreamingEvent(
+                event_type="repair",
+                data={
+                    "index": idx + 1,
+                    "title": repair.get("title", ""),
+                    "description": repair.get("description", ""),
+                    "difficulty": repair.get("difficulty", "intermediate"),
+                    "estimated_cost_min": repair.get("estimated_cost_min"),
+                    "estimated_cost_max": repair.get("estimated_cost_max"),
+                    "estimated_time_minutes": repair.get("estimated_time_minutes"),
+                },
+                diagnosis_id=diagnosis_id,
+                progress=0.75 + (0.17 * (idx + 1) / max(len(repairs), 1)),
+            )
+        )
+        await asyncio.sleep(0.02)
+
+    # Safety warnings
+    safety_warnings = rag_result.get("safety_warnings", [])
+    if safety_warnings:
+        yield _format_sse_event(
+            StreamingEvent(
+                event_type="warning",
+                data={"warnings": safety_warnings, "count": len(safety_warnings)},
+                diagnosis_id=diagnosis_id,
+                progress=0.95,
+            )
+        )
 
 
 STREAMING_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
@@ -731,8 +819,9 @@ eventSource.onmessage = (event) => {
 **Recommended for:** Long-running diagnoses where real-time feedback improves UX.
     """,
 )
-async def analyze_vehicle_stream(
+async def analyze_vehicle_stream(  # noqa: PLR0915
     request: DiagnosisStreamRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
 ):
@@ -740,9 +829,15 @@ async def analyze_vehicle_stream(
     Streaming vehicle analysis endpoint.
 
     Returns Server-Sent Events (SSE) stream with real-time diagnosis progress.
+    Protected by:
+    - Per-stream timeout (STREAM_TIMEOUT_SECONDS)
+    - Concurrent stream semaphore (MAX_CONCURRENT_STREAMS)
+    - Client disconnection detection
+    - Rate limiting via middleware (5 req/min)
 
     Args:
         request: Streaming diagnosis request with vehicle info, DTCs, and symptoms
+        http_request: Raw HTTP request for disconnect detection
         db: Database session
         current_user: Optional authenticated user
 
@@ -752,10 +847,204 @@ async def analyze_vehicle_stream(
     diagnosis_id = uuid4()
     user_id = UUID(str(current_user.id)) if current_user else None
 
+    # Capture request options for use in generator (avoid stale closure)
+    include_context = request.include_context
+    include_progress = request.include_progress
+
+    async def _is_connected() -> bool:
+        """Check if the client is still connected."""
+        return not await http_request.is_disconnected()
+
+    async def _run_pipeline(service):
+        """Run the streaming diagnosis pipeline, yielding SSE events."""
+        # Step 1: VIN decoding (if provided)
+        vin_data = None
+        if request.vin:
+            try:
+                vin_data = await service._decode_vin(request.vin)
+                if include_context:
+                    yield _format_sse_event(
+                        StreamingEvent(
+                            event_type="context",
+                            data={
+                                "stage": "vin_decode",
+                                "message": f"VIN dekodolva: {vin_data.make} {vin_data.model}",
+                            },
+                            diagnosis_id=diagnosis_id,
+                            progress=0.1,
+                        )
+                    )
+            except Exception as e:
+                logger.warning(
+                    "VIN decode failed in stream",
+                    extra={"diagnosis_id": str(diagnosis_id), "error": str(e)},
+                )
+
+        if not await _is_connected():
+            return
+
+        # Step 2: DTC validation
+        dtc_details = await service._validate_and_enrich_dtc_codes(request.dtc_codes)
+        if include_context:
+            yield _format_sse_event(
+                StreamingEvent(
+                    event_type="context",
+                    data={
+                        "stage": "dtc_validation",
+                        "message": f"{len(dtc_details)} DTC kod validalva",
+                        "validated_codes": [d.code for d in dtc_details],
+                    },
+                    diagnosis_id=diagnosis_id,
+                    progress=0.2,
+                )
+            )
+
+        # Step 3: Symptom preprocessing
+        preprocessed_symptoms = service._preprocess_symptoms(request.symptoms)
+        if include_context:
+            yield _format_sse_event(
+                StreamingEvent(
+                    event_type="context",
+                    data={"stage": "symptom_preprocessing", "message": "Tunetek feldolgozva"},
+                    diagnosis_id=diagnosis_id,
+                    progress=0.25,
+                )
+            )
+
+        if not await _is_connected():
+            return
+
+        # Step 4: NHTSA data fetch
+        recalls, complaints = await service._fetch_nhtsa_data(
+            make=request.vehicle_make,
+            model=request.vehicle_model,
+            year=request.vehicle_year,
+        )
+        if (recalls or complaints) and include_context:
+            yield _format_sse_event(
+                StreamingEvent(
+                    event_type="context",
+                    data={
+                        "stage": "nhtsa_data",
+                        "message": f"{len(recalls)} visszahivas, {len(complaints)} panasz talalva",
+                        "recalls_found": len(recalls),
+                        "complaints_found": len(complaints),
+                    },
+                    diagnosis_id=diagnosis_id,
+                    progress=0.35,
+                )
+            )
+
+        if not await _is_connected():
+            return
+
+        # Step 5: RAG pipeline
+        if include_progress:
+            yield _format_sse_event(
+                StreamingEvent(
+                    event_type="analysis",
+                    data={"stage": "rag_start", "message": "AI elemzes inditasa..."},
+                    diagnosis_id=diagnosis_id,
+                    progress=0.4,
+                )
+            )
+
+        from app.api.v1.schemas.diagnosis import DiagnosisRequest as DR
+
+        diag_request = DR(
+            vehicle_make=request.vehicle_make,
+            vehicle_model=request.vehicle_model,
+            vehicle_year=request.vehicle_year,
+            vehicle_engine=request.vehicle_engine,
+            vin=request.vin,
+            dtc_codes=request.dtc_codes,
+            symptoms=request.symptoms,
+            additional_context=request.additional_context,
+        )
+        rag_result = await service._run_rag_pipeline(
+            request=diag_request,
+            dtc_details=dtc_details,
+            preprocessed_symptoms=preprocessed_symptoms,
+            recalls=recalls,
+            complaints=complaints,
+            vin_data=vin_data,
+        )
+
+        if not await _is_connected():
+            return
+
+        if include_progress:
+            yield _format_sse_event(
+                StreamingEvent(
+                    event_type="analysis",
+                    data={
+                        "stage": "rag_complete",
+                        "message": "AI elemzes kesz",
+                        "model_used": rag_result.get("model_used", "unknown"),
+                    },
+                    diagnosis_id=diagnosis_id,
+                    progress=0.6,
+                )
+            )
+
+        # Step 6: Stream results (causes, repairs, warnings)
+        async for event in _stream_results(rag_result, diagnosis_id):
+            yield event
+
+        # Step 7: Build, save, and complete
+        response = service._build_response(
+            diagnosis_id=diagnosis_id,
+            request=diag_request,
+            dtc_details=dtc_details,
+            rag_result=rag_result,
+            recalls=recalls,
+            complaints=complaints,
+        )
+        await service._save_diagnosis_session(
+            diagnosis_id=diagnosis_id,
+            request=diag_request,
+            response=response,
+            user_id=user_id,
+        )
+        yield _format_sse_event(
+            StreamingEvent(
+                event_type="complete",
+                data={
+                    "diagnosis_id": str(diagnosis_id),
+                    "confidence_score": response.confidence_score,
+                    "urgency_level": response.urgency_level,
+                    "probable_causes_count": len(response.probable_causes),
+                    "repairs_count": len(response.recommended_repairs),
+                    "recalls_count": len(response.related_recalls),
+                    "complaints_count": len(response.similar_complaints),
+                    "message": "Diagnosztika befejezve",
+                },
+                diagnosis_id=diagnosis_id,
+                progress=1.0,
+            )
+        )
+
     async def generate_events():
-        """Generate SSE events for streaming diagnosis."""
+        """Generate SSE events with semaphore and error handling."""
+        acquired = False
         try:
-            # Start event
+            try:
+                await asyncio.wait_for(_stream_semaphore.acquire(), timeout=10.0)
+                acquired = True
+            except asyncio.TimeoutError:
+                yield _format_sse_event(
+                    StreamingEvent(
+                        event_type="error",
+                        data={
+                            "error_type": "capacity",
+                            "message": "A szerver jelenleg tul van terhelve.",
+                        },
+                        diagnosis_id=diagnosis_id,
+                        progress=0.0,
+                    )
+                )
+                return
+
             yield _format_sse_event(
                 StreamingEvent(
                     event_type="start",
@@ -768,272 +1057,94 @@ async def analyze_vehicle_stream(
                     progress=0.0,
                 )
             )
-            await asyncio.sleep(0.1)  # Small delay for client to process
+            await asyncio.sleep(0.1)
 
             async with DiagnosisService(db) as service:
-                # Step 1: VIN decoding (if provided)
-                vin_data = None
-                if request.vin:
-                    try:
-                        vin_data = await service._decode_vin(request.vin)
-                        yield _format_sse_event(
-                            StreamingEvent(
-                                event_type="context",
-                                data={
-                                    "stage": "vin_decode",
-                                    "message": f"VIN dekodolva: {vin_data.make} {vin_data.model}",
-                                },
-                                diagnosis_id=diagnosis_id,
-                                progress=0.1,
-                            )
-                        )
-                    except Exception as e:
-                        logger.warning(f"VIN decode failed: {e}")
-
-                # Step 2: DTC validation
-                dtc_details = await service._validate_and_enrich_dtc_codes(request.dtc_codes)
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="context",
-                        data={
-                            "stage": "dtc_validation",
-                            "message": f"{len(dtc_details)} DTC kod validalva",
-                            "validated_codes": [d.code for d in dtc_details],
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=0.2,
-                    )
-                )
-                await asyncio.sleep(0.05)
-
-                # Step 3: Symptom preprocessing
-                preprocessed_symptoms = service._preprocess_symptoms(request.symptoms)
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="context",
-                        data={
-                            "stage": "symptom_preprocessing",
-                            "message": "Tunetek feldolgozva",
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=0.25,
-                    )
-                )
-
-                # Step 4: NHTSA data fetch
-                recalls, complaints = await service._fetch_nhtsa_data(
-                    make=request.vehicle_make,
-                    model=request.vehicle_model,
-                    year=request.vehicle_year,
-                )
-
-                if recalls or complaints:
-                    yield _format_sse_event(
-                        StreamingEvent(
-                            event_type="context",
-                            data={
-                                "stage": "nhtsa_data",
-                                "message": f"{len(recalls)} visszahivas, {len(complaints)} panasz talalva",
-                                "recalls_found": len(recalls),
-                                "complaints_found": len(complaints),
-                            },
-                            diagnosis_id=diagnosis_id,
-                            progress=0.35,
-                        )
-                    )
-                    await asyncio.sleep(0.05)
-
-                # Step 5: RAG pipeline - this is where AI analysis happens
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="analysis",
-                        data={
-                            "stage": "rag_start",
-                            "message": "AI elemzes inditasa...",
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=0.4,
-                    )
-                )
-
-                # Convert request to DiagnosisRequest for service
-                from app.api.v1.schemas.diagnosis import DiagnosisRequest as DR
-
-                diag_request = DR(
-                    vehicle_make=request.vehicle_make,
-                    vehicle_model=request.vehicle_model,
-                    vehicle_year=request.vehicle_year,
-                    vehicle_engine=request.vehicle_engine,
-                    vin=request.vin,
-                    dtc_codes=request.dtc_codes,
-                    symptoms=request.symptoms,
-                    additional_context=request.additional_context,
-                )
-
-                # Run RAG pipeline
-                rag_result = await service._run_rag_pipeline(
-                    request=diag_request,
-                    dtc_details=dtc_details,
-                    preprocessed_symptoms=preprocessed_symptoms,
-                    recalls=recalls,
-                    complaints=complaints,
-                    vin_data=vin_data,
-                )
-
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="analysis",
-                        data={
-                            "stage": "rag_complete",
-                            "message": "AI elemzes kesz",
-                            "model_used": rag_result.get("model_used", "unknown"),
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=0.6,
-                    )
-                )
-                await asyncio.sleep(0.05)
-
-                # Step 6: Stream probable causes
-                probable_causes = rag_result.get("probable_causes", [])
-                for idx, cause in enumerate(probable_causes[:5]):
-                    yield _format_sse_event(
-                        StreamingEvent(
-                            event_type="cause",
-                            data={
-                                "index": idx + 1,
-                                "title": cause.get("title", ""),
-                                "description": cause.get("description", ""),
-                                "confidence": cause.get("confidence", 0.5),
-                                "related_dtc_codes": cause.get("related_dtc_codes", []),
-                                "components": cause.get("components", []),
-                            },
-                            diagnosis_id=diagnosis_id,
-                            progress=0.6 + (0.1 * (idx + 1) / max(len(probable_causes), 1)),
-                        )
-                    )
-                    await asyncio.sleep(0.02)
-
-                # Step 7: Stream repair recommendations
-                repairs = rag_result.get("recommended_repairs", [])
-                for idx, repair in enumerate(repairs[:5]):
-                    yield _format_sse_event(
-                        StreamingEvent(
-                            event_type="repair",
-                            data={
-                                "index": idx + 1,
-                                "title": repair.get("title", ""),
-                                "description": repair.get("description", ""),
-                                "difficulty": repair.get("difficulty", "intermediate"),
-                                "estimated_cost_min": repair.get("estimated_cost_min"),
-                                "estimated_cost_max": repair.get("estimated_cost_max"),
-                                "estimated_time_minutes": repair.get("estimated_time_minutes"),
-                            },
-                            diagnosis_id=diagnosis_id,
-                            progress=0.8 + (0.1 * (idx + 1) / max(len(repairs), 1)),
-                        )
-                    )
-                    await asyncio.sleep(0.02)
-
-                # Step 8: Stream safety warnings
-                safety_warnings = rag_result.get("safety_warnings", [])
-                if safety_warnings:
-                    yield _format_sse_event(
-                        StreamingEvent(
-                            event_type="warning",
-                            data={
-                                "warnings": safety_warnings,
-                                "count": len(safety_warnings),
-                            },
-                            diagnosis_id=diagnosis_id,
-                            progress=0.95,
-                        )
-                    )
-
-                # Step 9: Build and save final response
-                response = service._build_response(
-                    diagnosis_id=diagnosis_id,
-                    request=diag_request,
-                    dtc_details=dtc_details,
-                    rag_result=rag_result,
-                    recalls=recalls,
-                    complaints=complaints,
-                )
-
-                # Save to database
-                await service._save_diagnosis_session(
-                    diagnosis_id=diagnosis_id,
-                    request=diag_request,
-                    response=response,
-                    user_id=user_id,
-                )
-
-                # Complete event with full response
-                yield _format_sse_event(
-                    StreamingEvent(
-                        event_type="complete",
-                        data={
-                            "diagnosis_id": str(diagnosis_id),
-                            "confidence_score": response.confidence_score,
-                            "urgency_level": response.urgency_level,
-                            "probable_causes_count": len(response.probable_causes),
-                            "repairs_count": len(response.recommended_repairs),
-                            "recalls_count": len(response.related_recalls),
-                            "complaints_count": len(response.similar_complaints),
-                            "message": "Diagnosztika befejezve",
-                        },
-                        diagnosis_id=diagnosis_id,
-                        progress=1.0,
-                    )
-                )
+                if not await _is_connected():
+                    return
+                async for event in _run_pipeline(service):
+                    yield event
 
         except DTCValidationError as e:
             yield _format_sse_event(
                 StreamingEvent(
                     event_type="error",
-                    data={
-                        "error_type": "dtc_validation",
-                        "message": str(e),
-                    },
+                    data={"error_type": "dtc_validation", "message": str(e)},
                     diagnosis_id=diagnosis_id,
                     progress=0.0,
                 )
             )
-
-        except VINDecodeError as e:
+        except VINDecodeError:
             yield _format_sse_event(
                 StreamingEvent(
                     event_type="error",
                     data={
                         "error_type": "vin_decode",
-                        "message": str(e),
+                        "message": "VIN dekodolasa sikertelen. Kerem, ellenorizze a VIN szamot.",
                     },
                     diagnosis_id=diagnosis_id,
                     progress=0.0,
                 )
             )
-
+        except asyncio.CancelledError:
+            logger.info(f"Stream cancelled for diagnosis {diagnosis_id}")
+            return
         except Exception as e:
-            logger.exception(f"Streaming diagnosis error: {e}")
-            yield _format_sse_event(
-                StreamingEvent(
-                    event_type="error",
-                    data={
-                        "error_type": "internal",
-                        "message": "Varatlan hiba tortent a diagnosztika soran.",
-                    },
-                    diagnosis_id=diagnosis_id,
-                    progress=0.0,
-                )
+            logger.exception(
+                "Streaming diagnosis error",
+                extra={"diagnosis_id": str(diagnosis_id), "error_type": type(e).__name__},
             )
+            try:
+                yield _format_sse_event(
+                    StreamingEvent(
+                        event_type="error",
+                        data={
+                            "error_type": "internal",
+                            "message": "Varatlan hiba tortent a diagnosztika soran.",
+                        },
+                        diagnosis_id=diagnosis_id,
+                        progress=0.0,
+                    )
+                )
+            except Exception:
+                logger.error(f"Failed to send error event for stream {diagnosis_id}")
+        finally:
+            if acquired:
+                _stream_semaphore.release()
+
+    async def _timeout_wrapper():
+        """Enforce stream timeout to prevent Slowloris attacks."""
+        deadline = asyncio.get_event_loop().time() + STREAM_TIMEOUT_SECONDS
+        gen = generate_events()
+        try:
+            async for event in gen:
+                if asyncio.get_event_loop().time() > deadline:
+                    logger.warning(f"Stream timeout reached for diagnosis {diagnosis_id}")
+                    yield _format_sse_event(
+                        StreamingEvent(
+                            event_type="error",
+                            data={
+                                "error_type": "timeout",
+                                "message": "A diagnosztika tullepte a maximalis idokeretet.",
+                            },
+                            diagnosis_id=diagnosis_id,
+                            progress=0.0,
+                        )
+                    )
+                    # Cancel the generator to release resources (semaphore, DB session)
+                    await gen.aclose()
+                    return
+                yield event
+        except GeneratorExit:
+            await gen.aclose()
 
     return StreamingResponse(
-        generate_events(),
+        _timeout_wrapper(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -1044,7 +1155,7 @@ def _format_sse_event(event: StreamingEvent) -> str:
         "event_type": event.event_type,
         "data": event.data,
         "diagnosis_id": str(event.diagnosis_id),
-        "timestamp": event.timestamp.isoformat(),
+        "timestamp": event.timestamp.isoformat().replace("+00:00", "Z"),
         "progress": event.progress,
     }
     return f"event: {event.event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

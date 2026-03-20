@@ -39,6 +39,8 @@ class InMemoryRateLimiter:
     Note: Not suitable for multi-instance deployments.
     """
 
+    MAX_TRACKED_CLIENTS = 10000  # Prevent unbounded memory growth under DDoS
+
     def __init__(self) -> None:
         # Structure: {key: [(timestamp, count), ...]}
         self._requests: Dict[str, list] = defaultdict(list)
@@ -54,6 +56,7 @@ class InMemoryRateLimiter:
         key: str,
         limit: int,
         window_seconds: int,
+        block_duration_seconds: int = 60,
     ) -> Tuple[bool, int, int]:
         """
         Check if a request is allowed.
@@ -62,11 +65,22 @@ class InMemoryRateLimiter:
             key: Unique identifier (IP or user ID)
             limit: Maximum requests allowed
             window_seconds: Time window in seconds
+            block_duration_seconds: How long to block after limit exceeded
 
         Returns:
             Tuple of (allowed, remaining, retry_after_seconds)
         """
         now = time.time()
+
+        # Evict oldest entries if memory limit exceeded
+        if len(self._requests) > self.MAX_TRACKED_CLIENTS:
+            oldest_keys = sorted(
+                self._requests.keys(),
+                key=lambda k: max((ts for ts, _ in self._requests[k]), default=0),
+            )[: len(self._requests) - self.MAX_TRACKED_CLIENTS]
+            for old_key in oldest_keys:
+                del self._requests[old_key]
+                self._blocked.pop(old_key, None)
 
         # Check if blocked
         if key in self._blocked:
@@ -84,8 +98,8 @@ class InMemoryRateLimiter:
 
         if current_count >= limit:
             # Block the key
-            self._blocked[key] = now + settings.RATE_LIMIT_PER_MINUTE
-            return False, 0, settings.RATE_LIMIT_PER_MINUTE
+            self._blocked[key] = now + block_duration_seconds
+            return False, 0, block_duration_seconds
 
         # Add new request
         self._requests[key].append((now, 1))
@@ -148,7 +162,9 @@ class RedisRateLimiter:
         """
         redis_client = await self._get_redis()
         if not redis_client:
-            return True, limit, 0  # Allow if Redis unavailable
+            # Fail-closed: deny requests when Redis unavailable (security policy)
+            logger.warning("Redis unavailable - rate limiter denying request (fail-closed)")
+            return False, 0, 60
 
         now = time.time()
         window_start = now - window_seconds
@@ -187,7 +203,8 @@ class RedisRateLimiter:
 
         except Exception as e:
             logger.error(f"Redis rate limit error: {e}")
-            return True, limit, 0  # Allow on error
+            # Fail-closed: deny on error to prevent bypass during Redis failures
+            return False, 0, 60
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -202,7 +219,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     SENSITIVE_ENDPOINTS = {
         "/api/v1/auth/login": (10, 60),  # 10 per minute
         "/api/v1/auth/register": (5, 60),  # 5 per minute
+        "/api/v1/diagnosis/analyze/stream": (5, 60),  # 5 per minute (long-lived SSE)
         "/api/v1/diagnosis/analyze": (20, 60),  # 20 per minute (expensive)
+        "/api/v1/auth/forgot-password": (5, 60),  # 5 per minute (brute-force protection)
+        "/api/v1/auth/reset-password": (5, 300),  # 5 per 5 minutes (token brute-force)
     }
 
     # Endpoints exempt from rate limiting
@@ -232,8 +252,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check X-Forwarded-For header (for proxied requests)
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
-            # Take the first IP (original client)
-            return forwarded_for.split(",")[0].strip()
+            # Take the LAST IP (closest trusted proxy adds client IP at the end)
+            # First IP is client-supplied and easily spoofable
+            ips = [ip.strip() for ip in forwarded_for.split(",")]
+            return ips[-1] if ips else "unknown"
 
         # Check X-Real-IP header
         real_ip = request.headers.get("X-Real-IP")
@@ -291,7 +313,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         except Exception:
             # Fallback to in-memory limiter
             allowed, remaining, retry_after = self._memory_limiter.is_allowed(
-                rate_key, limit, window
+                rate_key,
+                limit,
+                window,
+                block_duration_seconds=self._config.block_duration_seconds,
             )
 
         if not allowed:

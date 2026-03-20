@@ -207,19 +207,19 @@ jobs:
         id: deploy-backend
         run: |
           cd backend
-          railway up --service backend --detach || echo "Backend deployment may need manual intervention"
+          railway up --service backend --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        continue-on-error: true
+        continue-on-error: false
 
       - name: Deploy Frontend to Railway
         id: deploy-frontend
         run: |
           cd frontend
-          railway up --service frontend --detach || echo "Frontend deployment may need manual intervention"
+          railway up --service frontend --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        continue-on-error: true
+        continue-on-error: false
 
       - name: Output deployment URL
         id: deploy
@@ -253,7 +253,7 @@ jobs:
           alembic upgrade head
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        continue-on-error: true
+        continue-on-error: false
 
   # ============================================
   # Smoke Tests after deployment

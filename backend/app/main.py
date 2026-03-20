@@ -9,7 +9,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
+
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -141,6 +143,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Shutdown
     logger.info("Shutting down AutoCognitix backend service")
 
+    # Shut down embedding service thread pool
+    try:
+        from app.services.embedding_service import _thread_pool
+
+        _thread_pool.shutdown(wait=True)
+        logger.info("Embedding service thread pool shut down")
+    except Exception as e:
+        logger.warning(f"Embedding thread pool shutdown error: {e}")
+
     # Close Redis connection
     try:
         from app.db.redis_cache import _cache_service
@@ -153,6 +164,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     await engine.dispose()
     logger.info("Database connections closed")
+
+
+class MaxBodySizeMiddleware:
+    """ASGI middleware that rejects requests with Content-Length exceeding the limit."""
+
+    MAX_BODY_SIZE = 1_048_576  # 1 MB
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            content_length = headers.get(b"content-length")
+            if content_length is not None:
+                try:
+                    if int(content_length) > self.MAX_BODY_SIZE:
+                        response = JSONResponse(
+                            status_code=413,
+                            content={"detail": "Request body too large. Maximum size is 1MB."},
+                        )
+                        await response(scope, receive, send)
+                        return
+                except ValueError:
+                    pass
+        await self.app(scope, receive, send)
 
 
 def create_application() -> FastAPI:
@@ -248,7 +285,12 @@ For API support, visit the [project repository](https://github.com/autocognitix)
     # Cache-Control headers middleware
     application.add_middleware(CacheControlMiddleware)
 
-    # Rate limiting middleware (must be added first to process before other middleware)
+    # Idempotency-Key middleware (caches duplicate POST/PUT responses)
+    from app.core.idempotency import IdempotencyMiddleware
+
+    application.add_middleware(IdempotencyMiddleware)
+
+    # Rate limiting middleware (LIFO: added last = executes first, before idempotency)
     application.add_middleware(RateLimitMiddleware)
 
     # Metrics collection middleware (collects request metrics for Prometheus)
@@ -271,8 +313,9 @@ For API support, visit the [project repository](https://github.com/autocognitix)
             "X-Requested-With",
             "X-Request-ID",
             "X-CSRF-Token",
+            "Idempotency-Key",
         ],
-        expose_headers=["X-Request-ID", "X-Correlation-ID"],
+        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Idempotent-Replayed"],
     )
 
     # Security headers middleware - protect against common web vulnerabilities
@@ -302,6 +345,9 @@ For API support, visit the [project repository](https://github.com/autocognitix)
             "/api/v1",
         ],
     )
+
+    # Max request body size middleware (outermost - rejects oversized requests early)
+    application.add_middleware(MaxBodySizeMiddleware)
 
     # Setup exception handlers
     setup_all_exception_handlers(application)

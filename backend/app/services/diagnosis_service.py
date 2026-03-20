@@ -13,7 +13,7 @@ Author: AutoCognitix Team
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -35,7 +35,11 @@ from app.api.v1.schemas.diagnosis import (
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import DTCCode
-from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
+from app.db.postgres.repositories import (
+    DiagnosisSessionRepository,
+    DTCCodeBatchRepository,
+    DTCCodeRepository,
+)
 from app.services.embedding_service import preprocess_hungarian
 from app.services.nhtsa_service import (
     Complaint,
@@ -169,6 +173,30 @@ class DiagnosisService:
         )
 
         try:
+            # Step 0: Check for duplicate submission (authenticated users only)
+            if user_id and request.dtc_codes:
+                duplicate = await self.diagnosis_repository.find_recent_duplicate(
+                    user_id=user_id,
+                    dtc_codes=request.dtc_codes,
+                    vehicle_vin=request.vin,
+                )
+                if duplicate:
+                    duplicate_id = (
+                        UUID(str(duplicate.id))
+                        if not isinstance(duplicate.id, UUID)
+                        else duplicate.id
+                    )
+                    logger.info(
+                        f"Duplicate diagnosis detected for user {user_id}, "
+                        f"returning existing session {duplicate_id}"
+                    )
+                    existing_response = await self.get_diagnosis_by_id(
+                        duplicate_id, user_id=user_id
+                    )
+                    if existing_response is not None:
+                        # Mark response as duplicate so the endpoint can add the header
+                        object.__setattr__(existing_response, "_duplicate_of", duplicate_id)
+                        return existing_response
             # Step 1: VIN decoding (if provided)
             vin_data: Optional[VINDecodeResult] = None
             if request.vin:
@@ -222,13 +250,20 @@ class DiagnosisService:
                 parts_data=parts_data,
             )
 
-            # Step 7: Save to database
-            await self._save_diagnosis_session(
+            # Step 7: Save to database (must succeed before returning ID)
+            save_ok = await self._save_diagnosis_session(
                 diagnosis_id=diagnosis_id,
                 request=request,
                 response=response,
                 user_id=user_id,
             )
+
+            if not save_ok:
+                # Save failed - strip ID so client doesn't reference a non-existent record
+                logger.warning(
+                    f"Diagnosis {diagnosis_id} save failed, returning result without persisted ID"
+                )
+                response = response.model_copy(update={"id": None})
 
             logger.info(
                 f"Diagnosis {diagnosis_id} completed with confidence "
@@ -312,22 +347,27 @@ class DiagnosisService:
         validated_codes: List[DTCCode] = []
         unknown_codes: List[str] = []
 
+        # Validate format first, collect valid codes
+        valid_format_codes: List[str] = []
         for code in dtc_codes:
             code_upper = code.upper().strip()
-
-            # Basic format validation
             if not self._is_valid_dtc_format(code_upper):
                 logger.warning(f"Invalid DTC format: {sanitize_log(code)}")
                 continue
+            valid_format_codes.append(code_upper)
 
-            # Fetch from database
-            dtc_detail = await self.dtc_repository.get_by_code(code_upper)
+        # Batch fetch all valid codes in single query (avoids N+1)
+        if valid_format_codes:
+            batch_repo = DTCCodeBatchRepository(self.db)
+            found_codes = await batch_repo.get_batch(valid_format_codes)
 
-            if dtc_detail:
-                validated_codes.append(dtc_detail)
-            else:
-                unknown_codes.append(code_upper)
-                logger.info(f"Unknown DTC code (not in database): {sanitize_log(code_upper)}")
+            for code_upper in valid_format_codes:
+                dtc_detail = found_codes.get(code_upper)
+                if dtc_detail:
+                    validated_codes.append(dtc_detail)
+                else:
+                    unknown_codes.append(code_upper)
+                    logger.info(f"Unknown DTC code (not in database): {sanitize_log(code_upper)}")
 
         if unknown_codes:
             logger.warning(
@@ -566,17 +606,13 @@ class DiagnosisService:
                         if repair.parts
                         else [],
                         "estimated_time_minutes": repair.estimated_time_minutes,
-                        "tools_needed": repair.tools_needed
-                        if hasattr(repair, "tools_needed")
-                        else [],
-                        "expert_tips": repair.expert_tips if hasattr(repair, "expert_tips") else [],
-                        "root_cause_explanation": repair.root_cause_explanation
-                        if hasattr(repair, "root_cause_explanation")
-                        else None,
+                        "tools_needed": getattr(repair, "tools_needed", []),
+                        "expert_tips": getattr(repair, "expert_tips", []),
+                        "root_cause_explanation": getattr(repair, "root_cause_explanation", None),
                     }
                     for repair in result.repair_recommendations
                 ],
-                "confidence_score": result.confidence_score,
+                "confidence_score": max(0.0, min(1.0, result.confidence_score)),
                 "sources": [
                     {
                         "type": source.get("type", "database"),
@@ -787,6 +823,12 @@ class DiagnosisService:
             "recommended_repairs": recommended_repairs,
             "confidence_score": min(0.8, confidence),
             "sources": sources,
+            "used_fallback": True,
+            "safety_warnings": [],
+            "diagnostic_steps": [],
+            "processing_time_ms": 0,
+            "model_used": "fallback",
+            "root_cause_analysis": None,
         }
 
     # =========================================================================
@@ -1038,7 +1080,7 @@ class DiagnosisService:
             parts_with_prices=parts_with_prices,
             total_cost_estimate=total_cost_estimate,
             root_cause_analysis=root_cause_analysis,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
     def _determine_urgency(
@@ -1094,7 +1136,7 @@ class DiagnosisService:
         request: DiagnosisRequest,
         response: DiagnosisResponse,
         user_id: Optional[UUID],
-    ) -> None:
+    ) -> bool:
         """
         Save diagnosis session to database.
 
@@ -1103,6 +1145,9 @@ class DiagnosisService:
             request: Original request.
             response: Generated response.
             user_id: Optional user ID.
+
+        Returns:
+            True if save succeeded, False otherwise.
         """
         try:
             # Check if session is still valid
@@ -1111,7 +1156,7 @@ class DiagnosisService:
                     "Database session expired, skipping diagnosis session save. "
                     "Session will be recreated by dependency injection on next request."
                 )
-                return
+                return False
 
             session_data = {
                 "id": diagnosis_id,
@@ -1128,11 +1173,14 @@ class DiagnosisService:
             }
 
             await self.diagnosis_repository.create(session_data)
+            await self.db.commit()
             logger.debug(f"Saved diagnosis session {diagnosis_id}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to save diagnosis session: {sanitize_log(str(e))}", exc_info=True)
             # Don't raise - diagnosis should still be returned even if save fails
+            return False
 
     async def get_diagnosis_by_id(
         self, diagnosis_id: UUID, user_id: Optional[UUID] = None

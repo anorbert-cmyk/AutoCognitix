@@ -194,6 +194,36 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
+## Post-Sprint Review Protocol - KÖTELEZŐ MINDEN SPRINT UTÁN
+
+### Mikor: Minden sprint befejezése után, a következő sprint indítása ELŐTT.
+
+### Folyamat:
+
+1. **Parallel Review Team indítása** (4 specialist párhuzamosan):
+   - **Security Specialist**: OWASP Top 10, auth bypass, injection, GDPR compliance
+   - **Database Specialist**: Cross-DB konzisztencia, tranzakció határok, connection management
+   - **Performance Specialist**: Async hibák, race condition, memory leak, N+1 query
+   - **Code Quality Specialist**: Type safety, edge case, Python 3.9 kompatibilitás, teszt minőség
+
+2. **Minden specialist teljes fájl-olvasással dolgozik** - nem csak diff-ek, hanem teljes kontextus.
+
+3. **Találat osztályozás**: CRITICAL → HIGH → MEDIUM → LOW
+
+4. **Javítási sorrend**:
+   - CRITICAL: Azonnal javítandó, blokkolja a következő sprintet
+   - HIGH: Sprint review részeként javítandó
+   - MEDIUM: Következő sprint backlog-ba kerül
+   - LOW: Dokumentálandó, de nem blokkoló
+
+5. **Verifikáció**: Ruff lint + format check + összes teszt PASS szükséges.
+
+6. **Audit teszt fájl**: `tests/test_sprint_review_audit.py` - a review során talált és javított hibák tesztjei.
+
+7. **Dokumentáció**: Találatok és javítások rögzítése `tasks/lessons.md`-ben.
+
+### Trigger: PARALLEL_REVIEW + bármely másik trigger → Agent Teams mód.
+
 ## Core Principles
 
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
@@ -241,6 +271,15 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-03-20 - Post-Sprint Review Audit (Sprint 9/10)
+- **Új kötelező workflow**: Minden sprint után Parallel Review Team (4 specialist) audit
+- 3 CRITICAL + 6 HIGH hiba javítva (SQL injection, GDPR atomicity, JWT claim protection, stb.)
+- `contextvars.ContextVar` használata singleton service-ek thread-safety-jéhez
+- `embed_text_async()` az event loop blokkolás elkerülésére
+- `_escape_ilike()` helper az SQL wildcard injection ellen
+- Rate limiter: fail-closed policy (Redis kiesés → deny, nem allow)
+- Post-Sprint Review Protocol hozzáadva a CLAUDE.md-hez
 
 ### 2026-03-01 - Demo Error Simulation (Sprint 8)
 - Demo oldal: pre-filled P0300 szimuláció VW Golf VII 1.4 TSI-hez valós árakkal

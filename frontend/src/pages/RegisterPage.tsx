@@ -4,8 +4,9 @@
 
 import { useState, FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Car, Eye, EyeOff, Loader2, Check, X } from 'lucide-react'
+import { Car, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { PasswordStrengthMeter } from '../components/ui'
 
 // Password requirements
 const PASSWORD_REQUIREMENTS = [
@@ -215,33 +216,9 @@ export default function RegisterPage() {
                 </button>
               </div>
 
-              {/* Password requirements */}
+              {/* Password strength meter */}
               {showRequirements && (
-                <div className="mt-2 p-3 bg-gray-50 rounded-md">
-                  <p className="text-xs font-medium text-gray-700 mb-2">
-                    Jelszo kovetelmenyei:
-                  </p>
-                  <ul className="space-y-1">
-                    {PASSWORD_REQUIREMENTS.map((req) => {
-                      const passed = req.test(password)
-                      return (
-                        <li
-                          key={req.id}
-                          className={`flex items-center text-xs ${
-                            passed ? 'text-green-600' : 'text-gray-500'
-                          }`}
-                        >
-                          {passed ? (
-                            <Check className="h-3 w-3 mr-1" />
-                          ) : (
-                            <X className="h-3 w-3 mr-1" />
-                          )}
-                          {req.label}
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </div>
+                <PasswordStrengthMeter password={password} />
               )}
             </div>
 

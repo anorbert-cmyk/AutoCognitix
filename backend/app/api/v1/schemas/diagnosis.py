@@ -2,11 +2,12 @@
 Diagnosis schemas - core diagnostic request/response models.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DiagnosisRequest(BaseModel):
@@ -92,6 +93,20 @@ class TotalCostEstimate(BaseModel):
     difficulty: str = Field("medium", description="Overall difficulty level")
     disclaimer: str = Field("", description="Price estimate disclaimer")
 
+    @model_validator(mode="after")
+    def validate_min_max_ranges(self) -> "TotalCostEstimate":
+        """Ensure min values do not exceed max values."""
+        if self.parts_min > self.parts_max:
+            msg = f"parts_min ({self.parts_min}) must be <= parts_max ({self.parts_max})"
+            raise ValueError(msg)
+        if self.labor_min > self.labor_max:
+            msg = f"labor_min ({self.labor_min}) must be <= labor_max ({self.labor_max})"
+            raise ValueError(msg)
+        if self.total_min > self.total_max:
+            msg = f"total_min ({self.total_min}) must be <= total_max ({self.total_max})"
+            raise ValueError(msg)
+        return self
+
 
 class RepairRecommendation(BaseModel):
     """Schema for repair recommendation."""
@@ -163,7 +178,7 @@ class RelatedComplaint(BaseModel):
         return max(0.0, min(1.0, v))
 
 
-class UrgencyLevel(str):
+class UrgencyLevel(str, Enum):
     """Urgency level for diagnosis."""
 
     LOW = "low"
@@ -175,7 +190,7 @@ class UrgencyLevel(str):
 class DiagnosisResponse(BaseModel):
     """Response schema for vehicle diagnosis."""
 
-    id: UUID = Field(..., description="Unique diagnosis ID")
+    id: Optional[UUID] = Field(None, description="Unique diagnosis ID (None if not persisted)")
     vehicle_make: str
     vehicle_model: str
     vehicle_year: int
@@ -224,7 +239,18 @@ class DiagnosisResponse(BaseModel):
     model_used: Optional[str] = Field(None, description="AI model used for diagnosis")
     used_fallback: bool = Field(False, description="Whether fallback diagnosis was used")
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    # AI disclaimer (EU AI Act + liability protection)
+    ai_disclaimer: str = Field(
+        default=(
+            "Ez az elemzés mesterséges intelligencia által készült, tájékoztató jellegű. "
+            "NEM helyettesíti a szakképzett szerelő véleményét. "
+            "Minden javítás előtt kérjen szakemberi diagnózist. "
+            "Az AutoCognitix nem vállal felelősséget az AI alapú ajánlások alapján végzett munkákért."
+        ),
+        description="AI-generated diagnosis disclaimer (EU AI Act compliance)",
+    )
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("confidence_score")
     @classmethod
@@ -371,7 +397,7 @@ class DeleteResponse(BaseModel):
 # =============================================================================
 
 
-class StreamingEventType(str):
+class StreamingEventType(str, Enum):
     """Types of streaming events."""
 
     START = "start"
@@ -393,7 +419,9 @@ class StreamingEvent(BaseModel):
     )
     data: dict = Field(default_factory=dict, description="Event data payload")
     diagnosis_id: UUID = Field(..., description="Diagnosis session ID")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Event timestamp")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc), description="Event timestamp"
+    )
     progress: Optional[float] = Field(None, ge=0, le=1, description="Progress indicator (0-1)")
 
     class Config:

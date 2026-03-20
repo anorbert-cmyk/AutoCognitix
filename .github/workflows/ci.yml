@@ -142,11 +142,11 @@ jobs:
           ENVIRONMENT: test
         run: |
           cd backend
-          pytest tests/test_dtc_validation.py tests/test_translation_fixer.py -v \
+          pytest tests/ -v \
             --cov=app \
             --cov-report=xml \
             --cov-report=term-missing \
-            --cov-fail-under=0
+            --cov-fail-under=60
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

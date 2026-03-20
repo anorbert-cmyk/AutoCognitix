@@ -6,10 +6,11 @@ and password reset endpoints. All tokens are JWTs with configurable expiration t
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Union, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,23 +29,73 @@ from app.api.v1.schemas.auth import (
     UserRole,
     UserUpdate,
 )
+from app.core.config import settings
 from app.core.security import (
     blacklist_token,
     create_access_token,
     create_password_reset_token,
     create_refresh_token,
     decode_token,
+    generate_csrf_token,
     get_password_hash,
     verify_password,
 )
-from app.db.postgres.models import User
+from app.db.postgres.models import DiagnosisSession, User
+from app.services.email_service import send_password_reset_email, send_welcome_email
 from app.db.postgres.repositories import UserRepository
 from app.db.postgres.session import get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+# =============================================================================
+# Cookie Helpers
+# =============================================================================
+
+
+def _set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+) -> None:
+    """Set httpOnly secure cookies for access and refresh tokens."""
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/api/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path="/api/v1/auth/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Clear httpOnly auth cookies on logout."""
+    response.delete_cookie(
+        key="access_token",
+        path="/api/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/api/v1/auth/",
+        domain=settings.COOKIE_DOMAIN,
+    )
 
 
 # =============================================================================
@@ -53,14 +104,21 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 async def get_current_user_from_token(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
     Dependency to get the current authenticated user from JWT token.
 
+    Supports dual auth: checks httpOnly cookie first, then falls back
+    to the Authorization header for API clients.
+
     Args:
-        token: JWT access token from Authorization header
+        request: The incoming request
+        token: JWT access token from Authorization header (optional)
+        access_token_cookie: JWT access token from httpOnly cookie (optional)
         db: Database session
 
     Returns:
@@ -76,7 +134,14 @@ async def get_current_user_from_token(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = await decode_token(token)
+    # Resolve token: cookie first, then Authorization header
+    resolved_token = access_token_cookie or token
+
+    if not resolved_token:
+        logger.warning("No token provided (cookie or header)")
+        raise credentials_exception
+
+    payload = await decode_token(resolved_token)
 
     if not payload:
         logger.warning("Invalid token provided")
@@ -113,21 +178,28 @@ async def get_current_user_from_token(
 
 
 async def get_optional_current_user(
-    token: Optional[str] = Depends(
-        OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
-    ),
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """
     Optional dependency to get current user (returns None if not authenticated).
 
+    Supports dual auth: checks httpOnly cookie first, then Authorization header.
     Useful for endpoints that work differently for authenticated vs anonymous users.
     """
-    if not token:
+    resolved_token = access_token_cookie or token
+    if not resolved_token:
         return None
 
     try:
-        return await get_current_user_from_token(token, db)
+        return await get_current_user_from_token(
+            request=request,
+            token=token,
+            access_token_cookie=access_token_cookie,
+            db=db,
+        )
     except HTTPException:
         return None
 
@@ -293,6 +365,7 @@ ME_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
 )
 async def register(
     user_data: UserCreate,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """
@@ -343,6 +416,20 @@ async def register(
 
     logger.info(f"User registered: {user.email}")
 
+    # Send welcome email (best-effort, don't block registration)
+    try:
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+        login_link = f"{frontend_url}/login"
+        await send_welcome_email(
+            to_email=user.email,
+            name=user.full_name or user.email,
+            login_link=login_link,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send welcome email to {user.email}: {e}")
+
+    response.headers["Location"] = f"/api/v1/auth/users/{user.id}"
+
     return UserResponse(
         id=str(user.id),
         email=user.email,
@@ -378,6 +465,7 @@ Authorization: Bearer <access_token>
     """,
 )
 async def login(
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
@@ -404,6 +492,9 @@ async def login(
     user = await repository.get_by_email(form_data.username.lower())
 
     if not user:
+        # Timing-safe: always run bcrypt to prevent user enumeration via response timing
+        _dummy_hash = "$2b$12$LJ3m4ys3Lz0qtL0Gq.X7/.bN.qKGmF5E3pXbR6V5q0jHdFg6Cq0TS"
+        verify_password(form_data.password, _dummy_hash)
         logger.warning(f"Login attempt with unknown email: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -457,12 +548,20 @@ async def login(
     )
     refresh_token = create_refresh_token(subject=str(user.id))
 
+    # Generate CSRF token for cookie-based auth protection
+    csrf_token = generate_csrf_token()
+
+    # Set httpOnly secure cookies for browser clients
+    _set_auth_cookies(response, access_token, refresh_token)
+
     logger.info(f"User logged in: {user.email}")
 
+    # Return tokens in body for backward compatibility (API clients)
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
+        csrf_token=csrf_token,
     )
 
 
@@ -486,7 +585,9 @@ anélkül, hogy a felhasználónak újra be kellene jelentkeznie.
     """,
 )
 async def refresh_tokens(
-    token_data: TokenRefresh,
+    response: Response,
+    token_data: Optional[TokenRefresh] = None,
+    refresh_token_cookie: Optional[str] = Cookie(default=None, alias="refresh_token"),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
     """
@@ -495,8 +596,12 @@ async def refresh_tokens(
     Validates the refresh token and issues new access and refresh tokens.
     The old refresh token should be discarded after this call.
 
+    Supports dual auth: checks httpOnly cookie first, then request body.
+
     Args:
-        token_data: Refresh token data
+        response: The response object for setting new cookies
+        token_data: Refresh token data from request body (optional)
+        refresh_token_cookie: Refresh token from httpOnly cookie (optional)
         db: Database session
 
     Returns:
@@ -505,7 +610,19 @@ async def refresh_tokens(
     Raises:
         401: Invalid refresh token
     """
-    payload = await decode_token(token_data.refresh_token)
+    # Resolve refresh token: cookie first, then request body
+    resolved_refresh_token = refresh_token_cookie
+    if not resolved_refresh_token and token_data:
+        resolved_refresh_token = token_data.refresh_token
+
+    if not resolved_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Érvénytelen refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = await decode_token(resolved_refresh_token)
 
     if not payload or payload.get("type") != "refresh":
         logger.warning("Invalid refresh token provided")
@@ -533,8 +650,11 @@ async def refresh_tokens(
             detail="Felhasználó nem található vagy inaktív",
         )
 
-    # Blacklist old refresh token
-    await blacklist_token(token_data.refresh_token)
+    # Blacklist old refresh token - log failure as security event
+    if not await blacklist_token(resolved_refresh_token):
+        logger.error(
+            f"Failed to blacklist old refresh token for user {user_id} - potential token reuse"
+        )
 
     # Create new tokens
     access_token = create_access_token(
@@ -543,12 +663,19 @@ async def refresh_tokens(
     )
     new_refresh_token = create_refresh_token(subject=user_id)
 
+    # Generate new CSRF token
+    csrf_token = generate_csrf_token()
+
+    # Set new httpOnly cookies for browser clients
+    _set_auth_cookies(response, access_token, new_refresh_token)
+
     logger.info(f"Tokens refreshed for user: {user.email}")
 
     return Token(
         access_token=access_token,
         refresh_token=new_refresh_token,
         token_type="bearer",
+        csrf_token=csrf_token,
     )
 
 
@@ -566,25 +693,42 @@ Felhasználó kijelentkeztetése és tokenek érvénytelenítése.
     """,
 )
 async def logout(
+    response: Response,
     logout_data: Optional[LogoutRequest] = None,
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme),
+    access_token_cookie: Optional[str] = Cookie(default=None, alias="access_token"),
+    refresh_token_cookie: Optional[str] = Cookie(default=None, alias="refresh_token"),
 ) -> LogoutResponse:
     """
     Logout user and invalidate tokens.
 
+    Supports dual auth: reads tokens from cookies and/or request body/header.
+    Clears httpOnly cookies on logout.
+
     Args:
+        response: The response object for clearing cookies
         logout_data: Optional logout request with refresh token
-        token: Access token from header
+        token: Access token from Authorization header (optional)
+        access_token_cookie: Access token from httpOnly cookie (optional)
+        refresh_token_cookie: Refresh token from httpOnly cookie (optional)
 
     Returns:
         Logout confirmation
     """
-    # Blacklist access token
-    await blacklist_token(token)
+    # Blacklist access token (cookie or header) - log failure as security event
+    resolved_access = access_token_cookie or token
+    if resolved_access and not await blacklist_token(resolved_access):
+        logger.error("Failed to blacklist access token during logout - token may remain valid")
 
-    # Blacklist refresh token if provided
-    if logout_data and logout_data.refresh_token:
-        await blacklist_token(logout_data.refresh_token)
+    # Blacklist refresh token (cookie or request body)
+    resolved_refresh = refresh_token_cookie
+    if not resolved_refresh and logout_data and logout_data.refresh_token:
+        resolved_refresh = logout_data.refresh_token
+    if resolved_refresh and not await blacklist_token(resolved_refresh):
+        logger.error("Failed to blacklist refresh token during logout")
+
+    # Clear httpOnly auth cookies
+    _clear_auth_cookies(response)
 
     logger.info("User logged out")
 
@@ -785,10 +929,17 @@ async def forgot_password(
         await repository.set_password_reset_token(user, reset_token)
         await db.commit()
 
-        # TODO: Send email with reset link
-        # In production, this would send an email like:
-        # reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
-        # await send_password_reset_email(user.email, reset_link)
+        # Send password reset email (best-effort, don't block the response)
+        try:
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+            reset_link = f"{frontend_url}/reset-password?token={reset_token}"
+            await send_password_reset_email(
+                to_email=user.email,
+                name=user.full_name or user.email,
+                reset_link=reset_link,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send password reset email to {user.email}: {e}")
 
         logger.info(f"Password reset requested for: {user.email}")
 
@@ -860,6 +1011,139 @@ async def reset_password(
     logger.info(f"Password reset completed for: {user.email}")
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
+
+
+# =============================================================================
+# GDPR Compliance Endpoints
+# =============================================================================
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    summary="GDPR Article 17 - Right to Erasure",
+)
+async def delete_user_account(
+    current_user: User = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete user account and all associated data.
+    GDPR Article 17 - Right to Erasure compliance.
+    """
+    user_id = str(current_user.id)
+    cleanup_errors: list = []
+
+    # 1. Clean up external databases FIRST (before PostgreSQL commit)
+    # If these fail, we abort - user can retry later
+    try:
+        from app.db.qdrant_client import get_qdrant_service
+
+        qdrant = await get_qdrant_service()
+        await qdrant.delete_by_user(user_id)
+    except Exception as e:
+        cleanup_errors.append(f"Qdrant: {e}")
+        logger.error(f"Qdrant cleanup failed for user {user_id}: {e}")
+
+    try:
+        from app.db.neo4j_models import delete_user_data
+
+        await delete_user_data(user_id)
+    except Exception as e:
+        cleanup_errors.append(f"Neo4j: {e}")
+        logger.error(f"Neo4j cleanup failed for user {user_id}: {e}")
+
+    # If external cleanups failed, abort to prevent orphaned data
+    if cleanup_errors:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Az adattörlés részben sikertelen. Kérjük próbálja újra később.",
+        )
+
+    # 2. Delete from PostgreSQL (atomic within this DB)
+    from sqlalchemy import delete as sql_delete
+
+    await db.execute(
+        sql_delete(DiagnosisSession).where(DiagnosisSession.user_id == current_user.id)
+    )
+    await db.execute(sql_delete(User).where(User.id == current_user.id))
+    await db.commit()
+
+    # 3. Invalidate cache (best-effort - PG is already committed)
+    try:
+        from app.db.redis_cache import get_cache_service
+
+        cache = await get_cache_service()
+        # Match actual CachePrefix patterns (api:user:, api:diagnosis:, ratelimit:)
+        await cache.delete_pattern(f"api:user:{user_id}:*")
+        await cache.delete_pattern(f"api:diagnosis:*")
+        await cache.delete_pattern(f"ratelimit:{user_id}*")
+    except Exception as e:
+        # Log cache cleanup failure for GDPR audit trail (best-effort but tracked)
+        logger.warning(
+            "GDPR cache cleanup failed (best-effort)",
+            extra={"user_id": str(user_id), "error_type": type(e).__name__},
+        )
+
+    logger.info(f"GDPR deletion completed for user {user_id}")
+
+    return {"message": "Fiók és minden kapcsolódó adat véglegesen törölve.", "gdpr_article": "17"}
+
+
+@router.get(
+    "/me/export",
+    status_code=status.HTTP_200_OK,
+    summary="GDPR Article 20 - Right to Data Portability",
+)
+async def export_user_data(
+    current_user: User = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export all user data in a portable format.
+    GDPR Article 20 - Right to Data Portability compliance.
+    """
+    from sqlalchemy import select
+
+    # Get all diagnosis sessions
+    result = await db.execute(
+        select(DiagnosisSession)
+        .where(
+            DiagnosisSession.user_id == current_user.id,
+            DiagnosisSession.is_deleted.is_(False),
+        )
+        .order_by(DiagnosisSession.created_at.desc())
+    )
+    sessions = result.scalars().all()
+
+    export_data = {
+        "gdpr_article": "20",
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "user": {
+            "id": str(current_user.id),
+            "email": current_user.email,
+            "full_name": current_user.full_name if hasattr(current_user, "full_name") else None,
+            "role": current_user.role,
+            "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+            "last_login_at": current_user.last_login_at.isoformat()
+            if current_user.last_login_at
+            else None,
+        },
+        "diagnosis_sessions": [
+            {
+                "id": str(s.id),
+                "vehicle_make": s.vehicle_make,
+                "vehicle_model": s.vehicle_model,
+                "vehicle_year": s.vehicle_year,
+                "dtc_codes": s.dtc_codes,
+                "symptoms_text": s.symptoms_text,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            }
+            for s in sessions
+        ],
+    }
+
+    return export_data
 
 
 # =============================================================================

@@ -5,16 +5,18 @@ Provides JWT token management, password hashing, and token blacklisting.
 """
 
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# jose.jwt.encode/decode return Any, so we cast to proper types
+# PyJWT encode returns str, decode returns dict
 # passlib CryptContext.verify/hash also return Any
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,10 @@ def create_access_token(
     }
 
     if additional_claims:
-        to_encode.update(additional_claims)
+        # Prevent overwriting critical JWT claims (sub, exp, iat, type, jti)
+        protected = {"exp", "iat", "sub", "type", "jti"}
+        safe_claims = {k: v for k, v in additional_claims.items() if k not in protected}
+        to_encode.update(safe_claims)
 
     encoded_jwt: str = jwt.encode(
         to_encode,
@@ -165,6 +170,7 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
+            leeway=30,
         )
 
         # Check if token is blacklisted
@@ -173,7 +179,7 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             return None
 
         return payload
-    except JWTError:
+    except (InvalidTokenError, ExpiredSignatureError, DecodeError):
         return None
 
 
@@ -223,7 +229,7 @@ async def blacklist_token(token: str) -> bool:
             logger.debug(f"Token already expired, skipping blacklist: {jti[:8]}...")
             return True  # Expired tokens are effectively blacklisted
 
-    except JWTError as e:
+    except (InvalidTokenError, ExpiredSignatureError, DecodeError) as e:
         logger.warning(f"Failed to decode token for blacklisting: {e}")
         return False
 
@@ -242,13 +248,58 @@ async def is_token_blacklisted(jti: str) -> bool:
         from app.db.redis_cache import get_cache_service
 
         cache = await get_cache_service()
+
+        # If circuit breaker is open, fail closed (reject token)
+        if cache.is_circuit_open():
+            logger.critical("Redis circuit breaker open - rejecting token for safety")
+            return True
+
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.error(f"Failed to check token blacklist: {e}")
-        # Fail open - if Redis is unavailable, allow the token
-        # The token will still be validated for expiration and signature
-        return False
+        logger.critical(f"Token blacklist check failed - rejecting token for safety: {e}")
+        return True
+
+
+def check_password_strength(password: str) -> Dict[str, Any]:
+    """
+    Check password strength and return detailed results.
+
+    Returns a dict with score (0-5), requirement statuses, and Hungarian feedback.
+
+    Args:
+        password: The password to check
+
+    Returns:
+        Dict with is_strong, score, requirements, and feedback_hu
+    """
+    special_chars = re.compile(r"[!@#$%^&*()\\_+\-=\[\]{}|;:,.<>?]")
+
+    requirements = {
+        "min_length": len(password) >= 8,
+        "has_uppercase": bool(re.search(r"[A-Z]", password)),
+        "has_lowercase": bool(re.search(r"[a-z]", password)),
+        "has_digit": bool(re.search(r"[0-9]", password)),
+        "has_special": bool(special_chars.search(password)),
+    }
+
+    score = sum(1 for v in requirements.values() if v)
+
+    feedback_map: Dict[int, str] = {
+        0: "Nagyon gyenge jelszo - egyik kovetelmeny sem teljesul",
+        1: "Gyenge jelszo - tobb kovetelmeny teljesitese szukseges",
+        2: "Gyenge jelszo - legalabb 3 kovetelmeny teljesitese szukseges",
+        3: "Kozepes jelszo - meg erosebb lenne tobb kovetelmeny teljesitesevel",
+        4: "Eros jelszo - majdnem minden kovetelmeny teljesul",
+        5: "Nagyon eros jelszo - minden kovetelmeny teljesul",
+    }
+
+    return {
+        "is_strong": score >= 3,
+        "score": score,
+        "requirements": requirements,
+        "feedback_hu": feedback_map[score],
+    }
 
 
 def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
@@ -299,3 +350,33 @@ def generate_secure_token(length: int = 32) -> str:
         A URL-safe base64 encoded token string
     """
     return secrets.token_urlsafe(length)
+
+
+def generate_csrf_token() -> str:
+    """
+    Generate a CSRF token for cookie-based auth protection.
+
+    Returns a cryptographically secure token that should be returned
+    in the login response body (NOT in a cookie) and sent by the
+    frontend as an X-CSRF-Token header on state-changing requests.
+
+    Returns:
+        A URL-safe base64 encoded CSRF token string
+    """
+    return secrets.token_urlsafe(32)
+
+
+def verify_csrf_token(token: Optional[str]) -> bool:
+    """
+    Verify that a CSRF token is present and non-empty.
+
+    The token is validated for presence only since we use a per-session
+    token stored in-memory on the frontend (not accessible to attackers).
+
+    Args:
+        token: The CSRF token from X-CSRF-Token header
+
+    Returns:
+        True if token is present and non-empty
+    """
+    return bool(token and len(token) >= 16)

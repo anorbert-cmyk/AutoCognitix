@@ -13,10 +13,13 @@ Author: AutoCognitix Team
 """
 
 import asyncio
+import contextvars
 import hashlib
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 # Python 3.9 compatible string enum
@@ -42,7 +45,7 @@ from app.prompts.diagnosis_hu import (
     parse_diagnosis_response,
 )
 from app.services.embedding_service import (
-    embed_text,
+    embed_text_async,
     get_embedding_service,
     preprocess_hungarian,
 )
@@ -54,6 +57,21 @@ from app.services.llm_provider import (
 )
 
 logger = get_logger(__name__)
+
+# Maximum estimated tokens for the prompt sent to the LLM.
+# Rough estimation: 1 token ≈ 4 characters.
+MAX_PROMPT_TOKENS = 8000
+
+
+def _escape_ilike(value: str) -> str:
+    """Escape SQL ILIKE special characters (%, _, \\) to prevent wildcard injection."""
+    return re.sub(r"([%_\\])", r"\\\1", value)
+
+
+# ContextVar for request-scoped DB session (thread-safe for singleton RAGService)
+_current_db_session: contextvars.ContextVar[Optional[AsyncSession]] = contextvars.ContextVar(
+    "_current_db_session", default=None
+)
 
 
 # =============================================================================
@@ -209,7 +227,7 @@ class DiagnosisResult:
     sources: List[Dict[str, Any]] = field(default_factory=list)
 
     # Metadata
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     model_used: str = ""
     provider_used: str = ""
     processing_time_ms: int = 0
@@ -278,7 +296,9 @@ class HybridRanker:
                     item_objects[item_key] = item
 
         # Sort by combined score
-        sorted_keys = sorted(item_scores.keys(), key=lambda k: item_scores[k], reverse=True)
+        sorted_keys = sorted(
+            item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True
+        )
 
         # Update item scores and return
         result = []
@@ -292,7 +312,7 @@ class HybridRanker:
     def _get_item_key(self, item: RetrievedItem) -> str:
         """Generate unique key for an item."""
         content_str = str(item.content)
-        return hashlib.md5(content_str.encode()).hexdigest()
+        return hashlib.sha256(content_str.encode()).hexdigest()
 
     def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
         """Normalize scores to 0-1 range."""
@@ -327,7 +347,7 @@ class ContextCache:
 
     def _make_key(self, *args) -> str:
         """Create cache key from arguments."""
-        return hashlib.md5(str(args).encode()).hexdigest()
+        return hashlib.sha256(str(args).encode()).hexdigest()
 
     def get(self, *args) -> Optional[Any]:
         """Get item from cache if not expired."""
@@ -393,13 +413,17 @@ class RAGService:
         self._embedding_service = None
         self._ranker = HybridRanker()
         self._cache = ContextCache()
-        self._db_session: Optional[AsyncSession] = None
 
         logger.info("RAGService initialized")
 
     def set_db_session(self, session: AsyncSession) -> None:
-        """Set the database session for PostgreSQL queries."""
-        self._db_session = session
+        """Set the database session for the current request context (thread-safe)."""
+        _current_db_session.set(session)
+
+    @property
+    def _db_session(self) -> Optional[AsyncSession]:
+        """Get the database session for the current request context."""
+        return _current_db_session.get()
 
     def _get_embedding_service(self):
         """Get embedding service instance."""
@@ -432,13 +456,16 @@ class RAGService:
         Returns:
             List of RetrievedItem from Qdrant.
         """
+        # Normalize Hungarian text to NFC form for consistent search
+        query = unicodedata.normalize("NFC", query)
+
         # Check cache
         cached = self._cache.get("qdrant", collection, query, filters)
         if cached is not None:
             return cast("List[RetrievedItem]", cached)
 
-        # Generate embedding for query
-        query_embedding = embed_text(query, preprocess=True)
+        # Generate embedding for query (async to avoid blocking event loop)
+        query_embedding = await embed_text_async(query, preprocess=True)
 
         try:
             results = await self._qdrant.search(
@@ -544,6 +571,9 @@ class RAGService:
         Returns:
             List of RetrievedItem from PostgreSQL.
         """
+        # Normalize Hungarian text to NFC form for consistent search
+        query = unicodedata.normalize("NFC", query)
+
         if self._db_session is None:
             logger.warning("No database session available for PostgreSQL search")
             return []
@@ -581,13 +611,14 @@ class RAGService:
             if query:
                 # Use ILIKE for simple text matching
                 # In production, use PostgreSQL full-text search with tsvector
+                escaped_query = _escape_ilike(query)
                 search_stmt = (
                     select(DTCCode)
                     .where(
                         or_(
-                            DTCCode.description_en.ilike(f"%{query}%"),
-                            DTCCode.description_hu.ilike(f"%{query}%"),
-                            func.array_to_string(DTCCode.symptoms, " ").ilike(f"%{query}%"),
+                            DTCCode.description_en.ilike(f"%{escaped_query}%"),
+                            DTCCode.description_hu.ilike(f"%{escaped_query}%"),
+                            func.array_to_string(DTCCode.symptoms, " ").ilike(f"%{escaped_query}%"),
                         )
                     )
                     .limit(top_k)
@@ -626,10 +657,11 @@ class RAGService:
 
                 conditions = []
                 if query:
+                    escaped_q = _escape_ilike(query)
                     conditions.append(
                         or_(
-                            KnownIssue.title.ilike(f"%{query}%"),
-                            KnownIssue.description.ilike(f"%{query}%"),
+                            KnownIssue.title.ilike(f"%{escaped_q}%"),
+                            KnownIssue.description.ilike(f"%{escaped_q}%"),
                         )
                     )
                 if vehicle_make:
@@ -726,15 +758,30 @@ class RAGService:
             ),
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("RAG retrieval timed out after 30s")
+            results = []
 
         # Process results - narrow types from gather with return_exceptions=True
-        qdrant_dtc_items: List[RetrievedItem] = results[0] if isinstance(results[0], list) else []
-        qdrant_symptom_items: List[RetrievedItem] = (
-            results[1] if isinstance(results[1], list) else []
+        qdrant_dtc_items: List[RetrievedItem] = (
+            results[0] if len(results) > 0 and isinstance(results[0], list) else []
         )
-        neo4j_result = results[2] if not isinstance(results[2], BaseException) else ([], {})
-        postgres_items: List[RetrievedItem] = results[3] if isinstance(results[3], list) else []
+        qdrant_symptom_items: List[RetrievedItem] = (
+            results[1] if len(results) > 1 and isinstance(results[1], list) else []
+        )
+        neo4j_result = (
+            results[2]
+            if len(results) > 2 and not isinstance(results[2], BaseException)
+            else ([], {})
+        )
+        postgres_items: List[RetrievedItem] = (
+            results[3] if len(results) > 3 and isinstance(results[3], list) else []
+        )
 
         neo4j_items: List[RetrievedItem]
         graph_data: Dict[str, Any]
@@ -870,8 +917,9 @@ class RAGService:
             score += 0.1
             factors += 0.1
 
-        # Normalize score
+        # Normalize score and clamp to [0.0, 1.0]
         normalized_score = min(1.0, score / factors) if factors > 0 else 0.1
+        normalized_score = max(0.0, min(1.0, normalized_score))
 
         # Determine confidence level
         if normalized_score >= 0.75:
@@ -930,6 +978,22 @@ class RAGService:
         )
 
         user_prompt = build_diagnosis_prompt(prompt_context)
+
+        # Estimate token count and truncate if necessary
+        estimated_tokens = len(user_prompt) // 4
+        if estimated_tokens > MAX_PROMPT_TOKENS:
+            max_chars = MAX_PROMPT_TOKENS * 4
+            logger.warning(
+                f"Prompt too large: ~{estimated_tokens} tokens estimated, "
+                f"truncating to ~{MAX_PROMPT_TOKENS} tokens ({max_chars} chars)"
+            )
+            # Truncate at section boundary to avoid breaking structured content
+            truncated = user_prompt[:max_chars]
+            last_section = truncated.rfind("\n##")
+            if last_section > max_chars // 2:
+                truncated = truncated[:last_section]
+            truncated += "\n\n[Kontextus rövidítve a mérethatár miatt.]"
+            user_prompt = truncated
 
         # Check if LLM is available
         if not is_llm_available():
@@ -1026,6 +1090,9 @@ class RAGService:
         """
         start_time = time.time()
 
+        # Normalize Hungarian text to NFC form for consistent search
+        symptoms = unicodedata.normalize("NFC", symptoms)
+
         # Parse vehicle info
         vehicle = VehicleInfo(
             make=vehicle_info.get("make", ""),
@@ -1111,12 +1178,13 @@ class RAGService:
 
         processing_time = int((time.time() - start_time) * 1000)
 
-        # Combine confidence from context and diagnosis
+        # Combine confidence from context and diagnosis, clamped to [0.0, 1.0]
         final_confidence = (
             max(confidence_score, diagnosis.confidence_score)
             if diagnosis.probable_causes
             else confidence_score
         )
+        final_confidence = max(0.0, min(1.0, final_confidence))
 
         result = DiagnosisResult(
             dtc_codes=dtc_codes,
@@ -1153,6 +1221,54 @@ class RAGService:
         return result
 
     # =========================================================================
+    # Cross-DB Consistency
+    # =========================================================================
+
+    async def verify_cross_db_consistency(self) -> dict:
+        """Verify DTC codes are consistent across PostgreSQL, Neo4j, and Qdrant."""
+        results: Dict[str, Any] = {"consistent": True, "details": {}}
+
+        # 1. Count DTCs in PostgreSQL
+        try:
+            if self._db_session is not None:
+                stmt = select(func.count()).select_from(DTCCode)
+                result = await self._db_session.execute(stmt)
+                pg_count = result.scalar() or 0
+                results["details"]["postgresql"] = {"status": "ok", "count": pg_count}
+            else:
+                results["details"]["postgresql"] = {
+                    "status": "checked",
+                    "note": "requires session",
+                }
+        except Exception as e:
+            results["details"]["postgresql"] = {"status": "error", "error": str(e)}
+
+        # 2. Count DTCs in Qdrant
+        try:
+            info = await self._qdrant.get_collection_info(QdrantService.DTC_COLLECTION)
+            qdrant_count = info.get("points_count", 0) if info else 0
+            results["details"]["qdrant"] = {"status": "ok", "count": qdrant_count}
+        except Exception as e:
+            results["details"]["qdrant"] = {"status": "error", "error": str(e)}
+            results["consistent"] = False
+
+        # 3. Check Neo4j
+        try:
+            from app.db.neo4j_models import is_neo4j_available
+
+            neo4j_ok = await is_neo4j_available()
+            results["details"]["neo4j"] = {
+                "status": "ok" if neo4j_ok else "unavailable",
+            }
+            if not neo4j_ok:
+                results["consistent"] = False
+        except Exception as e:
+            results["details"]["neo4j"] = {"status": "error", "error": str(e)}
+            results["consistent"] = False
+
+        return results
+
+    # =========================================================================
     # Utility Methods
     # =========================================================================
 
@@ -1181,9 +1297,6 @@ class RAGService:
 # =============================================================================
 
 
-_rag_service: Optional[RAGService] = None
-
-
 def get_rag_service() -> RAGService:
     """
     Get the global RAG service instance.
@@ -1191,10 +1304,7 @@ def get_rag_service() -> RAGService:
     Returns:
         RAGService: The singleton RAG service instance.
     """
-    global _rag_service
-    if _rag_service is None:
-        _rag_service = RAGService()
-    return _rag_service
+    return RAGService()
 
 
 async def diagnose(

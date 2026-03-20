@@ -188,12 +188,15 @@ class TestSimilarityCalculation:
 
     def test_identical_texts_have_high_similarity(self):
         """Test that identical texts have similarity close to 1."""
-        import numpy as np
+        import math
 
         def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-            v1 = np.array(vec1)
-            v2 = np.array(vec2)
-            return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+            dot = sum(a * b for a, b in zip(vec1, vec2))
+            norm1 = math.sqrt(sum(a * a for a in vec1))
+            norm2 = math.sqrt(sum(b * b for b in vec2))
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            return dot / (norm1 * norm2)
 
         vec = [0.1] * 768
         similarity = cosine_similarity(vec, vec)
@@ -202,16 +205,15 @@ class TestSimilarityCalculation:
 
     def test_orthogonal_vectors_have_zero_similarity(self):
         """Test that orthogonal vectors have zero similarity."""
-        import numpy as np
+        import math
 
         def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-            v1 = np.array(vec1)
-            v2 = np.array(vec2)
-            dot = np.dot(v1, v2)
-            norm = np.linalg.norm(v1) * np.linalg.norm(v2)
-            if norm == 0:
+            dot = sum(a * b for a, b in zip(vec1, vec2))
+            norm1 = math.sqrt(sum(a * a for a in vec1))
+            norm2 = math.sqrt(sum(b * b for b in vec2))
+            if norm1 == 0 or norm2 == 0:
                 return 0.0
-            return float(dot / norm)
+            return dot / (norm1 * norm2)
 
         # Create orthogonal vectors
         vec1 = [1.0] + [0.0] * 767
@@ -223,12 +225,15 @@ class TestSimilarityCalculation:
 
     def test_similarity_is_symmetric(self):
         """Test that similarity is symmetric: sim(a,b) = sim(b,a)."""
-        import numpy as np
+        import math
 
         def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-            v1 = np.array(vec1)
-            v2 = np.array(vec2)
-            return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+            dot = sum(a * b for a, b in zip(vec1, vec2))
+            norm1 = math.sqrt(sum(a * a for a in vec1))
+            norm2 = math.sqrt(sum(b * b for b in vec2))
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+            return dot / (norm1 * norm2)
 
         vec1 = [0.1, 0.2, 0.3] + [0.0] * 765
         vec2 = [0.3, 0.2, 0.1] + [0.0] * 765
@@ -452,31 +457,29 @@ class TestNormalization:
 
     def test_normalized_vector_has_unit_length(self):
         """Test that normalized vector has unit length."""
-        import numpy as np
+        import math
 
         def normalize(vec: List[float]) -> List[float]:
-            v = np.array(vec)
-            norm = np.linalg.norm(v)
+            norm = math.sqrt(sum(v * v for v in vec))
             if norm == 0:
                 return vec
-            return (v / norm).tolist()
+            return [v / norm for v in vec]
 
         vec = [3.0, 4.0] + [0.0] * 766  # 3-4-5 triangle
         normalized = normalize(vec)
 
-        length = np.linalg.norm(normalized)
+        length = math.sqrt(sum(v * v for v in normalized))
         assert abs(length - 1.0) < 0.0001
 
     def test_zero_vector_normalization(self):
         """Test normalization of zero vector."""
-        import numpy as np
+        import math
 
         def normalize(vec: List[float]) -> List[float]:
-            v = np.array(vec)
-            norm = np.linalg.norm(v)
+            norm = math.sqrt(sum(v * v for v in vec))
             if norm == 0:
                 return vec  # Return as-is
-            return (v / norm).tolist()
+            return [v / norm for v in vec]
 
         zero_vec = [0.0] * 768
         normalized = normalize(zero_vec)

@@ -17,7 +17,7 @@ Endpoints:
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -88,6 +88,20 @@ class DatabaseStats(BaseModel):
     redis: Dict[str, Any]
 
 
+class ConsistencyResponse(BaseModel):
+    """Cross-database consistency check response."""
+
+    checked_at: str
+    pg_dtc_count: int = 0
+    neo4j_dtc_count: int = 0
+    qdrant_vector_count: int = 0
+    missing_in_neo4j: list = []
+    missing_in_qdrant: list = []
+    orphaned_in_neo4j: list = []
+    is_consistent: bool = False
+    errors: list = []
+
+
 # Track startup time for uptime calculation
 _startup_time: Optional[float] = None
 
@@ -115,8 +129,10 @@ async def check_postgres_health() -> ServiceHealth:
             result.fetchone()
 
             # Get table counts for key tables
+            # Whitelist of allowed table names to prevent SQL injection
+            ALLOWED_TABLES = {"dtc_codes", "vehicle_makes", "vehicle_models", "users"}
             table_counts = {}
-            for table in ["dtc_codes", "vehicle_makes", "vehicle_models", "users"]:
+            for table in ALLOWED_TABLES:
                 try:
                     count_result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
                     row = count_result.fetchone()
@@ -180,8 +196,10 @@ async def check_neo4j_health() -> ServiceHealth:
             result.single()
 
             # Get node counts by label
+            # Whitelist of allowed Neo4j labels to prevent Cypher injection
+            ALLOWED_LABELS = {"DTCCode", "Symptom", "Component", "Repair"}
             node_counts = {}
-            for label in ["DTCCode", "Symptom", "Component", "Repair"]:
+            for label in ALLOWED_LABELS:
                 try:
                     count_result = session.run(f"MATCH (n:{label}) RETURN COUNT(n) AS count")
                     record = count_result.single()
@@ -384,7 +402,7 @@ async def liveness_check():
     """
     return LivenessResponse(
         status="alive",
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -435,7 +453,7 @@ async def readiness_check():
     return ReadinessResponse(
         status="ready",
         checks=checks,
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -539,7 +557,7 @@ async def detailed_health_check():
         environment=settings.ENVIRONMENT,
         uptime_seconds=round(uptime, 2),
         services=services,
-        checked_at=datetime.utcnow().isoformat() + "Z",
+        checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -574,5 +592,38 @@ async def database_stats():
         "redis": redis_health.details
         if not isinstance(redis_health, Exception)
         else {"error": str(redis_health)},
-        "checked_at": datetime.utcnow().isoformat() + "Z",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/consistency", response_model=ConsistencyResponse, tags=["Health"])
+async def consistency_check():
+    """
+    Cross-database consistency check.
+
+    Compares DTC codes across PostgreSQL, Neo4j, and Qdrant to detect
+    data synchronization issues. Reports mismatches, orphaned records,
+    and missing entries.
+
+    This is a heavier operation than standard health checks.
+    Intended for admin/monitoring use, not frequent polling.
+
+    Returns:
+        ConsistencyResponse: Consistency report with counts and mismatches
+    """
+    from app.services.consistency_service import ConsistencyService
+
+    service = ConsistencyService()
+    report = await service.check_dtc_consistency()
+
+    return ConsistencyResponse(
+        checked_at=report.checked_at,
+        pg_dtc_count=report.pg_dtc_count,
+        neo4j_dtc_count=report.neo4j_dtc_count,
+        qdrant_vector_count=report.qdrant_vector_count,
+        missing_in_neo4j=report.missing_in_neo4j,
+        missing_in_qdrant=report.missing_in_qdrant,
+        orphaned_in_neo4j=report.orphaned_in_neo4j,
+        is_consistent=report.is_consistent,
+        errors=report.errors,
+    )

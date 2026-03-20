@@ -128,12 +128,17 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+    csrf_token: Optional[str] = None
 
 
 class TokenRefresh(BaseModel):
-    """Schema for token refresh request."""
+    """Schema for token refresh request.
 
-    refresh_token: str
+    The refresh_token field is optional because browser clients
+    send the token via httpOnly cookie instead of the request body.
+    """
+
+    refresh_token: Optional[str] = None
 
 
 class TokenPayload(BaseModel):

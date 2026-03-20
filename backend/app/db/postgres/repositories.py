@@ -12,13 +12,14 @@ Performance Optimizations:
 - Full-text search using PostgreSQL GIN indexes
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Generic, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.sql_utils import escape_ilike
 from app.db.postgres.models import Base, DiagnosisSession, DTCCode, User, VehicleMake, VehicleModel
 
 if TYPE_CHECKING:
@@ -126,7 +127,7 @@ class UserRepository(BaseRepository[User]):
             return False
 
         # Check if lockout period has expired
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if user.locked_until <= now:
             # Lockout expired, reset the counter
             user.locked_until = None
@@ -149,11 +150,13 @@ class UserRepository(BaseRepository[User]):
         from datetime import timedelta
 
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        user.last_failed_login = datetime.utcnow()
+        user.last_failed_login = datetime.now(timezone.utc)
 
         # Lock account if max attempts exceeded
         if user.failed_login_attempts >= self.MAX_FAILED_ATTEMPTS:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=self.LOCKOUT_DURATION_MINUTES)
+            user.locked_until = datetime.now(timezone.utc) + timedelta(
+                minutes=self.LOCKOUT_DURATION_MINUTES
+            )
             await self.db.flush()
             return True
 
@@ -169,7 +172,7 @@ class UserRepository(BaseRepository[User]):
         """
         user.failed_login_attempts = 0
         user.locked_until = None
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         await self.db.flush()
 
     async def update_password(self, user: User, hashed_password: str) -> None:
@@ -196,7 +199,7 @@ class UserRepository(BaseRepository[User]):
         from datetime import timedelta
 
         user.password_reset_token = token
-        user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+        user.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         await self.db.flush()
 
     async def verify_email(self, user: User) -> None:
@@ -285,6 +288,22 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         result = await self.db.execute(select(DTCCode).where(DTCCode.code == code.upper()))
         return result.scalar_one_or_none()
 
+    async def get_by_codes(self, codes: List[str]) -> List[DTCCode]:
+        """
+        Get multiple DTCs by code strings in a single query.
+
+        Args:
+            codes: List of DTC codes to search for.
+
+        Returns:
+            List of matching DTCCode objects.
+        """
+        if not codes:
+            return []
+        upper_codes = [c.upper() for c in codes]
+        result = await self.db.execute(select(DTCCode).where(DTCCode.code.in_(upper_codes)))
+        return list(result.scalars().all())
+
     async def search(
         self,
         query: str,
@@ -304,10 +323,11 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         Returns:
             List of matching DTCCode objects.
         """
+        escaped_query = escape_ilike(query)
         stmt = select(DTCCode).where(
-            (DTCCode.code.ilike(f"%{query}%"))
-            | (DTCCode.description_en.ilike(f"%{query}%"))
-            | (DTCCode.description_hu.ilike(f"%{query}%"))
+            (DTCCode.code.ilike(f"%{escaped_query}%"))
+            | (DTCCode.description_en.ilike(f"%{escaped_query}%"))
+            | (DTCCode.description_hu.ilike(f"%{escaped_query}%"))
         )
 
         if category:
@@ -344,7 +364,7 @@ class VehicleMakeRepository(BaseRepository[VehicleMake]):
     async def search(self, query: str) -> List[VehicleMake]:
         """Search makes by name."""
         result = await self.db.execute(
-            select(VehicleMake).where(VehicleMake.name.ilike(f"%{query}%"))
+            select(VehicleMake).where(VehicleMake.name.ilike(f"%{escape_ilike(query)}%"))
         )
         return list(result.scalars().all())
 
@@ -400,6 +420,63 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         )
         return list(result.scalars().all())
 
+    async def find_recent_duplicate(
+        self,
+        user_id: UUID,
+        dtc_codes: List[str],
+        vehicle_vin: Optional[str] = None,
+        window_minutes: int = 5,
+    ) -> Optional[DiagnosisSession]:
+        """
+        Find a recent diagnosis with the same parameters.
+
+        Checks for duplicate submissions within the given time window
+        by comparing user, DTC codes, and optionally VIN.
+
+        Args:
+            user_id: The user ID.
+            dtc_codes: List of DTC codes.
+            vehicle_vin: Optional VIN.
+            window_minutes: Time window to check for duplicates.
+
+        Returns:
+            The existing session if a duplicate is found, None otherwise.
+        """
+        from datetime import timedelta, timezone
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+
+        # Build query for recent sessions by this user
+        query = (
+            select(DiagnosisSession)
+            .where(
+                and_(
+                    DiagnosisSession.user_id == user_id,
+                    DiagnosisSession.created_at >= cutoff,
+                    DiagnosisSession.is_deleted.is_(False),
+                )
+            )
+            .order_by(DiagnosisSession.created_at.desc())
+            .limit(10)
+        )
+
+        if vehicle_vin:
+            query = query.where(DiagnosisSession.vehicle_vin == vehicle_vin)
+
+        result = await self.db.execute(query)
+        recent_sessions = result.scalars().all()
+
+        # Compare DTC codes (sorted for consistent comparison)
+        sorted_new_codes = sorted(c.upper() for c in dtc_codes)
+
+        for session in recent_sessions:
+            if session.dtc_codes:
+                sorted_existing = sorted(c.upper() for c in session.dtc_codes)
+                if sorted_existing == sorted_new_codes:
+                    return session
+
+        return None
+
     async def get_filtered_history(
         self,
         user_id: UUID,
@@ -438,10 +515,14 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
         ]
 
         if vehicle_make:
-            conditions.append(DiagnosisSession.vehicle_make.ilike(f"%{vehicle_make}%"))
+            conditions.append(
+                DiagnosisSession.vehicle_make.ilike(f"%{escape_ilike(vehicle_make)}%")
+            )
 
         if vehicle_model:
-            conditions.append(DiagnosisSession.vehicle_model.ilike(f"%{vehicle_model}%"))
+            conditions.append(
+                DiagnosisSession.vehicle_model.ilike(f"%{escape_ilike(vehicle_model)}%")
+            )
 
         if vehicle_year:
             conditions.append(DiagnosisSession.vehicle_year == vehicle_year)
@@ -499,7 +580,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             return False
 
         session.is_deleted = True
-        session.deleted_at = datetime.utcnow()
+        session.deleted_at = datetime.now(timezone.utc)
         await self.db.flush()
         return True
 

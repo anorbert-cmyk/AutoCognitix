@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Cookie settings for httpOnly JWT storage
+    COOKIE_DOMAIN: Optional[str] = None  # None = current domain only
+    COOKIE_SECURE: bool = True  # Set to False for local HTTP development
+    COOKIE_SAMESITE: str = "lax"  # "lax" provides CSRF protection for top-level navigations
+
     @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
     @classmethod
     def validate_secrets(cls, v: str, info) -> str:

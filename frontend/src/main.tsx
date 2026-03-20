@@ -2,9 +2,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { initSentry } from './config/sentry'
 import App from './App'
 import { ApiError } from './services/api'
 import './index.css'
+
+// Initialize Sentry before React renders
+initSentry()
 
 /**
  * Custom retry function for TanStack Query
@@ -43,10 +47,10 @@ function onQueryError(error: unknown): void {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes
+      staleTime: 1000 * 60 * 2, // 2 minutes
       retry: shouldRetry,
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: true,
     },
     mutations: {
       retry: 1,

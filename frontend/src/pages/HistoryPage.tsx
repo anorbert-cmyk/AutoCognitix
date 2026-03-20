@@ -138,7 +138,7 @@ export default function HistoryPage() {
   const [page, setPage] = useState(1);
 
   // Try to use API hooks (will fall back to mock data if API fails)
-  const { data: apiHistoryData, isLoading } = useDiagnosisHistory({
+  const { data: apiHistoryData, isLoading, error, refetch } = useDiagnosisHistory({
     skip: (page - 1) * 10,
     limit: 10,
   });
@@ -350,10 +350,35 @@ export default function HistoryPage() {
                       Betöltés...
                     </td>
                   </tr>
-                ) : filteredData.length === 0 ? (
+                ) : error ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center">
+                      <p className="text-red-600 font-bold mb-3">Hiba történt az adatok betöltésekor. Próbálja újra!</p>
+                      <button
+                        onClick={() => refetch()}
+                        className="inline-flex items-center justify-center rounded-lg h-10 bg-[#0055d4] text-white px-5 font-bold uppercase tracking-widest text-xs hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+                      >
+                        Újrapróbálás
+                      </button>
+                    </td>
+                  </tr>
+                ) : filteredData.length === 0 && searchQuery ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                      Nincs találat
+                      A keresés nem hozott eredményt. Próbáljon más szűrőfeltételeket!
+                    </td>
+                  </tr>
+                ) : filteredData.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center">
+                      <p className="text-slate-500 font-medium mb-3">Még nincs diagnosztikai előzmény.</p>
+                      <Link
+                        to="/diagnosis"
+                        className="inline-flex items-center justify-center rounded-lg h-10 bg-[#0055d4] text-white px-5 font-bold uppercase tracking-widest text-xs hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 gap-2"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        Új diagnózis indítása
+                      </Link>
                     </td>
                   </tr>
                 ) : (

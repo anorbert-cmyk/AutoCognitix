@@ -5,7 +5,7 @@
  */
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
@@ -13,39 +13,19 @@ import { DiagnosisResponse, PartWithPrice } from '../services/api';
 import { MaterialIcon } from '../components/ui/MaterialIcon';
 import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
 import { RepairStep } from '../components/features/diagnosis/RepairStep';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
+import AIDisclaimerBadge from '../components/features/diagnosis/AIDisclaimerBadge';
 
-// Autó kép URL - Unsplash vagy fallback
+// Autó kép URL - placehold.co placeholder
 function getVehicleImageUrl(make: string, model: string): string {
-  const searchQuery = encodeURIComponent(`${make} ${model} car professional photo`);
-  return `https://source.unsplash.com/800x600/?${searchQuery}`;
+  return `https://placehold.co/800x600/1a1a2e/e0e0e0?text=${encodeURIComponent(make + ' ' + model)}`;
 }
-
-const fallbackImages: Record<string, string> = {
-  'Toyota': 'https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=800&h=600&fit=crop',
-  'Honda': 'https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?w=800&h=600&fit=crop',
-  'Ford': 'https://images.unsplash.com/photo-1551830820-330a71b99659?w=800&h=600&fit=crop',
-  'BMW': 'https://images.unsplash.com/photo-1555215695-3004980ad54e?w=800&h=600&fit=crop',
-  'Mercedes-Benz': 'https://images.unsplash.com/photo-1618843479619-f3d0d81e4d10?w=800&h=600&fit=crop',
-  'Mercedes': 'https://images.unsplash.com/photo-1618843479619-f3d0d81e4d10?w=800&h=600&fit=crop',
-  'Audi': 'https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?w=800&h=600&fit=crop',
-  'Volkswagen': 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?w=800&h=600&fit=crop',
-  'Tesla': 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=800&h=600&fit=crop',
-  'Skoda': 'https://images.unsplash.com/photo-1609521263047-f8f205293f24?w=800&h=600&fit=crop',
-  'Opel': 'https://images.unsplash.com/photo-1612825173281-9a193378527e?w=800&h=600&fit=crop',
-  'default': 'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=800&h=600&fit=crop',
-};
 
 function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const toast = useToast();
-  const [imageError, setImageError] = useState(false);
-
   // Autó kép URL generálása
   const vehicleImage = useMemo(() => {
-    const make = result.vehicle_make || 'default';
-    if (fallbackImages[make]) {
-      return fallbackImages[make];
-    }
-    return getVehicleImageUrl(result.vehicle_make, result.vehicle_model);
+    return getVehicleImageUrl(result.vehicle_make || 'Auto', result.vehicle_model || '');
   }, [result.vehicle_make, result.vehicle_model]);
 
   const licensePlate = 'N/A';
@@ -54,7 +34,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const engineInfo = 'N/A';
 
   // Elsődleges DTC kód
-  const primaryDTC = result.dtc_codes[0] || 'P0303';
+  const primaryDTC = result.dtc_codes?.[0] || 'P0303';
   const dtcDescription = result.probable_causes[0]?.title || 'Henger 3 Égéskimaradás';
 
   // Ügyfél panasza
@@ -76,7 +56,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
         description: repair.description,
         tools: (repair.tools_needed?.length > 0)
           ? repair.tools_needed.map(t => ({ icon: t.icon_hint || 'handyman', name: t.name }))
-          : repair.parts_needed.slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
+          : (repair.parts_needed ?? []).slice(0, 3).map(part => ({ icon: 'handyman', name: part })),
         expertTip: repair.expert_tips?.[0] || repair.root_cause_explanation || 'Ellenőrizze a kapcsolódó alkatrészeket is a javítás során.',
       }))
     : [];
@@ -179,10 +159,11 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               {/* Vehicle Image */}
               <div className="relative h-56 bg-slate-100 group">
                 <img
-                  src={imageError ? fallbackImages['default'] : vehicleImage}
+                  src={vehicleImage}
                   alt={`${result.vehicle_make} ${result.vehicle_model}`}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  onError={() => setImageError(true)}
+                  loading="lazy"
+                  decoding="async"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-transparent to-transparent"></div>
                 <div className="absolute bottom-5 left-6 text-white">
@@ -243,7 +224,11 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
 
           {/* Right Column - AI Analysis & Repair Steps */}
           <div className="lg:col-span-8 space-y-10">
+            {/* AI Disclaimer - GDPR/EU AI Act compliance */}
+            <AIDisclaimerBadge />
+
             {/* AI Analysis Section */}
+            <SectionErrorBoundary sectionName="AI elemzés">
             <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
               <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/3 group-hover:bg-blue-600/30 transition-colors duration-700"></div>
               <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/3"></div>
@@ -267,8 +252,10 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 <DiagnosticConfidence percentage={confidencePercentage} />
               </div>
             </section>
+            </SectionErrorBoundary>
 
             {/* Repair Steps Section */}
+            <SectionErrorBoundary sectionName="Javítási lépések">
             <section>
               <div className="flex items-center gap-4 mb-10">
                 <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Priorizált javítási terv</h3>
@@ -299,9 +286,11 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 </div>
               )}
             </section>
+            </SectionErrorBoundary>
 
             {/* Parts & Prices Section */}
-            {result.parts_with_prices && result.parts_with_prices.length > 0 && (
+            <SectionErrorBoundary sectionName="Alkatrészek és árak">
+            {result.parts_with_prices && result.parts_with_prices.length > 0 ? (
               <section>
                 <div className="flex items-center gap-4 mb-10">
                   <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Alkatrészek és Árak</h3>
@@ -411,7 +400,15 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                   </div>
                 )}
               </section>
+            ) : (
+              <section>
+                <div className="bg-blue-50 rounded-2xl p-8 border border-blue-100 flex items-center gap-4">
+                  <MaterialIcon name="info" className="text-3xl text-blue-400 flex-shrink-0" />
+                  <p className="text-blue-700 font-medium">Alkatrész árinformáció nem elérhető ehhez a diagnosztikához.</p>
+                </div>
+              </section>
             )}
+            </SectionErrorBoundary>
           </div>
         </div>
       </main>
@@ -424,7 +421,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
             className="w-full sm:w-auto px-6 py-3.5 rounded-lg border border-slate-600 text-slate-200 font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-sm"
           >
             <MaterialIcon name="picture_as_pdf" className="text-xl" />
-            Jelentés mentése PDF-ként
+            Nyomtatás / PDF
           </button>
           <button
             onClick={handlePrintWorksheet}

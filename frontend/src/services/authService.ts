@@ -5,7 +5,7 @@
  * and password management.
  */
 
-import api, { ApiError } from './api'
+import api, { setCsrfToken, getCsrfToken } from './api'
 
 // =============================================================================
 // Types
@@ -36,6 +36,7 @@ export interface AuthTokens {
   access_token: string
   refresh_token: string
   token_type: string
+  csrf_token?: string
 }
 
 export interface UpdateProfileData {
@@ -58,32 +59,44 @@ export interface ResetPasswordData {
 }
 
 // =============================================================================
-// Token Storage
+// Auth State (cookie-based - no localStorage)
 // =============================================================================
 
-const ACCESS_TOKEN_KEY = 'access_token'
-const REFRESH_TOKEN_KEY = 'refresh_token'
+// Track authentication state in memory. Tokens are stored in httpOnly cookies
+// (not accessible to JavaScript). The CSRF token is stored in memory via api.ts.
+
+let authenticated = false
 
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_TOKEN_KEY)
+  // Access token is in httpOnly cookie, not accessible to JS.
+  // Return null - callers should rely on isAuthenticated() instead.
+  return null
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY)
+  // Refresh token is in httpOnly cookie, not accessible to JS.
+  return null
 }
 
 export function setTokens(tokens: AuthTokens): void {
-  localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token)
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token)
+  // Tokens are set as httpOnly cookies by the backend.
+  // We only store the CSRF token in memory.
+  if (tokens.csrf_token) {
+    setCsrfToken(tokens.csrf_token)
+  }
+  authenticated = true
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_TOKEN_KEY)
-  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  // Cookies are cleared by the backend on logout.
+  // We only clear the in-memory CSRF token.
+  setCsrfToken(null)
+  authenticated = false
 }
 
 export function isAuthenticated(): boolean {
-  return !!getAccessToken()
+  // Check if we have a CSRF token (set on login) as a proxy for auth state
+  return authenticated || !!getCsrfToken()
 }
 
 // =============================================================================
@@ -100,7 +113,8 @@ export async function register(data: RegisterData): Promise<User> {
 
 /**
  * Login with email and password.
- * Returns tokens and stores them in localStorage.
+ * Tokens are set as httpOnly cookies by the backend.
+ * CSRF token is stored in memory for state-changing requests.
  */
 export async function login(credentials: LoginCredentials): Promise<AuthTokens> {
   // OAuth2 password flow requires form data
@@ -114,21 +128,19 @@ export async function login(credentials: LoginCredentials): Promise<AuthTokens> 
     },
   })
 
+  // Store CSRF token in memory (tokens are in httpOnly cookies)
   setTokens(response.data)
   return response.data
 }
 
 /**
  * Logout the current user.
- * Invalidates tokens on server and clears local storage.
+ * Server invalidates tokens and clears httpOnly cookies.
  */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken()
-
   try {
-    await api.post('/auth/logout', {
-      refresh_token: refreshToken,
-    })
+    // Cookies (access + refresh tokens) are sent automatically
+    await api.post('/auth/logout')
   } catch (error) {
     // Continue with local logout even if server request fails
     console.warn('Server logout failed, proceeding with local logout')
@@ -138,19 +150,13 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * Refresh the access token using the refresh token.
+ * Refresh the access token using the refresh token cookie.
  */
 export async function refreshTokens(): Promise<AuthTokens> {
-  const refreshToken = getRefreshToken()
+  // Refresh token is sent automatically via httpOnly cookie
+  const response = await api.post<AuthTokens>('/auth/refresh')
 
-  if (!refreshToken) {
-    throw new ApiError('Nincs refresh token', 401, 'Nincs refresh token')
-  }
-
-  const response = await api.post<AuthTokens>('/auth/refresh', {
-    refresh_token: refreshToken,
-  })
-
+  // Update CSRF token in memory
   setTokens(response.data)
   return response.data
 }

@@ -20,6 +20,7 @@ import { MaterialIcon } from '../components/ui/MaterialIcon';
 import { DiagnosticConfidence } from '../components/features/diagnosis/DiagnosticConfidence';
 import { RepairStep } from '../components/features/diagnosis/RepairStep';
 import { PartStoreCardGrid } from '../components/features/diagnosis/PartStoreCard';
+import SectionErrorBoundary from '../components/SectionErrorBoundary';
 
 function DemoBanner({ onStartDiagnosis }: { onStartDiagnosis: () => void }) {
   return (
@@ -238,105 +239,114 @@ export default function DemoResultPage() {
           {/* Right Column - AI Analysis & Repair Steps */}
           <div className="lg:col-span-8 space-y-10">
             {/* AI Analysis Section */}
-            <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
-              <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/3 group-hover:bg-blue-600/30 transition-colors duration-700"></div>
-              <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/3"></div>
+            <SectionErrorBoundary sectionName="AI Diagnosztikai Elemzés">
+              <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
+                <div className="absolute top-0 right-0 w-80 h-80 bg-blue-600/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/3 group-hover:bg-blue-600/30 transition-colors duration-700"></div>
+                <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/3"></div>
 
-              <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 backdrop-blur-md border border-white/10">
-                      <MaterialIcon name="psychology" className="text-blue-200" />
+                <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/10 backdrop-blur-md border border-white/10">
+                        <MaterialIcon name="psychology" className="text-blue-200" />
+                      </div>
+                      <h3 className="text-xl font-bold tracking-tight">AI Diagnosztikai Elemzés</h3>
                     </div>
-                    <h3 className="text-xl font-bold tracking-tight">AI Diagnosztikai Elemzés</h3>
+                    <p className="text-white/90 leading-relaxed mb-6 text-lg font-light">
+                      A rendszer <span className="text-white font-bold decoration-blue-400 underline underline-offset-4 decoration-2">{primaryDTC} hibakódot</span> és {result.dtc_codes.length - 1} kapcsolódó kódot detektált,
+                      amelyek a motorvezérlő (ECU) által észlelt főtengely-szöggyorsulás ingadozásra utalnak.
+                    </p>
+                    <div className="text-sm text-slate-300 leading-relaxed space-y-4 border-t border-white/10 pt-4 whitespace-pre-line">
+                      <p>{result.root_cause_analysis}</p>
+                    </div>
                   </div>
-                  <p className="text-white/90 leading-relaxed mb-6 text-lg font-light">
-                    A rendszer <span className="text-white font-bold decoration-blue-400 underline underline-offset-4 decoration-2">{primaryDTC} hibakódot</span> és {result.dtc_codes.length - 1} kapcsolódó kódot detektált,
-                    amelyek a motorvezérlő (ECU) által észlelt főtengely-szöggyorsulás ingadozásra utalnak.
-                  </p>
-                  <div className="text-sm text-slate-300 leading-relaxed space-y-4 border-t border-white/10 pt-4 whitespace-pre-line">
-                    <p>{result.root_cause_analysis}</p>
-                  </div>
-                </div>
 
-                <DiagnosticConfidence percentage={confidencePercentage} />
-              </div>
-            </section>
+                  <DiagnosticConfidence percentage={confidencePercentage} />
+                </div>
+              </section>
+            </SectionErrorBoundary>
 
             {/* Probable Causes */}
-            <section>
-              <div className="flex items-center gap-4 mb-6">
-                <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Lehetséges okok</h3>
-                <div className="h-px flex-1 bg-slate-200"></div>
-              </div>
-              <div className="space-y-4">
-                {result.probable_causes.map((cause, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <h4 className="text-base font-bold text-slate-900">{cause.title}</h4>
-                      <span
-                        className={`flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
-                          cause.confidence >= 0.8
-                            ? 'bg-green-100 text-green-700'
-                            : cause.confidence >= 0.5
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {Math.round(cause.confidence * 100)}%
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-600 leading-relaxed">{cause.description}</p>
-                    <div className="flex items-center gap-2 mt-3">
-                      {cause.related_dtc_codes.map((code) => (
-                        <span key={code} className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono font-bold">
-                          {code}
+            <SectionErrorBoundary sectionName="Lehetséges okok">
+              <section>
+                <div className="flex items-center gap-4 mb-6">
+                  <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Lehetséges okok</h3>
+                  <div className="h-px flex-1 bg-slate-200"></div>
+                </div>
+                <div className="space-y-4">
+                  {result.probable_causes.map((cause, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-4 mb-3">
+                        <h4 className="text-base font-bold text-slate-900">{cause.title}</h4>
+                        <span
+                          className={`flex-shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                            cause.confidence >= 0.8
+                              ? 'bg-green-100 text-green-700'
+                              : cause.confidence >= 0.5
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {Math.round(cause.confidence * 100)}%
                         </span>
-                      ))}
-                      {cause.components.map((comp) => (
-                        <span key={comp} className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
-                          {comp}
-                        </span>
-                      ))}
+                      </div>
+                      <p className="text-sm text-slate-600 leading-relaxed">{cause.description}</p>
+                      <div className="flex items-center gap-2 mt-3">
+                        {cause.related_dtc_codes.map((code) => (
+                          <span key={code} className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono font-bold">
+                            {code}
+                          </span>
+                        ))}
+                        {cause.components.map((comp) => (
+                          <span key={comp} className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                            {comp}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+                  ))}
+                </div>
+              </section>
+            </SectionErrorBoundary>
 
             {/* Repair Steps Section */}
-            <section>
-              <div className="flex items-center gap-4 mb-10">
-                <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Priorizált javítási terv</h3>
-                <div className="h-px flex-1 bg-slate-200"></div>
-                <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">{repairSteps.length} lépés</span>
-              </div>
+            <SectionErrorBoundary sectionName="Javítási terv">
+              <section>
+                <div className="flex items-center gap-4 mb-10">
+                  <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Priorizált javítási terv</h3>
+                  <div className="h-px flex-1 bg-slate-200"></div>
+                  <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">{repairSteps.length} lépés</span>
+                </div>
 
-              <div className="relative pl-4 md:pl-6 space-y-12">
-                <div className="absolute left-[28px] md:left-[36px] top-6 bottom-6 w-0.5 bg-slate-200 rounded-full"></div>
-                {repairSteps.map((step) => (
-                  <RepairStep
-                    key={step.number}
-                    number={step.number}
-                    title={step.title}
-                    description={step.description}
-                    tools={step.tools}
-                    expertTip={step.expertTip}
-                  />
-                ))}
-              </div>
-            </section>
+                <div className="relative pl-4 md:pl-6 space-y-12">
+                  <div className="absolute left-[28px] md:left-[36px] top-6 bottom-6 w-0.5 bg-slate-200 rounded-full"></div>
+                  {repairSteps.map((step) => (
+                    <RepairStep
+                      key={step.number}
+                      number={step.number}
+                      title={step.title}
+                      description={step.description}
+                      tools={step.tools}
+                      expertTip={step.expertTip}
+                    />
+                  ))}
+                </div>
+              </section>
+            </SectionErrorBoundary>
 
             {/* Parts Store Cards Section */}
-            <PartStoreCardGrid parts={demoParts} />
+            <SectionErrorBoundary sectionName="Alkatrészek és árak">
+              <PartStoreCardGrid parts={demoParts} />
+            </SectionErrorBoundary>
 
             {/* Total Cost Estimate Card */}
             {result.total_cost_estimate && (
-              <section>
-                <div className="bg-gradient-to-br from-[#0D1B2A] to-[#1B2838] rounded-2xl p-8 text-white shadow-xl relative overflow-hidden">
+              <SectionErrorBoundary sectionName="Becsült javítási költség">
+                <section>
+                  <div className="bg-gradient-to-br from-[#0D1B2A] to-[#1B2838] rounded-2xl p-8 text-white shadow-xl relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[60px] -translate-y-1/2 translate-x-1/3"></div>
                   <div className="relative z-10">
                     <div className="flex items-center gap-3 mb-6">
@@ -394,49 +404,52 @@ export default function DemoResultPage() {
                     )}
                   </div>
                 </div>
-              </section>
+                </section>
+              </SectionErrorBoundary>
             )}
 
             {/* Sources Section */}
-            <section>
-              <div className="flex items-center gap-4 mb-6">
-                <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Felhasznált források</h3>
-                <div className="h-px flex-1 bg-slate-200"></div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {result.sources.map((source, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-start gap-3"
-                  >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
-                      <MaterialIcon
-                        name={
-                          source.type === 'database' ? 'storage' :
-                          source.type === 'tsb' ? 'description' :
-                          source.type === 'forum' ? 'forum' :
-                          source.type === 'manual' ? 'menu_book' : 'source'
-                        }
-                        className="text-base text-slate-500"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900 truncate">{source.title}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{source.type}</span>
-                        <span className="text-[10px] text-slate-400">·</span>
-                        <span className={`text-[10px] font-bold ${
-                          source.relevance_score >= 0.8 ? 'text-green-600' :
-                          source.relevance_score >= 0.5 ? 'text-amber-600' : 'text-slate-500'
-                        }`}>
-                          {Math.round(source.relevance_score * 100)}% relevancia
-                        </span>
+            <SectionErrorBoundary sectionName="Felhasznált források">
+              <section>
+                <div className="flex items-center gap-4 mb-6">
+                  <h3 className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">Felhasznált források</h3>
+                  <div className="h-px flex-1 bg-slate-200"></div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {result.sources.map((source, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-start gap-3"
+                    >
+                      <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                        <MaterialIcon
+                          name={
+                            source.type === 'database' ? 'storage' :
+                            source.type === 'tsb' ? 'description' :
+                            source.type === 'forum' ? 'forum' :
+                            source.type === 'manual' ? 'menu_book' : 'source'
+                          }
+                          className="text-base text-slate-500"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-900 truncate">{source.title}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{source.type}</span>
+                          <span className="text-[10px] text-slate-400">·</span>
+                          <span className={`text-[10px] font-bold ${
+                            source.relevance_score >= 0.8 ? 'text-green-600' :
+                            source.relevance_score >= 0.5 ? 'text-amber-600' : 'text-slate-500'
+                          }`}>
+                            {Math.round(source.relevance_score * 100)}% relevancia
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
+                  ))}
+                </div>
+              </section>
+            </SectionErrorBoundary>
           </div>
         </div>
       </main>
