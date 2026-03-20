@@ -22,14 +22,19 @@ describe('DemoResultPage', () => {
 
   it('shows P0301 and P0304 as secondary DTC codes', () => {
     render(<DemoResultPage />);
-    expect(screen.getByText('P0301')).toBeInTheDocument();
-    expect(screen.getByText('P0304')).toBeInTheDocument();
+    // These codes appear in the DTC box and in probable causes sections
+    const p0301 = screen.getAllByText('P0301');
+    expect(p0301.length).toBeGreaterThanOrEqual(1);
+    const p0304 = screen.getAllByText('P0304');
+    expect(p0304.length).toBeGreaterThanOrEqual(1);
   });
 
   it('displays all 6 parts with names', () => {
     render(<DemoResultPage />);
     for (const part of demoParts) {
-      expect(screen.getByText(part.name)).toBeInTheDocument();
+      // Some part names may appear in multiple places (card + repair steps)
+      const elements = screen.getAllByText(part.name);
+      expect(elements.length).toBeGreaterThanOrEqual(1);
     }
   });
 

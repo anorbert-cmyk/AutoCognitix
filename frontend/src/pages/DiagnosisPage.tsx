@@ -404,53 +404,61 @@ export default function DiagnosisPage() {
 
         {/* Alsó kártyák */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Legutóbbi 1 */}
-          <div
-            className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
-            onClick={() => recentItems[0] && navigate(`/diagnosis/${recentItems[0].id}`)}
-          >
-            <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
-              <Clock className="h-5 w-5" aria-hidden="true" />
+          {/* Legutóbbi 1 - csak ha van adat */}
+          {recentItems[0] && (
+            <div
+              className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/diagnosis/${recentItems[0].id}`)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/diagnosis/${recentItems[0].id}`); } }}
+            >
+              <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
+                <Clock className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900">
+                  Legutóbbi: {recentItems[0].vehicle_make} {recentItems[0].vehicle_model}
+                </h4>
+                <p className="text-sm text-slate-500 mt-1">
+                  <span className="font-mono text-[#2563eb] font-semibold">
+                    {recentItems[0].dtc_codes?.[0]}
+                  </span>
+                </p>
+                <span className="text-xs text-[#2563eb] font-bold mt-2 inline-block">
+                  Jelentés megtekintése
+                </span>
+              </div>
             </div>
-            <div>
-              <h4 className="font-bold text-slate-900">
-                Legutóbbi: {recentItems[0]?.vehicle_make || 'Toyota'} {recentItems[0]?.vehicle_model || 'Camry'}
-              </h4>
-              <p className="text-sm text-slate-500 mt-1">
-                <span className="font-mono text-[#2563eb] font-semibold">
-                  {recentItems[0]?.dtc_codes?.[0] || 'P0420'}
-                </span>{' '}
-                - Katalizátor rendszer hatásfoka küszöb alatt
-              </p>
-              <button className="text-xs text-[#2563eb] font-bold mt-2 hover:underline">
-                Jelentés megtekintése
-              </button>
-            </div>
-          </div>
+          )}
 
-          {/* Legutóbbi 2 */}
-          <div
-            className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
-            onClick={() => recentItems[1] && navigate(`/diagnosis/${recentItems[1].id}`)}
-          >
-            <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
-              <Clock className="h-5 w-5" aria-hidden="true" />
+          {/* Legutóbbi 2 - csak ha van adat */}
+          {recentItems[1] && (
+            <div
+              className="p-5 rounded-xl bg-white border border-slate-200 flex items-start gap-4 shadow-sm cursor-pointer hover:border-[#2563eb] hover:shadow-md transition-all"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/diagnosis/${recentItems[1].id}`)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/diagnosis/${recentItems[1].id}`); } }}
+            >
+              <div className="bg-slate-100 text-slate-500 p-3 rounded-lg">
+                <Clock className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900">
+                  Legutóbbi: {recentItems[1].vehicle_make} {recentItems[1].vehicle_model}
+                </h4>
+                <p className="text-sm text-slate-500 mt-1">
+                  <span className="font-mono text-[#2563eb] font-semibold">
+                    {recentItems[1].dtc_codes?.[0]}
+                  </span>
+                </p>
+                <span className="text-xs text-[#2563eb] font-bold mt-2 inline-block">
+                  Jelentés megtekintése
+                </span>
+              </div>
             </div>
-            <div>
-              <h4 className="font-bold text-slate-900">
-                Legutóbbi: {recentItems[1]?.vehicle_make || 'Ford'} {recentItems[1]?.vehicle_model || 'F-150'}
-              </h4>
-              <p className="text-sm text-slate-500 mt-1">
-                <span className="font-mono text-[#2563eb] font-semibold">
-                  {recentItems[1]?.dtc_codes?.[0] || 'P0303'}
-                </span>{' '}
-                - 3. henger gyújtáskimaradás észlelve
-              </p>
-              <button className="text-xs text-[#2563eb] font-bold mt-2 hover:underline">
-                Jelentés megtekintése
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* Segítség kártya */}
           <div className="p-5 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">

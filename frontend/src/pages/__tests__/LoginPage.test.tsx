@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '../../test/test-utils';
+import { render, screen, waitFor, fireEvent } from '../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import LoginPage from '../LoginPage';
 
@@ -76,12 +76,11 @@ describe('LoginPage', () => {
   });
 
   it('should show validation error when email is empty on submit', async () => {
-    const user = userEvent.setup();
     render(<LoginPage />);
 
-    // Type only password, leave email empty
-    await user.type(screen.getByLabelText('Jelszo'), 'password123');
-    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+    // Use fireEvent.submit to bypass browser-level required validation
+    const form = screen.getByRole('button', { name: /bejelentkezes/i }).closest('form')!;
+    fireEvent.submit(form);
 
     await waitFor(() => {
       expect(screen.getByText('Kerem adja meg az email cimet')).toBeInTheDocument();
@@ -94,7 +93,10 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     await user.type(screen.getByLabelText('Email cim'), 'test@example.com');
-    await user.click(screen.getByRole('button', { name: /bejelentkezes/i }));
+
+    // Use fireEvent.submit to bypass browser-level required validation
+    const form = screen.getByRole('button', { name: /bejelentkezes/i }).closest('form')!;
+    fireEvent.submit(form);
 
     await waitFor(() => {
       expect(screen.getByText('Kerem adja meg a jelszot')).toBeInTheDocument();
