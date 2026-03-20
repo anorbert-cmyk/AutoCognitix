@@ -54,7 +54,7 @@ async def is_neo4j_available() -> bool:
         if now - _neo4j_last_check < NEO4J_CHECK_INTERVAL:
             return _neo4j_available
         try:
-            await asyncio.to_thread(lambda: db.cypher_query("RETURN 1"))
+            await asyncio.to_thread(lambda: db.cypher_query("RETURN 1", timeout=5))
             _neo4j_available = True
         except Exception:
             _neo4j_available = False
@@ -678,8 +678,9 @@ async def delete_user_data(user_id: str) -> bool:
 
         await asyncio.to_thread(
             db.cypher_query,
-            "MATCH (n {user_id: $uid}) DETACH DELETE n",
+            "MATCH (n:UserSession {user_id: $uid}) DETACH DELETE n",
             {"uid": user_id},
+            timeout=5,
         )
         logger.info(f"Neo4j GDPR cleanup completed for user {user_id}")
         return True

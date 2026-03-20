@@ -39,6 +39,8 @@ class InMemoryRateLimiter:
     Note: Not suitable for multi-instance deployments.
     """
 
+    MAX_TRACKED_CLIENTS = 10000  # Prevent unbounded memory growth under DDoS
+
     def __init__(self) -> None:
         # Structure: {key: [(timestamp, count), ...]}
         self._requests: Dict[str, list] = defaultdict(list)
@@ -67,6 +69,16 @@ class InMemoryRateLimiter:
             Tuple of (allowed, remaining, retry_after_seconds)
         """
         now = time.time()
+
+        # Evict oldest entries if memory limit exceeded
+        if len(self._requests) > self.MAX_TRACKED_CLIENTS:
+            oldest_keys = sorted(
+                self._requests.keys(),
+                key=lambda k: max((ts for ts, _ in self._requests[k]), default=0),
+            )[: len(self._requests) - self.MAX_TRACKED_CLIENTS]
+            for old_key in oldest_keys:
+                del self._requests[old_key]
+                self._blocked.pop(old_key, None)
 
         # Check if blocked
         if key in self._blocked:

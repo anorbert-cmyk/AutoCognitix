@@ -35,7 +35,11 @@ from app.api.v1.schemas.diagnosis import (
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import DTCCode
-from app.db.postgres.repositories import DiagnosisSessionRepository, DTCCodeRepository
+from app.db.postgres.repositories import (
+    DiagnosisSessionRepository,
+    DTCCodeBatchRepository,
+    DTCCodeRepository,
+)
 from app.services.embedding_service import preprocess_hungarian
 from app.services.nhtsa_service import (
     Complaint,
@@ -319,22 +323,27 @@ class DiagnosisService:
         validated_codes: List[DTCCode] = []
         unknown_codes: List[str] = []
 
+        # Validate format first, collect valid codes
+        valid_format_codes: List[str] = []
         for code in dtc_codes:
             code_upper = code.upper().strip()
-
-            # Basic format validation
             if not self._is_valid_dtc_format(code_upper):
                 logger.warning(f"Invalid DTC format: {sanitize_log(code)}")
                 continue
+            valid_format_codes.append(code_upper)
 
-            # Fetch from database
-            dtc_detail = await self.dtc_repository.get_by_code(code_upper)
+        # Batch fetch all valid codes in single query (avoids N+1)
+        if valid_format_codes:
+            batch_repo = DTCCodeBatchRepository(self.db)
+            found_codes = await batch_repo.get_batch(valid_format_codes)
 
-            if dtc_detail:
-                validated_codes.append(dtc_detail)
-            else:
-                unknown_codes.append(code_upper)
-                logger.info(f"Unknown DTC code (not in database): {sanitize_log(code_upper)}")
+            for code_upper in valid_format_codes:
+                dtc_detail = found_codes.get(code_upper)
+                if dtc_detail:
+                    validated_codes.append(dtc_detail)
+                else:
+                    unknown_codes.append(code_upper)
+                    logger.info(f"Unknown DTC code (not in database): {sanitize_log(code_upper)}")
 
         if unknown_codes:
             logger.warning(

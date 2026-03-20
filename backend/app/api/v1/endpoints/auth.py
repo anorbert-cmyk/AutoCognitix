@@ -419,6 +419,9 @@ async def login(
     user = await repository.get_by_email(form_data.username.lower())
 
     if not user:
+        # Timing-safe: always run bcrypt to prevent user enumeration via response timing
+        _dummy_hash = "$2b$12$LJ3m4ys3Lz0qtL0Gq.X7/.bN.qKGmF5E3pXbR6V5q0jHdFg6Cq0TS"
+        verify_password(form_data.password, _dummy_hash)
         logger.warning(f"Login attempt with unknown email: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

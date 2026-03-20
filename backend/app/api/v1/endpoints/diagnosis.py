@@ -485,6 +485,16 @@ async def delete_diagnosis(
 
         await db.commit()
 
+        # Invalidate cached diagnosis data
+        try:
+            from app.db.redis_cache import get_cache_service
+
+            cache = get_cache_service()
+            if cache and not cache.is_circuit_open():
+                await cache.delete_pattern(f"api:diagnosis:{diagnosis_id}*")
+        except Exception:
+            pass  # Best-effort cache cleanup
+
         return DeleteResponse(
             success=True,
             message="Diagnosis successfully deleted",
