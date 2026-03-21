@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Wrench, Zap, Shield, ArrowRight, Eye } from 'lucide-react'
+import { Wrench, Zap, Shield, ArrowRight, Eye, ClipboardCheck, Calculator, MessageSquare, MapPin } from 'lucide-react'
 
 export default function HomePage() {
   return (
@@ -86,6 +86,74 @@ export default function HomePage() {
                 Kapjon részletes diagnózist lehetséges okokkal és javítási javaslatokkal.
               </p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* New Features Section */}
+      <section className="py-24 bg-white">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              Új funkciók
+            </h2>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              Fedezze fel az új eszközöket a jármű karbantartásához és javításához.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Link to="/inspection" className="card p-8 text-center hover:shadow-lg transition-shadow group">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <ClipboardCheck className="h-8 w-8 text-primary-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                Műszaki Vizsga Felkészítő
+              </h3>
+              <p className="text-gray-600 mb-4">
+                DTC kódok alapján elemezze, milyen kockázattal járna a műszaki vizsgán.
+              </p>
+              <ArrowRight className="h-5 w-5 text-primary-600 mx-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+
+            <Link to="/calculator" className="card p-8 text-center hover:shadow-lg transition-shadow group">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Calculator className="h-8 w-8 text-primary-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                Megéri Megjavítani?
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Hasonlítsa össze a javítási költséget a jármű piaci értékével.
+              </p>
+              <ArrowRight className="h-5 w-5 text-primary-600 mx-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+
+            <Link to="/chat" className="card p-8 text-center hover:shadow-lg transition-shadow group">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <MessageSquare className="h-8 w-8 text-primary-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                AI Chat Asszisztens
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Beszélgessen az AI-val magyarul a jármű problémáiról.
+              </p>
+              <ArrowRight className="h-5 w-5 text-primary-600 mx-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
+
+            <Link to="/services" className="card p-8 text-center hover:shadow-lg transition-shadow group">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <MapPin className="h-8 w-8 text-primary-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                Szerviz Összehasonlítás
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Keresse meg a legközelebbi szervizeket interaktív térképen.
+              </p>
+              <ArrowRight className="h-5 w-5 text-primary-600 mx-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+            </Link>
           </div>
         </div>
       </section>

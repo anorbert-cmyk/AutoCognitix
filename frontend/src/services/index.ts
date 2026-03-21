@@ -129,5 +129,23 @@ export type {
   User,
 } from './authService'
 
+// Service Shop Service
+export {
+  formatPriceLevel,
+  getServiceTypeLabelHu,
+  getPriceLevelLabelHu,
+  getShopById,
+  getRegions,
+  searchShops,
+  serviceShopService,
+} from './serviceShopService'
+
+export type {
+  Region,
+  ServiceSearchParams,
+  ServiceSearchResponse,
+  ServiceShop,
+} from './serviceShopService'
+
 // Hooks
 export * from './hooks'
