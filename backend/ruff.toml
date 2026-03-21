@@ -44,6 +44,7 @@ ignore = [
     "B008",    # Function call in default argument (needed for FastAPI Depends)
     "B904",    # Within an except clause, raise exceptions with raise ... from err
     "PLR0913", # Too many arguments
+    "PLR0915", # Too many statements (streaming endpoints)
     "PLR2004", # Magic value used in comparison
     "ARG001",  # Unused function argument (often needed for interface compliance)
     "ARG002",  # Unused method argument

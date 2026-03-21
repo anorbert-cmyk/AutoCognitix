@@ -13,7 +13,7 @@ Performance Optimizations:
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Generic, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
+from typing import Any, cast, Dict, Generic, List, Optional, TYPE_CHECKING, Tuple, TypeVar, Union
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select, text
@@ -54,7 +54,7 @@ class BaseRepository(Generic[ModelType]):
     async def get(self, id: Union[str, int, UUID]) -> Optional[ModelType]:
         """Get a single record by ID."""
         result = await self.db.execute(select(self.model).where(self.model.id == id))  # type: ignore[attr-defined]
-        return result.scalar_one_or_none()
+        return cast("Optional[ModelType]", result.scalar_one_or_none())
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> List[ModelType]:
         """Get all records with pagination."""
@@ -111,7 +111,7 @@ class UserRepository(BaseRepository[User]):
             User if found, None otherwise.
         """
         result = await self.db.execute(select(User).where(User.email == email))
-        return result.scalar_one_or_none()
+        return cast("Optional[User]", result.scalar_one_or_none())
 
     async def is_account_locked(self, user: User) -> bool:
         """
@@ -286,7 +286,7 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
             DTCCode if found, None otherwise.
         """
         result = await self.db.execute(select(DTCCode).where(DTCCode.code == code.upper()))
-        return result.scalar_one_or_none()
+        return cast("Optional[DTCCode]", result.scalar_one_or_none())
 
     async def get_by_codes(self, codes: List[str]) -> List[DTCCode]:
         """
@@ -473,7 +473,7 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
             if session.dtc_codes:
                 sorted_existing = sorted(c.upper() for c in session.dtc_codes)
                 if sorted_existing == sorted_new_codes:
-                    return session
+                    return cast("DiagnosisSession", session)
 
         return None
 

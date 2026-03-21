@@ -831,7 +831,7 @@ eventSource.onmessage = (event) => {
 **Recommended for:** Long-running diagnoses where real-time feedback improves UX.
     """,
 )
-async def analyze_vehicle_stream(  # noqa: PLR0915
+async def analyze_vehicle_stream(
     request: DiagnosisStreamRequest,
     http_request: Request,
     db: AsyncSession = Depends(get_db),
