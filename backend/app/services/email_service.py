@@ -325,7 +325,11 @@ class EmailService:
             "email": to_email,
             "type": email_type,
             "language": language,
-            "base_url": getattr(settings, "LANDING_PAGE_URL", "https://autocognitix-landing-production.up.railway.app"),
+            "base_url": getattr(
+                settings,
+                "LANDING_PAGE_URL",
+                "https://autocognitix-landing-production.up.railway.app",
+            ),
         }
 
         if token:
@@ -337,7 +341,9 @@ class EmailService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(webhook_url, json=payload)
                 if response.status_code == 200:
-                    logger.info(f"Email sent via n8n: {to_email} (type={email_type}, lang={language})")
+                    logger.info(
+                        f"Email sent via n8n: {to_email} (type={email_type}, lang={language})"
+                    )
                     return True
                 else:
                     logger.warning(
