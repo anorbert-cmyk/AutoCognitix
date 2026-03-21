@@ -218,6 +218,10 @@ def create_application() -> FastAPI:
             "description": "Vehicle information management. Decode VINs, lookup vehicle makes/models, and retrieve NHTSA recall and complaint data.",
         },
         {
+            "name": "Newsletter",
+            "description": "Newsletter subscription management. Subscribe, confirm, and unsubscribe from the AutoCognitix newsletter. Public endpoints, no auth required.",
+        },
+        {
             "name": "Metrics",
             "description": "Prometheus metrics for monitoring. Track request counts, latencies, and application health metrics.",
         },
@@ -332,17 +336,19 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         return response
 
     # CSRF protection middleware - double-submit cookie pattern
-    # Exclude health checks, metrics, and docs from CSRF validation
-    # CSRF protection excluded for API endpoints:
-    # - JSON APIs are protected by Content-Type + CORS (not vulnerable to simple CSRF)
-    # - JWT Bearer tokens provide authentication
-    # - SameSite cookies prevent cookie-based CSRF
+    # Exclude only safe endpoints from CSRF validation:
+    # - Health checks (GET only)
+    # - Metrics (GET only)
+    # - API docs (GET only)
+    # State-changing API operations (POST/PUT/DELETE) require CSRF tokens
     application.add_middleware(
         CSRFMiddleware,
         exclude_paths=[
             "/health",
             "/metrics",
-            "/api/v1",
+            "/api/v1/docs",
+            "/api/v1/openapi.json",
+            "/api/v1/redoc",
         ],
     )
 

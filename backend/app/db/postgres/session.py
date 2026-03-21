@@ -42,10 +42,10 @@ logger = get_logger(__name__)
 # - pool_timeout: Wait time before raising TimeoutError
 # - pool_pre_ping: Test connections before use (detect stale connections)
 
-POOL_SIZE = int((settings.DEBUG and 5) or 10)  # 10 per worker (2 workers x 10 = 20 baseline)
-MAX_OVERFLOW = int((settings.DEBUG and 10) or 20)  # Max 30 per worker, 60 total
-POOL_RECYCLE = 1800  # Recycle connections every 30 minutes
-POOL_TIMEOUT = 30  # 30 second timeout for acquiring connection
+POOL_SIZE = settings.DB_POOL_SIZE  # Size of the connection pool
+MAX_OVERFLOW = settings.DB_MAX_OVERFLOW  # Maximum overflow connections
+POOL_RECYCLE = settings.DB_POOL_RECYCLE  # Recycle connections after N seconds
+POOL_TIMEOUT = settings.DB_POOL_TIMEOUT  # Timeout for acquiring connection
 
 # =============================================================================
 # Engine Configuration
@@ -88,7 +88,11 @@ engine = create_async_engine(
     },
 )
 
-logger.info(f"Database engine initialized with pool_size={POOL_SIZE}, max_overflow={MAX_OVERFLOW}")
+logger.info(
+    f"Database engine initialized with pool_size={settings.DB_POOL_SIZE}, "
+    f"max_overflow={settings.DB_MAX_OVERFLOW}, pool_recycle={settings.DB_POOL_RECYCLE}, "
+    f"pool_timeout={settings.DB_POOL_TIMEOUT}"
+)
 
 # Create async session factory with optimized settings
 async_session_maker = async_sessionmaker(

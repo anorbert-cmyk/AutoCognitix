@@ -1,0 +1,371 @@
+{
+  "name": "WF5 — Newsletter Double Opt-In Email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "newsletter-email",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Newsletter Email Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "newsletter-email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-type",
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "confirm",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-email-type",
+      "name": "Route by type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-lang",
+              "leftValue": "={{ $json.body.language }}",
+              "rightValue": "hu",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "confirm-lang-check",
+      "name": "Confirm: HU or EN?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "subject-hu",
+              "name": "subject",
+              "value": "AutoCognitix — Erősítsd meg a feliratkozásod",
+              "type": "string"
+            },
+            {
+              "id": "html-hu",
+              "name": "html",
+              "value": "={{ (() => { const email = $json.body.email; const token = $json.body.token; const baseUrl = $json.body.base_url || 'https://autocognitix-landing-production.up.railway.app'; const confirmUrl = `${baseUrl}/hu/confirm.html?token=${token}`; return `<!DOCTYPE html><html><head><meta charset='utf-8'></head><body style='margin:0;padding:0;font-family:Funnel Sans,Arial,sans-serif;background:#F2F2F4'><div style='max-width:600px;margin:0 auto;padding:40px 20px'><div style='background:#12110E;border-radius:12px;padding:32px;text-align:center;margin-bottom:24px'><h1 style='color:#fff;font-size:24px;margin:0;font-weight:700'>AutoCognitix</h1><p style='color:rgba(255,255,255,0.6);font-size:13px;margin:8px 0 0;letter-spacing:1px;text-transform:uppercase'>AI gépjármű-diagnosztika</p></div><div style='background:#fff;border-radius:12px;padding:32px;margin-bottom:24px'><h2 style='font-size:22px;margin:0 0 16px;color:#12110E'>Köszönjük a feliratkozást!</h2><p style='font-size:16px;line-height:26px;color:#6B7280;margin:0 0 24px'>Egy lépés van hátra — erősítsd meg az email címed, és megkapod a heti DTC kódszótárat, DIY útmutatókat és szerviz tippeket.</p><div style='text-align:center;margin:32px 0'><a href='${confirmUrl}' style='display:inline-block;background:#12110E;color:#fff;padding:16px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;letter-spacing:0.5px;text-transform:uppercase'>Feliratkozás megerősítése</a></div><p style='font-size:13px;color:#6B7280;margin:24px 0 0'>Ha nem te iratkoztál fel, egyszerűen hagyd figyelmen kívül ezt az emailt.</p></div><div style='text-align:center;padding:16px'><p style='font-size:12px;color:#6B7280;margin:0'>© 2026 AutoCognitix. Minden jog fenntartva.</p><p style='font-size:12px;color:#6B7280;margin:4px 0 0'>Budapest, Magyarország</p></div></div></body></html>`; })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "build-confirm-hu",
+      "name": "Build confirm HU",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [880, 140]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "subject-en",
+              "name": "subject",
+              "value": "AutoCognitix — Confirm your subscription",
+              "type": "string"
+            },
+            {
+              "id": "html-en",
+              "name": "html",
+              "value": "={{ (() => { const email = $json.body.email; const token = $json.body.token; const baseUrl = $json.body.base_url || 'https://autocognitix-landing-production.up.railway.app'; const confirmUrl = `${baseUrl}/en/confirm.html?token=${token}`; return `<!DOCTYPE html><html><head><meta charset='utf-8'></head><body style='margin:0;padding:0;font-family:Funnel Sans,Arial,sans-serif;background:#F2F2F4'><div style='max-width:600px;margin:0 auto;padding:40px 20px'><div style='background:#12110E;border-radius:12px;padding:32px;text-align:center;margin-bottom:24px'><h1 style='color:#fff;font-size:24px;margin:0;font-weight:700'>AutoCognitix</h1><p style='color:rgba(255,255,255,0.6);font-size:13px;margin:8px 0 0;letter-spacing:1px;text-transform:uppercase'>AI vehicle diagnostics</p></div><div style='background:#fff;border-radius:12px;padding:32px;margin-bottom:24px'><h2 style='font-size:22px;margin:0 0 16px;color:#12110E'>Thanks for subscribing!</h2><p style='font-size:16px;line-height:26px;color:#6B7280;margin:0 0 24px'>One last step — confirm your email to start getting weekly DTC code guides, DIY tips, and service insights.</p><div style='text-align:center;margin:32px 0'><a href='${confirmUrl}' style='display:inline-block;background:#12110E;color:#fff;padding:16px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;letter-spacing:0.5px;text-transform:uppercase'>Confirm subscription</a></div><p style='font-size:13px;color:#6B7280;margin:24px 0 0'>If you did not subscribe, simply ignore this email.</p></div><div style='text-align:center;padding:16px'><p style='font-size:12px;color:#6B7280;margin:0'>© 2026 AutoCognitix. All rights reserved.</p><p style='font-size:12px;color:#6B7280;margin:4px 0 0'>Budapest, Hungary</p></div></div></body></html>`; })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "build-confirm-en",
+      "name": "Build confirm EN",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [880, 280]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "subject-welcome",
+              "name": "subject",
+              "value": "={{ $json.body.language === 'hu' ? 'Üdvözlünk az AutoCognitix-en!' : 'Welcome to AutoCognitix!' }}",
+              "type": "string"
+            },
+            {
+              "id": "html-welcome",
+              "name": "html",
+              "value": "={{ (() => { const lang = $json.body.language || 'hu'; const name = $json.body.name || ''; const loginUrl = $json.body.login_url || 'https://autocognitix-landing-production.up.railway.app'; if (lang === 'hu') { return `<!DOCTYPE html><html><head><meta charset='utf-8'></head><body style='margin:0;padding:0;font-family:Funnel Sans,Arial,sans-serif;background:#F2F2F4'><div style='max-width:600px;margin:0 auto;padding:40px 20px'><div style='background:#12110E;border-radius:12px;padding:32px;text-align:center;margin-bottom:24px'><h1 style='color:#fff;font-size:24px;margin:0;font-weight:700'>AutoCognitix</h1><p style='color:rgba(255,255,255,0.6);font-size:13px;margin:8px 0 0;letter-spacing:1px;text-transform:uppercase'>AI gépjármű-diagnosztika</p></div><div style='background:#fff;border-radius:12px;padding:32px;margin-bottom:24px'><h2 style='font-size:22px;margin:0 0 16px;color:#12110E'>Üdvözlünk, ${name}!</h2><p style='font-size:16px;line-height:26px;color:#6B7280;margin:0 0 16px'>Sikeresen regisztráltál az AutoCognitix platformra. Íme, amit most elérhetsz:</p><ul style='font-size:15px;line-height:28px;color:#12110E;padding-left:20px;margin:0 0 24px'><li>DTC hibakód keresés és AI elemzés</li><li>Tünetalapú diagnosztika magyarul</li><li>Valós alkatrészár-becslés</li><li>NHTSA recall ellenőrzés</li></ul><div style='text-align:center;margin:32px 0'><a href='${loginUrl}' style='display:inline-block;background:#12110E;color:#fff;padding:16px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;letter-spacing:0.5px;text-transform:uppercase'>Bejelentkezés</a></div></div><div style='text-align:center;padding:16px'><p style='font-size:12px;color:#6B7280;margin:0'>© 2026 AutoCognitix. Minden jog fenntartva.</p></div></div></body></html>`; } else { return `<!DOCTYPE html><html><head><meta charset='utf-8'></head><body style='margin:0;padding:0;font-family:Funnel Sans,Arial,sans-serif;background:#F2F2F4'><div style='max-width:600px;margin:0 auto;padding:40px 20px'><div style='background:#12110E;border-radius:12px;padding:32px;text-align:center;margin-bottom:24px'><h1 style='color:#fff;font-size:24px;margin:0;font-weight:700'>AutoCognitix</h1><p style='color:rgba(255,255,255,0.6);font-size:13px;margin:8px 0 0;letter-spacing:1px;text-transform:uppercase'>AI vehicle diagnostics</p></div><div style='background:#fff;border-radius:12px;padding:32px;margin-bottom:24px'><h2 style='font-size:22px;margin:0 0 16px;color:#12110E'>Welcome, ${name}!</h2><p style='font-size:16px;line-height:26px;color:#6B7280;margin:0 0 16px'>You have successfully registered on the AutoCognitix platform. Here is what you can access now:</p><ul style='font-size:15px;line-height:28px;color:#12110E;padding-left:20px;margin:0 0 24px'><li>DTC fault code search and AI analysis</li><li>Symptom-based diagnostics</li><li>Real parts cost estimates</li><li>NHTSA recall checks</li></ul><div style='text-align:center;margin:32px 0'><a href='${loginUrl}' style='display:inline-block;background:#12110E;color:#fff;padding:16px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;letter-spacing:0.5px;text-transform:uppercase'>Log in</a></div></div><div style='text-align:center;padding:16px'><p style='font-size:12px;color:#6B7280;margin:0'>© 2026 AutoCognitix. All rights reserved.</p></div></div></body></html>`; } })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "build-welcome",
+      "name": "Build welcome email",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [660, 440]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM || 'noreply@autocognitix.com' }}",
+        "toEmail": "={{ $('Newsletter Email Webhook').item.json.body.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "replyTo": "hello@autocognitix.hu"
+        }
+      },
+      "id": "send-email-confirm-hu",
+      "name": "Send confirm HU",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1100, 140],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CREDENTIAL_ID",
+          "name": "AutoCognitix SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM || 'noreply@autocognitix.com' }}",
+        "toEmail": "={{ $('Newsletter Email Webhook').item.json.body.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "replyTo": "hello@autocognitix.hu"
+        }
+      },
+      "id": "send-email-confirm-en",
+      "name": "Send confirm EN",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1100, 280],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CREDENTIAL_ID",
+          "name": "AutoCognitix SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM || 'noreply@autocognitix.com' }}",
+        "toEmail": "={{ $('Newsletter Email Webhook').item.json.body.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "replyTo": "hello@autocognitix.hu"
+        }
+      },
+      "id": "send-email-welcome",
+      "name": "Send welcome",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [880, 440],
+      "credentials": {
+        "smtp": {
+          "id": "SMTP_CREDENTIAL_ID",
+          "name": "AutoCognitix SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Email sent', type: $('Newsletter Email Webhook').item.json.body.type }) }}"
+      },
+      "id": "respond-success",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, 300]
+    }
+  ],
+  "connections": {
+    "Newsletter Email Webhook": {
+      "main": [
+        [
+          {
+            "node": "Route by type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by type": {
+      "main": [
+        [
+          {
+            "node": "Confirm: HU or EN?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build welcome email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm: HU or EN?": {
+      "main": [
+        [
+          {
+            "node": "Build confirm HU",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build confirm EN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build confirm HU": {
+      "main": [
+        [
+          {
+            "node": "Send confirm HU",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build confirm EN": {
+      "main": [
+        [
+          {
+            "node": "Send confirm EN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build welcome email": {
+      "main": [
+        [
+          {
+            "node": "Send welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send confirm HU": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send confirm EN": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send welcome": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "newsletter"
+    },
+    {
+      "name": "email"
+    }
+  ]
+}

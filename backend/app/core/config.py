@@ -65,7 +65,11 @@ class Settings(BaseSettings):
         return v
 
     # CORS - Use Union type to handle both string (from env) and list formats
-    BACKEND_CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
+    BACKEND_CORS_ORIGINS: Union[List[str], str] = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://autocognitix-landing-production.up.railway.app",
+    ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
@@ -103,6 +107,12 @@ class Settings(BaseSettings):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
         return v
 
+    # PostgreSQL Connection Pool Configuration
+    DB_POOL_SIZE: int = 5  # Size of the connection pool
+    DB_MAX_OVERFLOW: int = 10  # Maximum overflow connections
+    DB_POOL_RECYCLE: int = 1800  # Recycle connections after 30 minutes
+    DB_POOL_TIMEOUT: int = 30  # Timeout for acquiring a connection from the pool
+
     # Neo4j - Set via environment variables
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
@@ -139,10 +149,14 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 768
     HUSPACY_MODEL: str = "hu_core_news_lg"
 
-    # Email (Resend API)
+    # Email (n8n webhook or Resend API)
+    N8N_WEBHOOK_URL: Optional[str] = None  # n8n base URL, e.g. https://your-n8n.app/webhook
     RESEND_API_KEY: Optional[str] = None
     EMAIL_FROM: str = "AutoCognitix <noreply@autocognitix.hu>"
     EMAIL_DEMO_MODE: bool = True  # True = csak logolás, nincs tényleges küldés
+
+    # Landing Page
+    LANDING_PAGE_URL: str = "https://autocognitix-landing-production.up.railway.app"
 
     # Logging
     LOG_LEVEL: str = "INFO"
