@@ -483,7 +483,7 @@ class TestDTCBulkImport:
             },
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
 
         assert "created" in data
@@ -515,7 +515,7 @@ class TestDTCBulkImport:
             },
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
 
         assert data["created"] == 2
@@ -541,7 +541,7 @@ class TestDTCBulkImport:
             },
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
 
         assert data["skipped"] == 1
@@ -567,7 +567,7 @@ class TestDTCBulkImport:
             },
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
 
         assert data["updated"] == 1

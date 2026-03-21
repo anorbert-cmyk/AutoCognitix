@@ -5,7 +5,7 @@ Tests graph queries for diagnostic paths, symptoms, and components.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from pathlib import Path
 
@@ -20,39 +20,47 @@ class TestNeo4jDiagnosticPaths:
     @pytest.mark.asyncio
     async def test_get_diagnostic_path_returns_data(self, mock_neo4j_client):
         """Test that get_diagnostic_path returns graph data."""
-        with patch("app.db.neo4j_models.driver") as mock_driver:
-            mock_session = AsyncMock()
-            mock_driver.session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_driver.session.return_value.__aexit__ = AsyncMock(return_value=None)
-            mock_session.run = mock_neo4j_client.run
+        from app.db.neo4j_models import get_diagnostic_path
 
-            from app.db.neo4j_models import get_diagnostic_path
+        with patch("app.db.neo4j_models.is_neo4j_available", return_value=True):
+            mock_dtc = MagicMock()
+            mock_dtc.code = "P0101"
+            mock_dtc.description_hu = "MAF aramkor hiba"
+            mock_dtc.description_en = "MAF Circuit Issue"
+            mock_dtc.severity = "medium"
+            mock_dtc.causes.all.return_value = []
+            mock_dtc.indicates_failure_of.all.return_value = []
 
-            result = await get_diagnostic_path("P0101")
+            with patch("app.db.neo4j_models.DTCNode") as mock_dtc_node:
+                mock_dtc_node.nodes.get_or_none.return_value = mock_dtc
 
-            # Should return data from mock
-            assert result is not None or mock_neo4j_client.run.called
+                result = await get_diagnostic_path("P0101")
+
+                # Should return data from mock
+                assert result is not None
+                assert result["dtc"]["code"] == "P0101"
 
     @pytest.mark.asyncio
     async def test_diagnostic_path_contains_dtc_info(self, mock_neo4j_client):
         """Test that diagnostic path includes DTC information."""
-        mock_result = {
-            "dtc": {"code": "P0101", "description": "MAF Circuit Issue"},
-            "symptoms": [{"name": "Rough idle"}],
-            "components": [{"name": "MAF Sensor", "system": "Engine"}],
-            "repairs": [{"name": "Replace MAF Sensor", "difficulty": "beginner"}],
-        }
+        from app.db.neo4j_models import get_diagnostic_path
 
-        mock_neo4j_client.run.return_value = [mock_result]
+        with patch("app.db.neo4j_models.is_neo4j_available", return_value=True):
+            mock_dtc = MagicMock()
+            mock_dtc.code = "P0101"
+            mock_dtc.description_hu = "MAF aramkor hiba"
+            mock_dtc.description_en = "MAF Circuit Issue"
+            mock_dtc.severity = "medium"
+            mock_dtc.causes.all.return_value = []
+            mock_dtc.indicates_failure_of.all.return_value = []
 
-        with patch("app.db.neo4j_models.driver") as mock_driver:
-            mock_session = AsyncMock()
-            mock_session.run = mock_neo4j_client.run
-            mock_driver.session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_driver.session.return_value.__aexit__ = AsyncMock(return_value=None)
+            with patch("app.db.neo4j_models.DTCNode") as mock_dtc_node:
+                mock_dtc_node.nodes.get_or_none.return_value = mock_dtc
 
-            # Verify mock setup
-            assert mock_neo4j_client.run.return_value[0]["dtc"]["code"] == "P0101"
+                result = await get_diagnostic_path("P0101")
+
+                assert result["dtc"]["code"] == "P0101"
+                assert result["dtc"]["description"] == "MAF aramkor hiba"
 
     @pytest.mark.asyncio
     async def test_diagnostic_path_contains_symptoms(self, mock_neo4j_client):

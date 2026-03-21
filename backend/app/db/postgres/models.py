@@ -17,9 +17,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -34,7 +35,7 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[Optional[str]] = mapped_column(String(100))
@@ -189,10 +190,8 @@ class DiagnosisSession(Base):
 
     __tablename__ = "diagnosis_sessions"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    user_id: Mapped[Optional[str]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), index=True
-    )
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[Optional[str]] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
 
     # Vehicle info
     vehicle_make: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -230,9 +229,9 @@ class DiagnosisArchive(Base):
 
     __tablename__ = "diagnosis_archive"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    original_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    original_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
     archived_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

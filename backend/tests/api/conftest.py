@@ -12,6 +12,8 @@ Provides comprehensive fixtures for testing all API endpoints including:
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 from datetime import datetime
 from typing import AsyncGenerator, Generator
 from uuid import uuid4
@@ -19,9 +21,73 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from unittest.mock import AsyncMock, MagicMock, patch
+
+# ---- SQLite compatibility patches for PostgreSQL-specific types ----
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.sqlite import base as sqlite_base
+
+
+def _visit_ARRAY(self, type_, **kw):
+    return "JSON"
+
+
+def _visit_JSONB(self, type_, **kw):
+    return "JSON"
+
+
+sqlite_base.SQLiteTypeCompiler.visit_ARRAY = _visit_ARRAY
+sqlite_base.SQLiteTypeCompiler.visit_JSONB = _visit_JSONB
+
+# Patch ARRAY and JSONB result_processor so SQLite returns Python objects
+_orig_array_result_processor = ARRAY.result_processor
+
+
+def _array_result_processor(self, dialect, coltype):
+    if dialect.name == "sqlite":
+
+        def process(value):
+            if value is None:
+                return value
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+
+        return process
+    return _orig_array_result_processor(self, dialect, coltype)
+
+
+ARRAY.result_processor = _array_result_processor
+
+_orig_jsonb_result_processor = JSONB.result_processor
+
+
+def _jsonb_result_processor(self, dialect, coltype):
+    if dialect.name == "sqlite":
+
+        def process(value):
+            if value is None:
+                return value
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+
+        return process
+    if _orig_jsonb_result_processor:
+        return _orig_jsonb_result_processor(self, dialect, coltype)
+    return None
+
+
+JSONB.result_processor = _jsonb_result_processor
+
+# Register adapters so Python lists/dicts are stored as JSON strings in SQLite
+sqlite3.register_adapter(list, json.dumps)
+sqlite3.register_adapter(dict, json.dumps)
+
+# ---- End SQLite patches ----
 
 from app.core.security import get_password_hash, create_access_token, create_refresh_token
 from app.db.postgres.models import (
@@ -32,6 +98,34 @@ from app.db.postgres.models import (
     VehicleMake,
     VehicleModel,
 )
+
+
+# =============================================================================
+# Auto-mock Redis blacklist for all API tests
+# =============================================================================
+# Redis is not available in test environments (SQLite in-memory).
+# The fail-closed blacklist policy rejects all tokens when Redis is down.
+# We mock is_token_blacklisted to return False and blacklist_token to return True
+# so that token validation works in tests without Redis.
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _mock_redis_blacklist():
+    """Auto-mock Redis token blacklist so tokens are accepted in tests."""
+    with (
+        patch(
+            "app.core.security.is_token_blacklisted",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.core.security.blacklist_token",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        yield
 
 
 # =============================================================================
@@ -620,9 +714,47 @@ def app(
 ):
     """Create FastAPI application for testing with mocked dependencies."""
     from fastapi import FastAPI
+    from fastapi.exceptions import RequestValidationError
     from fastapi.responses import ORJSONResponse
+    from starlette.responses import JSONResponse
 
     test_app = FastAPI(default_response_class=ORJSONResponse)
+
+    # Custom validation error handler to work around serialization issues.
+    # 1. PydanticUndefined in "input" when required Query params are missing
+    # 2. ValueError objects in "ctx" from custom Pydantic validators
+    # Both cause jsonable_encoder / json.dumps to fail.
+    @test_app.exception_handler(RequestValidationError)
+    async def _validation_exception_handler(request, exc):
+        import json as _json
+
+        def _make_serializable(obj):
+            """Recursively make an object JSON-serializable."""
+            if isinstance(obj, dict):
+                return {k: _make_serializable(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_make_serializable(item) for item in obj]
+            if isinstance(obj, Exception):
+                return str(obj)
+            if type(obj).__name__ == "PydanticUndefinedType":
+                return None
+            try:
+                _json.dumps(obj)
+                return obj
+            except (TypeError, ValueError):
+                return str(obj)
+
+        errors = [_make_serializable(err) for err in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": errors})
+
+    # Register exception handlers (AutoCognitixException, SQLAlchemy, etc.)
+    from app.core.error_handlers import setup_exception_handlers
+
+    setup_exception_handlers(test_app)
+
+    # Override the default RequestValidationError handler with our test-safe one
+    # (must come after setup_exception_handlers since it registers its own)
+    test_app.exception_handlers[RequestValidationError] = _validation_exception_handler
 
     # Import routers
     from app.api.v1.endpoints.dtc_codes import router as dtc_router
