@@ -202,7 +202,7 @@ export default function DiagnosisPage() {
             ? {
                 make: vehicleMake,
                 model: vehicleModel || 'Ismeretlen',
-                year: vehicleYear ? parseInt(vehicleYear) : currentYear,
+                year: vehicleYear ? parseInt(vehicleYear, 10) : currentYear,
                 dtcCode: dtcCode.toUpperCase(),
               }
             : undefined

@@ -323,6 +323,8 @@ class DTCCodeRepository(BaseRepository[DTCCode]):
         Returns:
             List of matching DTCCode objects.
         """
+        if not query or len(query) > 500:
+            return []
         escaped_query = escape_ilike(query)
         stmt = select(DTCCode).where(
             (DTCCode.code.ilike(f"%{escaped_query}%"))

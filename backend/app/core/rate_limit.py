@@ -245,10 +245,9 @@ def get_client_key(request: Request) -> str:
     # Check for X-Forwarded-For header (common with reverse proxies)
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        # Take the rightmost (most recently added by proxy) IP
-        # The first IP can be spoofed by the client; the last is added by the trusted proxy
+        # Take the first IP (original client) - Railway/trusted proxy appends its own
         ips = [ip.strip() for ip in forwarded_for.split(",")]
-        client_ip = ips[-1]
+        client_ip = ips[0]
     else:
         # Fall back to direct client IP
         client_ip = str(request.client.host) if request.client else "unknown"
@@ -402,7 +401,7 @@ class RateLimitMiddleware:
         for header in scope.get("headers", []):
             if header[0] == b"x-forwarded-for":
                 ips = [ip.strip() for ip in header[1].decode().split(",")]
-                client_host = ips[-1]  # Last IP is from the trusted proxy
+                client_host = ips[0]  # First IP is the original client
                 break
 
         if not client_host:

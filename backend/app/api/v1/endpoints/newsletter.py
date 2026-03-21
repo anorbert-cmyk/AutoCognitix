@@ -5,6 +5,7 @@ Handles subscribe, confirm, and unsubscribe for the landing page.
 No authentication required - public endpoints.
 """
 
+import ipaddress
 import secrets
 from datetime import datetime, timezone
 
@@ -115,6 +116,13 @@ async def subscribe(
     ip = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
     if ip and "," in ip:
         ip = ip.split(",")[0].strip()
+
+    # Validate IP address to prevent header injection
+    if ip:
+        try:
+            ipaddress.ip_address(ip.strip())
+        except (ValueError, TypeError):
+            ip = request.client.host if request.client else None
 
     subscriber = NewsletterSubscriber(
         email=email,

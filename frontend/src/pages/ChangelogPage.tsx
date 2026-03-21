@@ -44,7 +44,7 @@ const changelogData: ChangelogEntry[] = [
       'P0300 szimulációs demó oldal valós alkatrészárakkal.',
     highlights: [
       'VW Golf VII 1.4 TSI P0300 demo szimuláció',
-      'Valós árak: Bárdi Autó, Uni Autó, AUTODOC',
+      'Valós árak: Bárdi Autó, Unix Autó, AUTODOC',
       '6 alkatrész bolt-specifikus árösszehasonlítás',
     ],
   },

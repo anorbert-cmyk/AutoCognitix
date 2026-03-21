@@ -155,12 +155,15 @@ def get_password_hash(password: str) -> str:
     return hashed
 
 
-async def decode_token(token: str) -> Optional[Dict[str, Any]]:
+async def decode_token(token: str, expected_type: str = "access") -> Optional[Dict[str, Any]]:
     """
     Decode and verify a JWT token.
 
     Args:
         token: The JWT token to decode
+        expected_type: Expected token type claim (default "access").
+            Prevents token type confusion attacks (e.g. using a
+            refresh token as an access token).
 
     Returns:
         The decoded token payload or None if invalid
@@ -172,6 +175,13 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             algorithms=[settings.JWT_ALGORITHM],
             leeway=30,
         )
+
+        # Validate token type to prevent type confusion attacks
+        if payload.get("type") != expected_type:
+            logger.warning(
+                f"Token type mismatch: expected={expected_type}, got={payload.get('type')}"
+            )
+            return None
 
         # Check if token is blacklisted
         jti = payload.get("jti")

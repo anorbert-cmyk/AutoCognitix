@@ -142,14 +142,10 @@ async def get_current_user_from_token(
         logger.warning("No token provided (cookie or header)")
         raise credentials_exception
 
-    payload = await decode_token(resolved_token)
+    payload = await decode_token(resolved_token, expected_type="access")
 
     if not payload:
         logger.warning("Invalid token provided")
-        raise credentials_exception
-
-    if payload.get("type") != "access":
-        logger.warning("Token is not an access token")
         raise credentials_exception
 
     user_id = payload.get("sub")
@@ -496,7 +492,7 @@ async def login(
         # Timing-safe: always run bcrypt to prevent user enumeration via response timing
         _dummy_hash = "$2b$12$LJ3m4ys3Lz0qtL0Gq.X7/.bN.qKGmF5E3pXbR6V5q0jHdFg6Cq0TS"
         verify_password(form_data.password, _dummy_hash)
-        logger.warning(f"Login attempt with unknown email: {form_data.username}")
+        logger.warning("Login attempt with unknown email")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Hibás email cím vagy jelszó",
@@ -505,7 +501,7 @@ async def login(
 
     # Check if account is locked
     if await repository.is_account_locked(user):
-        logger.warning(f"Login attempt on locked account: {form_data.username}")
+        logger.warning("Login attempt on locked account")
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="Fiók zárolva túl sok sikertelen bejelentkezési kísérlet miatt. Próbálja újra később.",
@@ -520,7 +516,7 @@ async def login(
 
     # Verify password
     if not verify_password(form_data.password, user.hashed_password):
-        logger.warning(f"Login attempt with wrong password: {form_data.username}")
+        logger.warning("Login attempt with wrong password")
         # Record failed attempt
         is_locked = await repository.record_failed_login(user)
         await db.commit()
@@ -623,9 +619,9 @@ async def refresh_tokens(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = await decode_token(resolved_refresh_token)
+    payload = await decode_token(resolved_refresh_token, expected_type="refresh")
 
-    if not payload or payload.get("type") != "refresh":
+    if not payload:
         logger.warning("Invalid refresh token provided")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -977,9 +973,9 @@ async def reset_password(
         Success message
     """
     # Verify token
-    payload = await decode_token(request_data.token)
+    payload = await decode_token(request_data.token, expected_type="password_reset")
 
-    if not payload or payload.get("type") != "password_reset":
+    if not payload:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Érvénytelen vagy lejárt visszaállítási token",

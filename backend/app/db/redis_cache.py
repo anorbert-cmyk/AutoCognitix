@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, List, Mapping, Optional, Tuple
@@ -101,6 +102,7 @@ class RedisCacheService:
     """
 
     _instance: Optional["RedisCacheService"] = None
+    _instance_lock: threading.Lock = threading.Lock()
     _pool: Optional[ConnectionPool] = None
     _initialized: bool = False
 
@@ -108,10 +110,12 @@ class RedisCacheService:
     CIRCUIT_BREAKER_COOLDOWN = 30
 
     def __new__(cls) -> "RedisCacheService":
-        """Singleton pattern for shared connection pool."""
+        """Singleton pattern for shared connection pool with double-checked locking."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self) -> None:

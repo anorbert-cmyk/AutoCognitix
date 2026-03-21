@@ -3,7 +3,7 @@
  *
  * Pre-filled demo page with realistic P0300 misfire simulation.
  * Shows what a paid user would receive after running a full diagnosis.
- * Includes real Hungarian auto parts prices from Bárdi Autó, Uni Autó, AUTODOC.
+ * Includes real Hungarian auto parts prices from Bárdi Autó, Unix Autó, AUTODOC.
  *
  * Design: Navy theme (#0D1B2A), Space Grotesk font, Material Symbols icons
  */

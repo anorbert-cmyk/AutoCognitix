@@ -273,7 +273,7 @@ class DiagnosisService:
 
         except DiagnosisServiceError:
             raise
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
             logger.error(f"Diagnosis {diagnosis_id} failed: {sanitize_log(str(e))}", exc_info=True)
             raise DiagnosisServiceError(
                 message=f"Diagnosis failed: {e!s}",
@@ -451,14 +451,17 @@ class DiagnosisService:
         nhtsa = await self._get_nhtsa_service()
 
         try:
-            # Fetch recalls and complaints in parallel
+            # Fetch recalls and complaints in parallel with timeout
             recalls_task = nhtsa.get_recalls(make, model, year)
             complaints_task = nhtsa.get_complaints(make, model, year)
 
-            results = await asyncio.gather(
-                recalls_task,
-                complaints_task,
-                return_exceptions=True,
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    recalls_task,
+                    complaints_task,
+                    return_exceptions=True,
+                ),
+                timeout=15.0,
             )
 
             # Handle exceptions gracefully - narrow types from gather
@@ -482,6 +485,9 @@ class DiagnosisService:
 
             return final_recalls, final_complaints
 
+        except asyncio.TimeoutError:
+            logger.warning("NHTSA data fetch timed out after 15s")
+            return [], []
         except Exception as e:
             logger.error(f"NHTSA data fetch error: {sanitize_log(str(e))}")
             return [], []

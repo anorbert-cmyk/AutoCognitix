@@ -15,7 +15,7 @@ COPY package.json package-lock.json* ./
 
 # Install dependencies (npm install instead of npm ci for cross-platform compatibility)
 # npm ci requires exact lockfile match which can fail with different Node/npm versions
-RUN npm install --legacy-peer-deps
+RUN npm ci --legacy-peer-deps
 
 # ============================================
 # Stage 2: Builder - Build production assets

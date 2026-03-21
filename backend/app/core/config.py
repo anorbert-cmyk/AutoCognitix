@@ -103,8 +103,12 @@ class Settings(BaseSettings):
         Railway provides DATABASE_URL with postgresql:// prefix,
         but asyncpg requires postgresql+asyncpg:// prefix.
         """
+        if v and v.startswith("postgresql+asyncpg://"):
+            return v
         if v and v.startswith("postgresql://"):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if v and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
         return v
 
     # PostgreSQL Connection Pool Configuration

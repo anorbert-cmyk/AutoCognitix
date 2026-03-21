@@ -48,7 +48,6 @@ jobs:
   backend-type-check:
     name: Backend Type Check (MyPy)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -178,8 +177,7 @@ jobs:
         run: |
           cd backend
           bandit -r app -ll -ii -x tests -f json -o bandit-report.json || true
-          bandit -r app -ll -ii -x tests || true
-        continue-on-error: true
+          bandit -r app -ll -ii -x tests
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
