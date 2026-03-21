@@ -93,7 +93,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             response.set_cookie(
                 key=self.CSRF_COOKIE,
                 value=csrf_token,
-                httponly=False,  # Must be readable by JavaScript
+                httponly=False,  # Intentional: CSRF token must be readable by JavaScript to attach to X-CSRF-Token header
                 samesite="strict",  # Strict same-site policy
                 secure=True,  # HTTPS only in production
                 max_age=3600,  # 1 hour

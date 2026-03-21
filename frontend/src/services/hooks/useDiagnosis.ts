@@ -40,8 +40,8 @@ export function useAnalyzeDiagnosis() {
   return useMutation({
     mutationFn: (data: DiagnosisFormData) => analyzeDiagnosis(data),
     onSuccess: (data) => {
-      // Invalidate history to include new diagnosis
-      queryClient.invalidateQueries({ queryKey: diagnosisKeys.all })
+      // Invalidate only history (not all queries) to include new diagnosis
+      queryClient.invalidateQueries({ queryKey: diagnosisKeys.history() })
       // Cache the new diagnosis detail
       queryClient.setQueryData(diagnosisKeys.detail(data.id), data)
     },

@@ -51,7 +51,7 @@ class DTCSearchResult(DTCCode):
     """DTC code search result with additional fields."""
 
     severity: str = Field("medium", description="Severity level")
-    relevance_score: Optional[float] = Field(None, ge=0, le=1, description="Search relevance score")
+    relevance_score: float = Field(0.0, ge=0, le=1, description="Search relevance score")
 
 
 class DTCCodeDetail(DTCCode):

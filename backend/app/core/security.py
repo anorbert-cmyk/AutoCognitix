@@ -259,16 +259,19 @@ async def is_token_blacklisted(jti: str) -> bool:
 
         cache = await get_cache_service()
 
-        # If circuit breaker is open, fail closed (reject token)
+        # If circuit breaker is open, fail open (accept token)
+        # Rationale: fail-closed locks out ALL users during Redis outage.
+        # Token blacklisting is a secondary defence; JWTs still have expiry.
+        # Rate limiting remains fail-closed (that protects against abuse).
         if cache.is_circuit_open():
-            logger.critical("Redis circuit breaker open - rejecting token for safety")
-            return True
+            logger.warning("Redis circuit breaker open - accepting token (fail-open)")
+            return False
 
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.critical(f"Token blacklist check failed - rejecting token for safety: {e}")
-        return True
+        logger.warning(f"Token blacklist check failed - accepting token (fail-open): {e}")
+        return False
 
 
 def check_password_strength(password: str) -> Dict[str, Any]:

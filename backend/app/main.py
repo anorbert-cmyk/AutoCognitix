@@ -4,6 +4,7 @@ Main FastAPI Application Entry Point
 """
 
 from collections.abc import AsyncGenerator
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -119,6 +120,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         logger.info("Qdrant collections initialized successfully")
     except Exception as e:
         logger.warning(f"Qdrant initialization skipped: {e}")
+
+    # Qdrant health check - verify connectivity and report collection count
+    try:
+        collections = await asyncio.to_thread(qdrant_client.client.get_collections)
+        logger.info(f"Qdrant connected: {len(collections.collections)} collections")
+    except Exception as e:
+        logger.warning(f"Qdrant health check failed (non-fatal): {e}")
 
     # Initialize Redis cache
     try:

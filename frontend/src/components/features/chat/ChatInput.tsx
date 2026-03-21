@@ -7,6 +7,7 @@
 import { useState, useCallback, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { Send, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getSpeechRecognitionCtor, hasSpeechRecognition as checkSpeechSupport } from '@/lib/speechRecognition'
 
 const MAX_CHARS = 1000
 
@@ -71,27 +72,22 @@ export function ChatInput({
   }, [])
 
   const handleMic = useCallback(() => {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const SpeechRecognitionConstructor =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-    if (!SpeechRecognitionConstructor) {
+    const Ctor = getSpeechRecognitionCtor()
+    if (!Ctor) {
       return
     }
-    const recognition = new SpeechRecognitionConstructor()
+    const recognition = new Ctor()
     recognition.lang = 'hu-HU'
     recognition.continuous = false
     recognition.interimResults = false
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript: string = event.results[0][0].transcript
       setText((prev) => {
         const combined = prev + (prev ? ' ' : '') + transcript
         return combined.slice(0, MAX_CHARS)
       })
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error)
       setIsListening(false)
     }
@@ -103,9 +99,7 @@ export function ChatInput({
     setIsListening(true)
   }, [])
 
-  const hasSpeechRecognition =
-    typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+  const hasSpeechRecognition = checkSpeechSupport()
 
   return (
     <div className="border-t border-gray-200 bg-white px-4 py-3">

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAnalyzeDiagnosis, useDiagnosisHistory } from '../services/hooks';
 import { cn } from '@/lib/utils';
+import { getSpeechRecognitionCtor } from '@/lib/speechRecognition';
 import { ApiError, type DiagnosisRequest } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
 import { AnalysisProgress } from '../components/features/diagnosis/AnalysisProgress';
@@ -95,24 +96,20 @@ export default function DiagnosisPage() {
 
   // Diktálás kezelő
   const handleDictation = useCallback(() => {
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
       toast.error('A böngésző nem támogatja a beszédfelismerést');
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionConstructor) return;
-    const recognition = new SpeechRecognitionConstructor();
+    const recognition = new Ctor();
     recognition.lang = 'hu-HU';
     recognition.continuous = false;
     recognition.interimResults = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = event.results[0][0].transcript;
       setOwnerComplaints((prev) => prev + (prev ? ' ' : '') + transcript);
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
       toast.error('Hiba történt a beszédfelismerés során');
     };

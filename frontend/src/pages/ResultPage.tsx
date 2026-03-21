@@ -35,14 +35,14 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
 
   // Elsődleges DTC kód
   const primaryDTC = result.dtc_codes?.[0] || 'N/A';
-  const dtcDescription = result.probable_causes[0]?.title || 'Nincs leírás';
+  const dtcDescription = result.probable_causes?.[0]?.title || 'Nincs leírás';
 
   // Ügyfél panasza
   const customerComplaint = result.symptoms || '';
 
   // AI elemzés szöveg
   const aiAnalysisDetails = result.root_cause_analysis
-    || result.probable_causes[0]?.description
+    || result.probable_causes?.[0]?.description
     || 'Az AI elemzés nem tartalmaz részletes leírást ehhez a hibakódhoz.';
 
   // Konfidencia százalék

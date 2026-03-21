@@ -89,12 +89,15 @@ class ArchiveService:
                     },
                 )
                 self.db.add(archive)
+                await savepoint.commit()
 
-                # Soft delete the original
+                # Only mark deleted AFTER archive savepoint succeeds.
+                # If set before commit and the savepoint rolls back,
+                # the session object stays dirty (is_deleted=True) in
+                # the identity map, causing silent data loss.
                 session.is_deleted = True
                 session.deleted_at = datetime.now(timezone.utc)
-
-                await savepoint.commit()
+                await self.db.flush()
                 archived_count += 1
             except Exception:
                 await savepoint.rollback()

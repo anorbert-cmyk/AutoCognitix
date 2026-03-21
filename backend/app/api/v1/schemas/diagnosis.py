@@ -237,6 +237,10 @@ class DiagnosisResponse(BaseModel):
     # Processing metadata
     processing_time_ms: Optional[int] = Field(None, description="Processing time in milliseconds")
     model_used: Optional[str] = Field(None, description="AI model used for diagnosis")
+    save_error: bool = Field(
+        default=False,
+        description="True if diagnosis was generated but could not be persisted to database",
+    )
     used_fallback: bool = Field(False, description="Whether fallback diagnosis was used")
 
     # AI disclaimer (EU AI Act + liability protection)

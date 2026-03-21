@@ -8,7 +8,7 @@
  * Design: Navy theme (#0D1B2A), Space Grotesk, Material Symbols
  */
 
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { DemoPartWithStores, StorePricing } from '../../../data/demoData';
 import { MaterialIcon } from '../../ui/MaterialIcon';
 
@@ -155,13 +155,14 @@ interface PartStoreCardProps {
   index: number;
 }
 
-export function PartStoreCard({ part, index }: PartStoreCardProps) {
+export const PartStoreCard = React.memo(function PartStoreCard({ part, index }: PartStoreCardProps) {
   const bestPrice = useMemo(() => getBestPrice(part.stores), [part.stores]);
   const maxPrice = useMemo(() => getMaxPrice(part.stores), [part.stores]);
   const savings = bestPrice ? maxPrice - bestPrice.price : 0;
 
-  const secondaryStores = part.stores.filter(
-    (s) => !bestPrice || s.storeName !== bestPrice.storeName
+  const secondaryStores = useMemo(
+    () => part.stores.filter((s) => !bestPrice || s.storeName !== bestPrice.storeName),
+    [part.stores, bestPrice],
   );
 
   return (
@@ -247,7 +248,7 @@ export function PartStoreCard({ part, index }: PartStoreCardProps) {
       </div>
     </article>
   );
-}
+});
 
 // =============================================================================
 // PartStoreCardGrid — Section wrapper with header + stats
@@ -259,11 +260,31 @@ interface PartStoreCardGridProps {
 }
 
 export function PartStoreCardGrid({ parts, className = '' }: PartStoreCardGridProps) {
-  if (!parts || parts.length === 0) return null;
+  const inStockCount = useMemo(
+    () => parts.filter((p) => p.stores.some((s) => s.inStock)).length,
+    [parts],
+  );
+  const totalMinPrice = useMemo(
+    () => parts.reduce((sum, p) => sum + p.price_range_min, 0),
+    [parts],
+  );
+  const totalMaxPrice = useMemo(
+    () => parts.reduce((sum, p) => sum + p.price_range_max, 0),
+    [parts],
+  );
 
-  const inStockCount = parts.filter((p) => p.stores.some((s) => s.inStock)).length;
-  const totalMinPrice = parts.reduce((sum, p) => sum + p.price_range_min, 0);
-  const totalMaxPrice = parts.reduce((sum, p) => sum + p.price_range_max, 0);
+  const storeLegendItems = useMemo(() => {
+    const storeNames = ['Bárdi Autó', 'Unix Autó', 'AUTODOC'] as const;
+    return storeNames
+      .map((name) => {
+        const store = parts[0]?.stores.find((s) => s.storeName === name);
+        if (!store) return null;
+        return { name, color: store.storeLogoColor };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }, [parts]);
+
+  if (!parts || parts.length === 0) return null;
 
   return (
     <section className={className}>
@@ -286,19 +307,15 @@ export function PartStoreCardGrid({ parts, className = '' }: PartStoreCardGridPr
 
         {/* Store legend */}
         <div className="flex items-center gap-4 flex-wrap">
-          {['Bárdi Autó', 'Unix Autó', 'AUTODOC'].map((name) => {
-            const store = parts[0]?.stores.find((s) => s.storeName === name);
-            if (!store) return null;
-            return (
-              <div key={name} className="flex items-center gap-2">
-                <div
-                  className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm"
-                  style={{ backgroundColor: store.storeLogoColor }}
-                />
-                <span className="text-xs text-slate-700 font-semibold">{name}</span>
-              </div>
-            );
-          })}
+          {storeLegendItems.map((item) => (
+            <div key={item.name} className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-sm"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="text-xs text-slate-700 font-semibold">{item.name}</span>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AlertCircle, Car, Mic } from 'lucide-react';
 import { Button, Input, Select, Textarea, type SelectOption } from '@/components/lib';
 import { cn } from '@/lib/utils';
+import { getSpeechRecognitionCtor } from '@/lib/speechRecognition';
 
 export interface DiagnosisFormData {
   dtcCodes: string[];
@@ -144,30 +145,23 @@ export function DiagnosisForm({
   };
 
   const handleDictation = () => {
-    // Check for Web Speech API support
-    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
       alert('A böngésző nem támogatja a beszédfelismerést');
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognitionConstructor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognitionConstructor) return;
-
-    const recognition = new SpeechRecognitionConstructor();
+    const recognition = new Ctor();
     recognition.lang = 'hu-HU';
     recognition.continuous = false;
     recognition.interimResults = false;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript: string = event.results[0][0].transcript;
       setOwnerComplaints((prev) => prev + (prev ? ' ' : '') + transcript);
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
       alert('Hiba történt a beszédfelismerés során');
     };

@@ -259,11 +259,12 @@ class DiagnosisService:
             )
 
             if not save_ok:
-                # Save failed - strip ID so client doesn't reference a non-existent record
-                logger.warning(
-                    f"Diagnosis {diagnosis_id} save failed, returning result without persisted ID"
+                # Save failed - keep ID for traceability but flag the error
+                # so the client knows the result was NOT persisted.
+                logger.error(
+                    f"Failed to persist diagnosis {diagnosis_id} - flagging save_error in response"
                 )
-                response = response.model_copy(update={"id": None})
+                response = response.model_copy(update={"save_error": True})
 
             logger.info(
                 f"Diagnosis {diagnosis_id} completed with confidence "
