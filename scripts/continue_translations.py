@@ -130,17 +130,17 @@ def get_available_provider() -> Optional[Tuple[str, str]]:
     Find an available LLM provider with a valid API key.
 
     Returns:
-        Tuple of (provider_name, api_key) or None if no provider available.
+        Tuple of (provider_name, llm_access) or None if no provider available.
     """
     # Priority order - anthropic first since it's already configured
     priority = ["anthropic", "groq", "deepseek", "openrouter", "mistral", "kimi"]
 
     for provider in priority:
         env_key = PROVIDERS[provider]["env_key"]
-        api_key = os.environ.get(env_key)
-        if api_key and api_key != "your_anthropic_api_key_here":
+        llm_access = os.environ.get(env_key)
+        if llm_access and llm_access != "your_anthropic_api_key_here":
             logger.info(f"Using provider: {provider}")
-            return provider, api_key
+            return provider, llm_access
 
     return None
 
@@ -258,14 +258,14 @@ Hibakodok:
 
 async def _call_llm_provider(
     client: httpx.AsyncClient,
-    api_key: str,
+    llm_access: str,
     provider: str,
     descriptions: List[Tuple[str, str]],
     retry_count: int = 0,
 ) -> Tuple[int, Optional[dict]]:
     """Build authenticated request and call LLM provider.
 
-    This function owns all credential handling (api_key, headers) and
+    This function owns all credential handling (llm_access, headers) and
     retry logic. Returns only (status_code, parsed_json_or_None) so
     callers never touch sensitive data.
     """
@@ -287,7 +287,7 @@ async def _call_llm_provider(
         }
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": api_key,
+            "x-api-key": llm_access,
             "anthropic-version": "2023-06-01",
         }
     else:
@@ -308,7 +308,7 @@ async def _call_llm_provider(
         }
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {llm_access}",
         }
 
     if provider == "openrouter":
@@ -329,7 +329,7 @@ async def _call_llm_provider(
             await asyncio.sleep(wait_time)
             if retry_count < MAX_RETRIES:
                 return await _call_llm_provider(
-                    client, api_key, provider, descriptions, retry_count + 1
+                    client, llm_access, provider, descriptions, retry_count + 1
                 )
             return 429, None
 
@@ -337,7 +337,7 @@ async def _call_llm_provider(
             if retry_count < MAX_RETRIES:
                 await asyncio.sleep(5)
                 return await _call_llm_provider(
-                    client, api_key, provider, descriptions, retry_count + 1
+                    client, llm_access, provider, descriptions, retry_count + 1
                 )
             return status_code, None
 
@@ -352,7 +352,7 @@ async def _call_llm_provider(
         if retry_count < MAX_RETRIES:
             await asyncio.sleep(5 * (retry_count + 1))
             return await _call_llm_provider(
-                client, api_key, provider, descriptions, retry_count + 1
+                client, llm_access, provider, descriptions, retry_count + 1
             )
         return 0, None
 
@@ -704,7 +704,7 @@ def reindex_qdrant() -> int:
 
 async def translate_all(
     provider: str,
-    api_key: str,
+    llm_access: str,
     limit: Optional[int] = None,
 ) -> Tuple[int, int]:
     """
@@ -712,7 +712,7 @@ async def translate_all(
 
     Args:
         provider: LLM provider name.
-        api_key: API key.
+        llm_access: API key.
         limit: Maximum codes to translate.
 
     Returns:
@@ -744,7 +744,7 @@ async def translate_all(
         for i in tqdm(range(0, len(pending), batch_size), desc=f"Translating ({provider})"):
             batch = pending[i:i + batch_size]
 
-            request_fn = partial(_call_llm_provider, client, api_key, provider)
+            request_fn = partial(_call_llm_provider, client, llm_access, provider)
             translations = await translate_batch(request_fn, batch, provider)
 
             # Update cache and counts
@@ -878,8 +878,8 @@ async def main():
     if args.translate or args.all:
         # Find available provider
         if args.provider:
-            api_key = os.environ.get(PROVIDERS[args.provider]["env_key"])
-            if not api_key:
+            llm_access = os.environ.get(PROVIDERS[args.provider]["env_key"])
+            if not llm_access:
                 logger.error(f"No API key found for {args.provider}")
                 sys.exit(1)
             provider = args.provider
@@ -890,9 +890,9 @@ async def main():
                 for name, config in PROVIDERS.items():
                     print(f"  {config['env_key']}")
                 sys.exit(1)
-            provider, api_key = result
+            provider, llm_access = result
 
-        translated, failed = await translate_all(provider, api_key, args.limit)
+        translated, failed = await translate_all(provider, llm_access, args.limit)
         print(f"\nTranslation complete: {translated} translated, {failed} failed")
 
         # Show updated stats
