@@ -16,15 +16,11 @@ import sqlite3
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.sqlite import base as sqlite_base
 
-_PATCHED = False
-
-
 def apply_sqlite_patches() -> None:
     """Apply all SQLite compatibility patches (idempotent)."""
-    global _PATCHED
-    if _PATCHED:
+    if getattr(apply_sqlite_patches, "_done", False):
         return
-    _PATCHED = True
+    apply_sqlite_patches._done = True
 
     # -- Type compilation: render ARRAY / JSONB as JSON in SQLite -----------
 
