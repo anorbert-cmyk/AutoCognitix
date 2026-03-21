@@ -5,7 +5,7 @@ Supports Railway deployment with automatic environment variable detection.
 """
 
 from functools import lru_cache
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # Cookie settings for httpOnly JWT storage
     COOKIE_DOMAIN: Optional[str] = None  # None = current domain only
     COOKIE_SECURE: bool = True  # Set to False for local HTTP development
-    COOKIE_SAMESITE: str = "lax"  # "lax" provides CSRF protection for top-level navigations
+    COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"  # CSRF protection
 
     @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
     @classmethod

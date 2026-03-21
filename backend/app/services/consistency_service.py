@@ -56,23 +56,30 @@ class ConsistencyService:
             return report
 
         # Handle errors from each database
-        if isinstance(pg_codes, Exception):
-            report.errors.append(f"PostgreSQL error: {pg_codes}")
-            pg_codes = set()
-        if isinstance(neo4j_codes, Exception):
-            report.errors.append(f"Neo4j error: {neo4j_codes}")
-            neo4j_codes = set()
-        if isinstance(qdrant_count, Exception):
-            report.errors.append(f"Qdrant error: {qdrant_count}")
-            qdrant_count = 0
+        pg_set: set[str] = set()
+        neo4j_set: set[str] = set()
+        qdrant_int: int = 0
 
-        report.pg_dtc_count = len(pg_codes)
-        report.neo4j_dtc_count = len(neo4j_codes)
-        report.qdrant_vector_count = qdrant_count
+        if isinstance(pg_codes, BaseException):
+            report.errors.append(f"PostgreSQL error: {pg_codes}")
+        else:
+            pg_set = pg_codes
+        if isinstance(neo4j_codes, BaseException):
+            report.errors.append(f"Neo4j error: {neo4j_codes}")
+        else:
+            neo4j_set = neo4j_codes
+        if isinstance(qdrant_count, BaseException):
+            report.errors.append(f"Qdrant error: {qdrant_count}")
+        else:
+            qdrant_int = qdrant_count
+
+        report.pg_dtc_count = len(pg_set)
+        report.neo4j_dtc_count = len(neo4j_set)
+        report.qdrant_vector_count = qdrant_int
 
         # Find mismatches between PostgreSQL and Neo4j
-        report.missing_in_neo4j = sorted(pg_codes - neo4j_codes)[:50]
-        report.orphaned_in_neo4j = sorted(neo4j_codes - pg_codes)[:50]
+        report.missing_in_neo4j = sorted(pg_set - neo4j_set)[:50]
+        report.orphaned_in_neo4j = sorted(neo4j_set - pg_set)[:50]
 
         # Consistency = no errors and no mismatches
         report.is_consistent = (

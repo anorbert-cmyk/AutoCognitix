@@ -211,7 +211,7 @@ class TestGetDiagnosis:
 
     @pytest.mark.asyncio
     async def test_get_diagnosis_not_found_returns_404(
-        self, async_client: AsyncClient, sample_dtc_codes
+        self, async_client: AsyncClient, test_user, user_access_token: str, sample_dtc_codes
     ):
         """Test getting nonexistent diagnosis returns 404."""
         fake_id = uuid4()
@@ -226,14 +226,22 @@ class TestGetDiagnosis:
             "app.api.v1.endpoints.diagnosis.DiagnosisService",
             return_value=mock_service,
         ):
-            response = await async_client.get(f"/api/v1/diagnosis/{fake_id}")
+            response = await async_client.get(
+                f"/api/v1/diagnosis/{fake_id}",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
             assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_diagnosis_invalid_uuid_returns_422(self, async_client: AsyncClient):
+    async def test_get_diagnosis_invalid_uuid_returns_422(
+        self, async_client: AsyncClient, test_user, user_access_token: str
+    ):
         """Test getting diagnosis with invalid UUID returns 422."""
-        response = await async_client.get("/api/v1/diagnosis/not-a-uuid")
+        response = await async_client.get(
+            "/api/v1/diagnosis/not-a-uuid",
+            headers={"Authorization": f"Bearer {user_access_token}"},
+        )
 
         assert response.status_code == 422
 
@@ -395,12 +403,20 @@ class TestDiagnosisHistory:
         test_user,
         user_access_token: str,
     ):
-        """Test filtering history by DTC code."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/history/list",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-            params={"dtc_code": "P0101"},
-        )
+        """Test filtering history by DTC code.
+
+        The dtc_code filter uses PostgreSQL array .contains() which is not
+        supported by SQLite. We mock the repository method to avoid this.
+        """
+        with patch("app.api.v1.endpoints.diagnosis.DiagnosisSessionRepository") as MockRepo:
+            mock_repo = MockRepo.return_value
+            mock_repo.get_filtered_history = AsyncMock(return_value=([], 0))
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/history/list",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+                params={"dtc_code": "P0101"},
+            )
 
         assert response.status_code == 200
 
@@ -468,8 +484,51 @@ class TestDeleteDiagnosis:
         assert response.status_code == 422
 
 
+def _mock_stats_repo():
+    """Create a patched DiagnosisSessionRepository with SQLite-safe mock data.
+
+    The stats endpoint uses PostgreSQL-specific SQL (to_char, interval, unnest)
+    that cannot run on SQLite. We mock the repository methods instead.
+    """
+    mock_stats = {
+        "total_diagnoses": 3,
+        "avg_confidence": 0.82,
+        "most_diagnosed_vehicles": [
+            {"make": "Volkswagen", "model": "Golf", "count": 2},
+            {"make": "Toyota", "model": "Camry", "count": 1},
+        ],
+        "diagnoses_by_month": [
+            {"month": "2026-03", "count": 2},
+            {"month": "2026-02", "count": 1},
+        ],
+    }
+    mock_dtc_freq = [
+        {"code": "P0101", "count": 3},
+        {"code": "P0171", "count": 1},
+    ]
+    return (
+        patch(
+            "app.api.v1.endpoints.diagnosis.DiagnosisSessionRepository",
+        ),
+        mock_stats,
+        mock_dtc_freq,
+    )
+
+
+def _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq):
+    """Configure the mock repository with async return values."""
+    mock_repo = MockRepo.return_value
+    mock_repo.get_user_stats = AsyncMock(return_value=mock_stats)
+    mock_repo.get_dtc_frequency = AsyncMock(return_value=mock_dtc_freq)
+    return mock_repo
+
+
 class TestDiagnosisStats:
-    """Tests for GET /api/v1/diagnosis/stats/summary endpoint."""
+    """Tests for GET /api/v1/diagnosis/stats/summary endpoint.
+
+    Stats queries use PostgreSQL-specific SQL (to_char, interval, unnest)
+    so the repository is mocked for SQLite test environments.
+    """
 
     @pytest.mark.asyncio
     async def test_stats_requires_authentication(self, async_client: AsyncClient):
@@ -486,10 +545,14 @@ class TestDiagnosisStats:
         user_access_token: str,
     ):
         """Test that stats returns 200 with authentication."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
 
@@ -501,10 +564,14 @@ class TestDiagnosisStats:
         user_access_token: str,
     ):
         """Test that stats returns expected fields."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -523,10 +590,14 @@ class TestDiagnosisStats:
         user_access_token: str,
     ):
         """Test that most_diagnosed_vehicles is a list."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -541,10 +612,14 @@ class TestDiagnosisStats:
         user_access_token: str,
     ):
         """Test that most_common_dtcs is a list."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -590,10 +665,14 @@ class TestDiagnosisResponseFormat:
         user_access_token: str,
     ):
         """Test vehicle diagnosis count has correct format."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -611,10 +690,14 @@ class TestDiagnosisResponseFormat:
         user_access_token: str,
     ):
         """Test DTC frequency has correct format."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()
@@ -631,10 +714,14 @@ class TestDiagnosisResponseFormat:
         user_access_token: str,
     ):
         """Test monthly count has correct format."""
-        response = await async_client.get(
-            "/api/v1/diagnosis/stats/summary",
-            headers={"Authorization": f"Bearer {user_access_token}"},
-        )
+        repo_patch, mock_stats, mock_dtc_freq = _mock_stats_repo()
+        with repo_patch as MockRepo:
+            _setup_stats_mock(MockRepo, mock_stats, mock_dtc_freq)
+
+            response = await async_client.get(
+                "/api/v1/diagnosis/stats/summary",
+                headers={"Authorization": f"Bearer {user_access_token}"},
+            )
 
         assert response.status_code == 200
         data = response.json()

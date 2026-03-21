@@ -49,8 +49,15 @@ class TestBlacklistReturnValueChecked:
         content = auth_file.read_text()
 
         # Find the refresh section and check for return value handling
-        assert "not await blacklist_token(token_data.refresh_token)" in content, (
+        # The code may use a resolved variable name instead of token_data.refresh_token
+        assert "not await blacklist_token(" in content, (
             "Refresh endpoint should check blacklist_token return value"
+        )
+        # Verify it's in a conditional (if not await blacklist_token(...))
+        refresh_section = content[content.find("async def refresh_token") :]
+        refresh_section = refresh_section[: refresh_section.find("\nasync def ")]
+        assert "not await blacklist_token(" in refresh_section, (
+            "Refresh endpoint function must check blacklist_token return value"
         )
 
     def test_logout_blacklist_checked(self):
@@ -58,7 +65,10 @@ class TestBlacklistReturnValueChecked:
         auth_file = BACKEND_DIR / "api" / "v1" / "endpoints" / "auth.py"
         content = auth_file.read_text()
 
-        assert "not await blacklist_token(token)" in content, (
+        # The code may use a resolved variable (resolved_access) instead of raw token
+        logout_section = content[content.find("async def logout") :]
+        logout_section = logout_section[: logout_section.find("\nasync def ")]
+        assert "not await blacklist_token(" in logout_section, (
             "Logout should check blacklist_token return value for access token"
         )
 

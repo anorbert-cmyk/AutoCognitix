@@ -5,12 +5,17 @@ Stores request results keyed by Idempotency-Key header in Redis.
 If the same key is seen again, returns the cached response instead of re-processing.
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+
+if TYPE_CHECKING:
+    from app.db.redis_cache import RedisCacheService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +28,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     """Middleware that handles Idempotency-Key header for POST requests."""
 
     @staticmethod
-    async def _get_cache() -> Optional["RedisCacheService"]:  # noqa: F821
+    async def _get_cache() -> Optional[RedisCacheService]:
         """Get Redis cache service, returning None if unavailable."""
         try:
             from app.db.redis_cache import get_cache_service
@@ -88,7 +93,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         if 200 <= response.status_code < 300 and not is_streaming:
             try:
                 body = b""
-                async for chunk in response.body_iterator:
+                async for chunk in response.body_iterator:  # type: ignore[attr-defined]
                     body += chunk if isinstance(chunk, bytes) else chunk.encode()
                     if len(body) > MAX_CACHEABLE_BODY_SIZE:
                         # Too large to cache, return as-is

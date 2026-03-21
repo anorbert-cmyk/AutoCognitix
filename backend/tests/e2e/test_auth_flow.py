@@ -1091,8 +1091,6 @@ class TestConcurrentAuthentication:
     @pytest.mark.asyncio
     async def test_multiple_active_sessions(self, async_client, seeded_db):
         """Test that user can have multiple active sessions."""
-        import asyncio
-
         # Register user
         user_data = {
             "email": "multisession@example.com",
@@ -1100,16 +1098,14 @@ class TestConcurrentAuthentication:
         }
         await async_client.post("/api/v1/auth/register", json=user_data)
 
-        # Login multiple times
-        login_tasks = [
-            async_client.post(
+        # Login multiple times sequentially (SQLite doesn't support concurrent writes)
+        responses = []
+        for _ in range(3):
+            resp = await async_client.post(
                 "/api/v1/auth/login",
                 data={"username": "multisession@example.com", "password": "SecurePassword123!"},
             )
-            for _ in range(3)
-        ]
-
-        responses = await asyncio.gather(*login_tasks)
+            responses.append(resp)
 
         # All logins should succeed
         for response in responses:
@@ -1367,7 +1363,7 @@ class TestTokenClaims:
         tokens = login_response.json()
 
         # Decode token and check claims
-        payload = decode_token(tokens["access_token"])
+        payload = await decode_token(tokens["access_token"])
         assert payload is not None
         assert "role" in payload
         assert payload["role"] == "user"
@@ -1391,6 +1387,6 @@ class TestTokenClaims:
         tokens = login_response.json()
 
         # Decode refresh token
-        payload = decode_token(tokens["refresh_token"])
+        payload = await decode_token(tokens["refresh_token"])
         assert payload is not None
         assert payload.get("type") == "refresh"

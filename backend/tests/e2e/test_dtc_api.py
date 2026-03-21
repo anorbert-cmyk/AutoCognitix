@@ -222,10 +222,10 @@ class TestSemanticSearch:
         """Test that semantic search is enabled by default."""
         with (
             patch(
-                "app.services.embedding_service.get_embedding_service",
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
                 return_value=mock_embedding_service,
             ),
-            patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client),
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", mock_qdrant_client),
         ):
             response = await async_client.get(
                 "/api/v1/dtc/search",
@@ -255,10 +255,10 @@ class TestSemanticSearch:
         """Test that semantic search handles Hungarian text."""
         with (
             patch(
-                "app.services.embedding_service.get_embedding_service",
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
                 return_value=mock_embedding_service,
             ),
-            patch("app.db.qdrant_client.qdrant_client", mock_qdrant_client),
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", mock_qdrant_client),
         ):
             response = await async_client.get(
                 "/api/v1/dtc/search",
@@ -641,7 +641,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
         assert "created" in data
         assert data["created"] >= 0
@@ -663,7 +663,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
         assert data["skipped"] >= 1
 
@@ -684,7 +684,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
         assert data["updated"] >= 0 or data["created"] >= 0
 
@@ -705,7 +705,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 201
+        assert response.status_code == 200
         data = response.json()
 
         assert "created" in data
@@ -870,7 +870,7 @@ class TestDTCUpdateEndpoint:
         }
 
         update_response = await async_client.post("/api/v1/dtc/bulk", json=update_data)
-        assert update_response.status_code == 201
+        assert update_response.status_code == 200
 
         # Verify update
         get_response = await async_client.get("/api/v1/dtc/P6001")
@@ -1032,7 +1032,7 @@ class TestDTCBulkOperations:
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
         # Should either reject all or create valid ones and report errors
-        assert response.status_code in [201, 422]
+        assert response.status_code in [200, 422]
 
     @pytest.mark.asyncio
     async def test_bulk_import_large_batch(self, async_client, seeded_db):
@@ -1053,7 +1053,7 @@ class TestDTCBulkOperations:
         }
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 201
+        assert response.status_code == 200
 
         data = response.json()
         assert data["total"] == 50

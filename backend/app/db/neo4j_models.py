@@ -393,7 +393,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
             }
 
             # Get repairs for this component
-            repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))
+            repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))  # type: ignore[misc]
             for repair in repairs:
                 repair_rel = await asyncio.to_thread(component.repaired_by.relationship, repair)
                 repair_data = {
@@ -407,7 +407,7 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
                 }
 
                 # Get parts for this repair
-                parts = await asyncio.to_thread(lambda r=repair: list(r.uses_parts.all()))
+                parts = await asyncio.to_thread(lambda r=repair: list(r.uses_parts.all()))  # type: ignore[misc]
                 for part in parts:
                     part_rel = await asyncio.to_thread(repair.uses_parts.relationship, part)
                     repair_data["parts"].append(
@@ -491,9 +491,9 @@ async def get_vehicle_common_issues(make: str, model: str, year: Optional[int] =
 
             # Get repair recommendations for this DTC
             dtc_data["recommended_repairs"] = []
-            components = await asyncio.to_thread(lambda d=dtc: list(d.indicates_failure_of.all()))
+            components = await asyncio.to_thread(lambda d=dtc: list(d.indicates_failure_of.all()))  # type: ignore[misc]
             for component in components:
-                repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))
+                repairs = await asyncio.to_thread(lambda c=component: list(c.repaired_by.all()))  # type: ignore[misc]
                 for repair in repairs:
                     await asyncio.to_thread(component.repaired_by.relationship, repair)
                     dtc_data["recommended_repairs"].append(

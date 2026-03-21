@@ -7,10 +7,70 @@ Tests user registration, login, token refresh, and protected endpoints.
 import pytest
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 # Add backend to path
 backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
+
+
+# =============================================================================
+# Mock Redis-dependent security functions (no Redis in test environment)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _mock_redis_security():
+    """Mock token blacklist functions to avoid Redis dependency in tests.
+
+    The security module uses a fail-closed policy: when Redis is unavailable,
+    is_token_blacklisted returns True (= reject token). We mock both functions
+    so tests don't depend on a running Redis instance.
+    """
+    with (
+        patch(
+            "app.core.security.is_token_blacklisted",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.core.security.blacklist_token",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        yield
+
+
+# =============================================================================
+# Helper: register + login flow for tests that need authenticated tokens
+# =============================================================================
+
+REGISTERED_EMAIL = "loginuser@example.com"
+REGISTERED_PASSWORD = "SecurePassword123!"
+
+
+async def _register_and_login(async_client):
+    """Register a fresh user via the API, then login to get tokens."""
+    # Register (the API hashes the password properly with bcrypt)
+    await async_client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": REGISTERED_EMAIL,
+            "password": REGISTERED_PASSWORD,
+            "full_name": "Login Test User",
+        },
+    )
+
+    # Login using OAuth2 form data
+    login_response = await async_client.post(
+        "/api/v1/auth/login",
+        data={
+            "username": REGISTERED_EMAIL,
+            "password": REGISTERED_PASSWORD,
+        },
+    )
+    return login_response
 
 
 class TestUserRegistration:
@@ -137,22 +197,15 @@ class TestUserLogin:
     """Test POST /api/v1/auth/login endpoint."""
 
     @pytest.mark.asyncio
-    async def test_login_returns_200(self, async_client, seeded_db, user_login_data):
+    async def test_login_returns_200(self, async_client, seeded_db):
         """Test that login returns 200 OK."""
-        response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,  # OAuth2 form data
-        )
-
-        assert response.status_code == 200
+        login_response = await _register_and_login(async_client)
+        assert login_response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_login_returns_tokens(self, async_client, seeded_db, user_login_data):
+    async def test_login_returns_tokens(self, async_client, seeded_db):
         """Test that login returns access and refresh tokens."""
-        response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        response = await _register_and_login(async_client)
 
         assert response.status_code == 200
         data = response.json()
@@ -162,12 +215,9 @@ class TestUserLogin:
         assert data["token_type"] == "bearer"
 
     @pytest.mark.asyncio
-    async def test_login_tokens_are_jwt(self, async_client, seeded_db, user_login_data):
+    async def test_login_tokens_are_jwt(self, async_client, seeded_db):
         """Test that login tokens are valid JWT format."""
-        response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        response = await _register_and_login(async_client)
 
         assert response.status_code == 200
         data = response.json()
@@ -208,14 +258,9 @@ class TestTokenRefresh:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that refresh returns 200 with valid refresh token."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
         # Then refresh
@@ -231,14 +276,9 @@ class TestTokenRefresh:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that refresh returns new access and refresh tokens."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
         # Then refresh
@@ -269,14 +309,9 @@ class TestTokenRefresh:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that refresh rejects access token (wrong type)."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
         # Try to use access token as refresh token
@@ -296,17 +331,11 @@ class TestCurrentUser:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that /me returns 200 with valid access token."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
-        # Then get current user
         response = await async_client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
@@ -319,17 +348,11 @@ class TestCurrentUser:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that /me returns user information."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
-        # Then get current user
         response = await async_client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {tokens['access_token']}"},
@@ -365,14 +388,9 @@ class TestCurrentUser:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that /me rejects refresh token (wrong type)."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
         # Try to use refresh token as access token
@@ -392,14 +410,9 @@ class TestAuthorizationHeader:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that Bearer scheme is required."""
-        # First, login to get tokens
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         tokens = login_response.json()
 
         # Try without Bearer prefix
@@ -429,13 +442,9 @@ class TestTokenSecurity:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that access and refresh tokens are different."""
-        response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        response = await _register_and_login(async_client)
 
         data = response.json()
         assert data["access_token"] != data["refresh_token"]
@@ -445,14 +454,9 @@ class TestTokenSecurity:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that refreshed tokens are different from original."""
-        # Login
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         original_tokens = login_response.json()
 
         # Refresh
@@ -471,14 +475,10 @@ class TestTokenSecurity:
         self,
         async_client,
         seeded_db,
-        user_login_data,
     ):
         """Test that password is never returned in any response."""
         # Login
-        login_response = await async_client.post(
-            "/api/v1/auth/login",
-            data=user_login_data,
-        )
+        login_response = await _register_and_login(async_client)
         assert "password" not in login_response.text.lower()
 
         # Get user
@@ -512,4 +512,9 @@ class TestAuthErrorResponses:
 
         assert response.status_code == 422
         data = response.json()
-        assert "detail" in data
+        # Custom error handler wraps validation errors in {"error": {...}} format
+        assert "error" in data
+        error = data["error"]
+        assert "code" in error
+        assert "message" in error
+        assert "details" in error

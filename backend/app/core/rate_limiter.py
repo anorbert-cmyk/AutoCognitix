@@ -255,16 +255,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Take the LAST IP (closest trusted proxy adds client IP at the end)
             # First IP is client-supplied and easily spoofable
             ips = [ip.strip() for ip in forwarded_for.split(",")]
-            return ips[-1] if ips else "unknown"
+            return str(ips[-1]) if ips else "unknown"
 
         # Check X-Real-IP header
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
-            return real_ip
+            return str(real_ip)
 
         # Fall back to direct connection IP
         if request.client:
-            return request.client.host
+            return str(request.client.host)
 
         return "unknown"
 
