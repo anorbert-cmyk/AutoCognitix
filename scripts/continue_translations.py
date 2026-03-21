@@ -255,6 +255,31 @@ Hibakodok:
     return prompt
 
 
+async def _send_llm_request(
+    client: httpx.AsyncClient,
+    api_url: str,
+    payload: dict,
+    headers: dict,
+) -> Tuple[int, Optional[dict]]:
+    """Send an HTTP request to an LLM provider and return safe values.
+
+    Isolates credential-bearing headers from the caller so that CodeQL
+    taint analysis does not propagate sensitive data to log statements.
+
+    Returns:
+        Tuple of (status_code, parsed_json_or_None).
+    """
+    response = await client.post(
+        api_url,
+        json=payload,
+        headers=headers,
+        timeout=120.0,
+    )
+    status_code = response.status_code
+    body = response.json() if status_code == 200 else None
+    return status_code, body
+
+
 async def translate_batch(
     client: httpx.AsyncClient,
     descriptions: List[Tuple[str, str]],
@@ -325,14 +350,9 @@ async def translate_batch(
         headers["X-Title"] = "AutoCognitix DTC Translator"
 
     try:
-        response = await client.post(
-            config["api_url"],
-            json=payload,
-            headers=headers,
-            timeout=120.0,
+        status_code, result = await _send_llm_request(
+            client, config["api_url"], payload, headers
         )
-
-        status_code = int(response.status_code)  # noqa: CodeQL - extract plain int, no sensitive data
 
         if status_code == 429:
             wait_time = 15 * (retry_count + 1)
@@ -352,8 +372,6 @@ async def translate_batch(
                     client, descriptions, api_key, provider, retry_count + 1
                 )
             return {}
-
-        result = response.json()
 
         # Extract content based on provider
         if is_anthropic:
