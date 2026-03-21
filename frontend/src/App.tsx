@@ -20,6 +20,9 @@ const InspectionPage = lazy(() => import('./pages/InspectionPage'))
 const CalculatorPage = lazy(() => import('./pages/CalculatorPage'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const ServiceComparisonPage = lazy(() => import('./pages/ServiceComparisonPage'))
+const ChangelogPage = lazy(() => import('./pages/ChangelogPage'))
+const PricingPage = lazy(() => import('./pages/PricingPage'))
+const BlogPage = lazy(() => import('./pages/BlogPage'))
 
 // Auth pages
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -79,6 +82,9 @@ function App() {
                 <Route path="calculator" element={<CalculatorPage />} />
                 <Route path="chat" element={<ChatPage />} />
                 <Route path="services" element={<ServiceComparisonPage />} />
+                <Route path="changelog" element={<ChangelogPage />} />
+                <Route path="pricing" element={<PricingPage />} />
+                <Route path="blog" element={<BlogPage />} />
                 <Route path="dtc/:code" element={<DTCDetailPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

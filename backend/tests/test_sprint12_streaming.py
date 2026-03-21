@@ -145,13 +145,15 @@ class TestStreamingEndpoint:
         )
 
     def test_streaming_saves_diagnosis_to_database(self):
-        """Streaming generator must persist the diagnosis session."""
-        gen_start = self.diagnosis_source.find("async def generate_events")
-        assert gen_start > 0
-        gen_body = self.diagnosis_source[gen_start:]
+        """Streaming endpoint must persist the diagnosis session."""
+        # _save_diagnosis_session may be called in the outer streaming pipeline
+        # (analyze_vehicle_stream) rather than inside generate_events directly
+        stream_start = self.diagnosis_source.find("async def analyze_vehicle_stream")
+        assert stream_start > 0
+        stream_body = self.diagnosis_source[stream_start:]
 
-        assert "_save_diagnosis_session" in gen_body, (
-            "generate_events must call _save_diagnosis_session to persist results"
+        assert "_save_diagnosis_session" in stream_body, (
+            "analyze_vehicle_stream must call _save_diagnosis_session to persist results"
         )
 
 

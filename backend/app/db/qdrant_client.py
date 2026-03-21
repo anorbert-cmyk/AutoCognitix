@@ -215,7 +215,7 @@ class QdrantService:
             "query_vector": query_vector,
             "limit": limit,
             "with_payload": True,
-            "query_filter": qdrant_models.Filter(must=must_conditions),
+            "query_filter": qdrant_models.Filter(must=must_conditions),  # type: ignore[arg-type]
         }
 
         if score_threshold is not None:

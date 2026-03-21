@@ -132,7 +132,7 @@ class ETagMiddleware(BaseHTTPMiddleware):
 
     def _generate_etag(self, content: bytes) -> str:
         """Generate ETag from content bytes."""
-        hash_value = hashlib.md5(content).hexdigest()
+        hash_value = hashlib.md5(content, usedforsecurity=False).hexdigest()  # nosec B324
 
         if self.weak_etag:
             return f'W/"{hash_value}"'

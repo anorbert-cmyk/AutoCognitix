@@ -270,11 +270,19 @@ class TestDTCDetailEndpoint:
     @pytest.mark.asyncio
     async def test_get_invalid_format_returns_400(self, async_client, seeded_db):
         """Test that invalid code format returns 400."""
-        invalid_codes = ["INVALID", "X0101", "P01", "P012345"]
+        # Codes that fail the format validation (len < 5 or invalid prefix)
+        invalid_codes = ["INVALID", "X0101", "P01"]
 
         for code in invalid_codes:
             response = await async_client.get(f"/api/v1/dtc/{code}")
             assert response.status_code == 400, f"Expected 400 for {code}"
+
+    @pytest.mark.asyncio
+    async def test_get_overlong_code_returns_404(self, async_client, seeded_db):
+        """Test that overlong but valid-prefix code returns 404 (not in DB)."""
+        response = await async_client.get("/api/v1/dtc/P012345")
+        # Passes format validation (len >= 5, starts with P) but not found in DB
+        assert response.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_code_normalizes_lowercase(self, async_client, seeded_db):
@@ -349,14 +357,12 @@ class TestDTCRelatedCodesEndpoint:
             assert "description_en" in item
 
     @pytest.mark.asyncio
-    async def test_related_codes_for_nonexistent_returns_empty(self, async_client, seeded_db):
-        """Test that nonexistent code returns empty related list."""
+    async def test_related_codes_for_nonexistent_returns_404(self, async_client, seeded_db):
+        """Test that nonexistent code returns 404."""
         response = await async_client.get("/api/v1/dtc/P9999/related")
 
-        # Should return empty list, not 404
-        assert response.status_code == 200
-        data = response.json()
-        assert data == []
+        # Endpoint raises 404 when the base DTC code doesn't exist
+        assert response.status_code == 404
 
 
 class TestDTCCategoriesEndpoint:

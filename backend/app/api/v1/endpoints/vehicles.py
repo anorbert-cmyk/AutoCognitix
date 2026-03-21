@@ -620,6 +620,8 @@ async def decode_vin(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"NHTSA API error: {e.message}",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error decoding VIN {vin}: {e}")
         raise HTTPException(

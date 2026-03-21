@@ -16,7 +16,7 @@ Author: AutoCognitix Team
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from app.core.logging import get_logger
 
@@ -269,7 +269,7 @@ class CalculatorService:
 
     def evaluate_repair_worthiness(
         self, vehicle_value_avg: int, repair_cost: int
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Union[str, float]]:
         """
         Evaluate whether repair is worth the cost.
 
@@ -702,9 +702,9 @@ class CalculatorService:
             Dict with cost breakdown or None if not found
         """
         try:
-            from app.db.postgres.session import async_session_factory
+            from app.db.postgres.session import async_session_maker
 
-            async with async_session_factory() as session:
+            async with async_session_maker() as session:
                 from sqlalchemy import select
 
                 from app.db.postgres.models import DiagnosisSession

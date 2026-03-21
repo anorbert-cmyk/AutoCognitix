@@ -14,6 +14,9 @@ import {
   Calculator,
   MessageSquare,
   MapPin,
+  Clock,
+  CreditCard,
+  BookOpen,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,6 +38,9 @@ const navigationItems: NavItem[] = [
   { label: 'Kalkulátor', href: '/calculator', icon: <Calculator className="h-4 w-4" /> },
   { label: 'AI Chat', href: '/chat', icon: <MessageSquare className="h-4 w-4" /> },
   { label: 'Szervizek', href: '/services', icon: <MapPin className="h-4 w-4" /> },
+  { label: 'Árazás', href: '/pricing', icon: <CreditCard className="h-4 w-4" /> },
+  { label: 'Changelog', href: '/changelog', icon: <Clock className="h-4 w-4" /> },
+  { label: 'Blog', href: '/blog', icon: <BookOpen className="h-4 w-4" /> },
 ];
 
 export default function Layout() {

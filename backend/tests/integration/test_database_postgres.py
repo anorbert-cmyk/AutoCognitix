@@ -535,10 +535,10 @@ class TestDatabaseTransactions:
 
     @pytest.mark.asyncio
     async def test_rollback_on_error(self, db_session):
-        """Test that errors trigger rollback."""
+        """Test that errors trigger rollback and session remains usable."""
         repo = DTCCodeRepository(db_session)
 
-        # Create a valid code
+        # Create a valid code and commit it
         await repo.create(
             {
                 "code": "P0400",
@@ -546,6 +546,7 @@ class TestDatabaseTransactions:
                 "category": "powertrain",
             }
         )
+        await db_session.commit()
 
         # Try to create duplicate (should fail)
         try:
@@ -557,9 +558,10 @@ class TestDatabaseTransactions:
                 }
             )
         except Exception:
-            pass
+            # Must rollback the failed transaction before the session is usable again
+            await db_session.rollback()
 
-        # Session should still be usable
+        # Session should still be usable after rollback
         dtc = await repo.get_by_code("P0400")
         assert dtc is not None
 

@@ -426,7 +426,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         # Check Cloudflare header first
         cf_connecting_ip = request.headers.get("CF-Connecting-IP")
         if cf_connecting_ip:
-            return cf_connecting_ip
+            return str(cf_connecting_ip)
 
         # Check X-Forwarded-For (take first non-private IP)
         forwarded = request.headers.get("X-Forwarded-For")
@@ -434,17 +434,17 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             ips = [ip.strip() for ip in forwarded.split(",")]
             for ip in ips:
                 if not self._is_private_ip(ip):
-                    return ip
-            return ips[0]  # Return first if all are private
+                    return str(ip)
+            return str(ips[0])  # Return first if all are private
 
         # Check X-Real-IP
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
-            return real_ip
+            return str(real_ip)
 
         # Fall back to direct client
         if request.client:
-            return request.client.host
+            return str(request.client.host)
         return "unknown"
 
     @staticmethod

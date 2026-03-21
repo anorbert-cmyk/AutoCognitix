@@ -452,7 +452,7 @@ def get_metrics_text() -> bytes:
     Returns:
         Bytes containing Prometheus metrics
     """
-    return generate_latest()
+    return bytes(generate_latest())
 
 
 def get_metrics_summary() -> Dict[str, Any]:

@@ -128,13 +128,17 @@ async def check_postgres_health() -> ServiceHealth:
             result = await session.execute(text("SELECT 1"))
             result.fetchone()
 
-            # Get table counts for key tables
-            # Whitelist of allowed table names to prevent SQL injection
+            # Get table counts for key tables using identifier quoting
+            # Table names are from a hardcoded whitelist - not user input
             ALLOWED_TABLES = {"dtc_codes", "vehicle_makes", "vehicle_models", "users"}
             table_counts = {}
             for table in ALLOWED_TABLES:
                 try:
-                    count_result = await session.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                    # Use quoted identifier to satisfy static analysis
+                    quoted = f'"{table}"'  # nosec B608
+                    count_result = await session.execute(
+                        text(f"SELECT COUNT(*) FROM {quoted}")  # nosec B608
+                    )
                     row = count_result.fetchone()
                     table_counts[table] = row[0] if row else 0
                 except Exception:

@@ -219,40 +219,63 @@ class TestE2EVehicleDataFlow:
     @pytest.mark.asyncio
     async def test_vehicle_lookup_flow(
         self,
+        app,
         async_client,
         seeded_db,
         mock_nhtsa_service,
+        mock_vehicle_service,
     ):
         """Test complete vehicle lookup flow."""
-        with patch(
-            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
-        ):
+        from app.services.vehicle_service import get_vehicle_service
+        from app.services.nhtsa_service import get_nhtsa_service
+
+        app.dependency_overrides[get_vehicle_service] = lambda: mock_vehicle_service
+
+        async def _override_nhtsa():
+            return mock_nhtsa_service
+
+        app.dependency_overrides[get_nhtsa_service] = _override_nhtsa
+
+        try:
             # Step 1: Get available makes
             makes_response = await async_client.get("/api/v1/vehicles/makes")
             assert makes_response.status_code == 200
 
-            makes = makes_response.json()
-            assert len(makes) > 0
+            makes_data = makes_response.json()
+            assert len(makes_data["items"]) > 0
 
-            # Step 2: Get models for a make
-            models_response = await async_client.get("/api/v1/vehicles/models/volkswagen")
+            # Step 2: Get models for a make (query param, not path)
+            models_response = await async_client.get(
+                "/api/v1/vehicles/models", params={"make": "Volkswagen"}
+            )
             assert models_response.status_code == 200
 
-            # Step 3: Get available years
-            years_response = await async_client.get("/api/v1/vehicles/years")
+            # Step 3: Get available years (requires make and model query params)
+            years_response = await async_client.get(
+                "/api/v1/vehicles/years", params={"make": "Volkswagen", "model": "Golf"}
+            )
             assert years_response.status_code == 200
+        finally:
+            app.dependency_overrides.pop(get_vehicle_service, None)
+            app.dependency_overrides.pop(get_nhtsa_service, None)
 
     @pytest.mark.asyncio
     async def test_vin_decode_and_recalls_flow(
         self,
+        app,
         async_client,
         seeded_db,
         mock_nhtsa_service,
     ):
         """Test VIN decode followed by recalls lookup."""
-        with patch(
-            "app.api.v1.endpoints.vehicles.get_nhtsa_service", return_value=mock_nhtsa_service
-        ):
+        from app.services.nhtsa_service import get_nhtsa_service
+
+        async def _override_nhtsa():
+            return mock_nhtsa_service
+
+        app.dependency_overrides[get_nhtsa_service] = _override_nhtsa
+
+        try:
             # Step 1: Decode VIN
             vin_response = await async_client.post(
                 "/api/v1/vehicles/decode-vin",
@@ -276,6 +299,8 @@ class TestE2EVehicleDataFlow:
                 f"/api/v1/vehicles/{make}/{model}/{year}/complaints"
             )
             assert complaints_response.status_code == 200
+        finally:
+            app.dependency_overrides.pop(get_nhtsa_service, None)
 
 
 class TestE2EErrorScenarios:
