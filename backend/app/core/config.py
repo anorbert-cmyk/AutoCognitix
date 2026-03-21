@@ -108,7 +108,7 @@ class Settings(BaseSettings):
         return v
 
     # PostgreSQL Connection Pool Configuration
-    DB_POOL_SIZE: int = 5  # Size of the connection pool
+    DB_POOL_SIZE: int = 10  # Size of the connection pool
     DB_MAX_OVERFLOW: int = 10  # Maximum overflow connections
     DB_POOL_RECYCLE: int = 1800  # Recycle connections after 30 minutes
     DB_POOL_TIMEOUT: int = 30  # Timeout for acquiring a connection from the pool
