@@ -99,6 +99,8 @@ export default function PricingPage() {
             </span>
             <button
               type="button"
+              role="switch"
+              aria-checked={isYearly}
               onClick={() => setIsYearly(!isYearly)}
               className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
                 isYearly ? 'bg-[#E8654A]' : 'bg-gray-300'
@@ -117,7 +119,7 @@ export default function PricingPage() {
               Éves
             </span>
             <span className="rounded-full bg-[#E8654A] px-3 py-1 text-xs font-semibold text-white">
-              SAVE 30%
+              30% kedvezmény
             </span>
           </div>
 
@@ -126,7 +128,7 @@ export default function PricingPage() {
             {/* Starter Card */}
             <div className="relative rounded-2xl border border-gray-200 bg-[#faf5f0] p-8 text-left">
               <span className="absolute right-6 top-6 rounded-full bg-[#E8654A] px-4 py-1 text-xs font-semibold text-white">
-                Most Popular
+                Legnépszerűbb
               </span>
               <h3 className="font-serif text-2xl font-bold text-gray-900">
                 Alap
@@ -152,6 +154,7 @@ export default function PricingPage() {
               </ul>
               <button
                 type="button"
+                onClick={() => { window.location.href = '/auth/register'; }}
                 className="mt-8 w-full rounded-lg bg-gray-900 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
               >
                 Választom
@@ -184,6 +187,7 @@ export default function PricingPage() {
               </ul>
               <button
                 type="button"
+                onClick={() => { window.location.href = '/auth/register'; }}
                 className="mt-8 w-full rounded-lg border-2 border-white px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-white hover:text-gray-900"
               >
                 Választom

@@ -62,6 +62,12 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+        },
+        "surface-warm": "hsl(var(--surface-warm))",
+        "border-warm": "hsl(var(--border-warm))",
         // Status colors for badges and indicators
         status: {
           success: {

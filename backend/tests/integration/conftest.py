@@ -5,9 +5,7 @@ Provides async database sessions, test clients, and mock services
 for comprehensive integration testing.
 """
 
-import asyncio
-import json
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 from uuid import uuid4
 import sys
 from pathlib import Path
@@ -15,8 +13,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
-from httpx import AsyncClient
-from sqlalchemy import event
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -24,101 +21,43 @@ from sqlalchemy.pool import StaticPool
 backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
-# Register PostgreSQL-specific types for SQLite compatibility BEFORE importing models
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+# ---- SQLite compatibility patches for PostgreSQL-specific types ----
+from tests.sqlite_compat import apply_sqlite_patches
 
-
-# Make ARRAY render as JSON in SQLite
-@event.listens_for(ARRAY, "before_parent_attach")
-def _receive_type(target, parent):
-    pass
-
-
-# Patch SQLite compiler to handle ARRAY and JSONB
-from sqlalchemy.dialects.sqlite import base as sqlite_base
-
-
-def _visit_ARRAY(self, type_, **kw):
-    return "JSON"
-
-
-def _visit_JSONB(self, type_, **kw):
-    return "JSON"
-
-
-sqlite_base.SQLiteTypeCompiler.visit_ARRAY = _visit_ARRAY
-sqlite_base.SQLiteTypeCompiler.visit_JSONB = _visit_JSONB
-
-# Patch ARRAY and JSONB result_processor so SQLite returns Python objects, not JSON strings
-_orig_array_result_processor = ARRAY.result_processor
-
-
-def _array_result_processor(self, dialect, coltype):
-    if dialect.name == "sqlite":
-
-        def process(value):
-            if value is None:
-                return value
-            if isinstance(value, str):
-                return json.loads(value)
-            return value
-
-        return process
-    return _orig_array_result_processor(self, dialect, coltype)
-
-
-ARRAY.result_processor = _array_result_processor
-
-_orig_jsonb_result_processor = JSONB.result_processor
-
-
-def _jsonb_result_processor(self, dialect, coltype):
-    if dialect.name == "sqlite":
-
-        def process(value):
-            if value is None:
-                return value
-            if isinstance(value, str):
-                return json.loads(value)
-            return value
-
-        return process
-    if _orig_jsonb_result_processor:
-        return _orig_jsonb_result_processor(self, dialect, coltype)
-    return None
-
-
-JSONB.result_processor = _jsonb_result_processor
-
-# Register adapters so Python lists/dicts are stored as JSON strings in SQLite
-import sqlite3
-
-
-def _adapt_list(lst):
-    return json.dumps(lst)
-
-
-def _adapt_dict(d):
-    return json.dumps(d)
-
-
-sqlite3.register_adapter(list, _adapt_list)
-sqlite3.register_adapter(dict, _adapt_dict)
+apply_sqlite_patches()
+# ---- End SQLite patches ----
 
 from app.db.postgres.models import Base, DTCCode, User, VehicleMake
 
 
 # =============================================================================
-# Event Loop Configuration
+# Mock Redis-dependent security functions (no Redis in test environment)
 # =============================================================================
 
 
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create an event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+def _mock_redis_security():
+    """Mock token blacklist functions to avoid Redis dependency in tests.
+
+    The security module uses a fail-closed policy: when Redis is unavailable,
+    is_token_blacklisted returns True (= reject token). We mock both functions
+    so tests don't depend on a running Redis instance.
+    """
+    from unittest.mock import patch
+
+    with (
+        patch(
+            "app.core.security.is_token_blacklisted",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.core.security.blacklist_token",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        yield
 
 
 # =============================================================================
@@ -580,7 +519,7 @@ async def async_client(app, db_session) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[get_db] = override_get_db
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
 
     app.dependency_overrides.clear()

@@ -221,7 +221,7 @@ class CalculatorService:
             Dict with min, max, avg vehicle value in HUF
         """
         current_year = datetime.now(timezone.utc).year
-        vehicle_age = current_year - year
+        vehicle_age = max(0, current_year - year)
 
         # Get MSRP range for vehicle class
         vehicle_class = self._get_vehicle_class(make)
@@ -294,7 +294,7 @@ class CalculatorService:
                 "ratio": 1.0,
             }
 
-        ratio = repair_cost / vehicle_value_avg
+        ratio = min(repair_cost / vehicle_value_avg, 99.99)
 
         if ratio < 0.35:
             recommendation = "repair"
@@ -348,7 +348,7 @@ class CalculatorService:
             List of factor dicts with name, impact, description
         """
         current_year = datetime.now(timezone.utc).year
-        vehicle_age = current_year - year
+        vehicle_age = max(0, current_year - year)
         factors: List[Dict[str, str]] = []
 
         # Vehicle age factor

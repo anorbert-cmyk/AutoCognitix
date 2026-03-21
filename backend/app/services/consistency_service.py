@@ -56,8 +56,8 @@ class ConsistencyService:
             return report
 
         # Handle errors from each database
-        pg_set: set[str] = set()
-        neo4j_set: set[str] = set()
+        pg_set: Set[str] = set()
+        neo4j_set: Set[str] = set()
         qdrant_int: int = 0
 
         if isinstance(pg_codes, BaseException):

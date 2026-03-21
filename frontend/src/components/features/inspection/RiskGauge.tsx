@@ -14,8 +14,8 @@ interface RiskGaugeProps {
   risk: 'high' | 'medium' | 'low'
 }
 
-function getRiskColor(score: number): { stroke: string; text: string; bg: string; label: string } {
-  if (score > 0.6) {
+function getRiskColor(risk: 'high' | 'medium' | 'low'): { stroke: string; text: string; bg: string; label: string } {
+  if (risk === 'high') {
     return {
       stroke: 'stroke-red-500',
       text: 'text-red-600',
@@ -23,7 +23,7 @@ function getRiskColor(score: number): { stroke: string; text: string; bg: string
       label: 'Magas kockazat',
     }
   }
-  if (score >= 0.3) {
+  if (risk === 'medium') {
     return {
       stroke: 'stroke-yellow-500',
       text: 'text-yellow-600',
@@ -41,7 +41,7 @@ function getRiskColor(score: number): { stroke: string; text: string; bg: string
 
 export default function RiskGauge({ score, risk }: RiskGaugeProps) {
   const percentage = Math.round(score * 100)
-  const colors = getRiskColor(score)
+  const colors = getRiskColor(risk)
 
   // SVG circle parameters
   const size = 180

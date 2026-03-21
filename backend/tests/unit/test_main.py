@@ -241,7 +241,7 @@ class TestMaxBodySizeMiddleware:
         middleware = MaxBodySizeMiddleware(dummy_app)
         scope = {"type": "websocket", "headers": []}
 
-        asyncio.get_event_loop().run_until_complete(middleware(scope, AsyncMock(), AsyncMock()))
+        asyncio.run(middleware(scope, AsyncMock(), AsyncMock()))
         assert called
 
     def test_max_body_size_constant(self):

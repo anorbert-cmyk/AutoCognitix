@@ -250,7 +250,7 @@ class TestDiagnosisHistoryEndpoint:
         data = response.json()
         # Response model is PaginatedDiagnosisHistory which may be dict or list
         if isinstance(data, dict):
-            assert "items" in data or "results" in data or "diagnoses" in data or len(data) >= 0
+            assert "items" in data or "results" in data or "diagnoses" in data
         else:
             assert isinstance(data, list)
             assert len(data) <= 5

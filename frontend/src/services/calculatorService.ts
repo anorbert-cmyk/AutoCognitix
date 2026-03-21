@@ -20,23 +20,22 @@ export interface CalculatorRequest {
   fuel_type?: 'petrol' | 'diesel' | 'hybrid' | 'electric' | 'lpg'
 }
 
-export interface BreakdownItem {
-  label: string
-  value: number
-  percentage: number
+export interface CostBreakdown {
+  parts_cost: number
+  labor_cost: number
+  additional_costs: number
 }
 
 export interface Factor {
   name: string
-  impact: 'positive' | 'negative' | 'neutral'
+  impact: 'positive' | 'negative'
   description: string
 }
 
 export interface AlternativeScenario {
-  title: string
+  scenario: string
   description: string
-  estimated_cost_huf: number
-  recommendation: string
+  estimated_value: number
 }
 
 export interface CalculatorResponse {
@@ -48,11 +47,12 @@ export interface CalculatorResponse {
   ratio: number
   recommendation: 'repair' | 'sell' | 'scrap'
   recommendation_text: string
-  breakdown: BreakdownItem[]
+  breakdown: CostBreakdown
   factors: Factor[]
   alternative_scenarios: AlternativeScenario[]
   confidence_score: number
   currency: string
+  ai_disclaimer: string
 }
 
 // =============================================================================
@@ -70,12 +70,12 @@ export function validateCalculatorRequest(data: CalculatorRequest): string[] {
     errors.push('Modell megadasa kotelezo')
   }
 
-  if (!data.vehicle_year || data.vehicle_year < 1970 || data.vehicle_year > new Date().getFullYear() + 1) {
-    errors.push('Ervenytelen evjarat (1970-tol)')
+  if (!data.vehicle_year || data.vehicle_year < 1990 || data.vehicle_year > 2030) {
+    errors.push('Ervenytelen evjarat (1990-2030)')
   }
 
-  if (!data.mileage_km || data.mileage_km < 0 || data.mileage_km > 1_000_000) {
-    errors.push('Ervenytelen kilometerora allas (0 - 1.000.000 km)')
+  if (data.mileage_km === undefined || data.mileage_km === null || data.mileage_km < 0 || data.mileage_km > 999_999) {
+    errors.push('Ervenytelen kilometerora allas (0 - 999.999 km)')
   }
 
   if (!data.condition) {

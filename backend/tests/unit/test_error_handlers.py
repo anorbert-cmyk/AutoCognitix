@@ -453,9 +453,17 @@ class TestRequestContextMiddleware:
             # At this point, request.state.request_id should be set
             return mock_response
 
-        await middleware.dispatch(request, mock_call_next)
-        # Verify request_id was set on state
-        assert hasattr(request.state, "request_id")
+        # Capture request_id inside call_next to verify it was set
+        captured_id = None
+
+        async def capturing_call_next(req):
+            nonlocal captured_id
+            captured_id = getattr(req.state, "request_id", None)
+            return mock_response
+
+        await middleware.dispatch(request, capturing_call_next)
+        # Verify request_id was actually set (not just MagicMock auto-attribute)
+        assert captured_id is not None
 
 
 # =============================================================================

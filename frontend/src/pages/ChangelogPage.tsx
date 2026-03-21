@@ -79,10 +79,10 @@ const ChangelogPage: React.FC = () => {
     <div className="min-h-screen bg-white">
       {/* Header */}
       <div className="pt-16 pb-12 text-center px-4">
-        <h1 className="font-serif text-5xl md:text-6xl text-[#1a1a1a] mb-4">
+        <h1 className="font-serif text-5xl md:text-6xl text-foreground mb-4">
           Changelog
         </h1>
-        <p className="text-[#666] text-lg max-w-xl mx-auto leading-relaxed">
+        <p className="text-muted-foreground text-lg max-w-xl mx-auto leading-relaxed">
           Folyamatosan fejlesztjük a platformot. Nézd meg a legújabb funkciók
           listáját!
         </p>
@@ -93,10 +93,7 @@ const ChangelogPage: React.FC = () => {
         <div className="relative">
           {/* Vertical dashed line */}
           <div
-            className="absolute left-[15px] md:left-[19px] top-2 bottom-0 w-0"
-            style={{
-              borderLeft: '2px dashed #d4c9be',
-            }}
+            className="absolute left-[15px] md:left-[19px] top-2 bottom-0 w-0 border-l-2 border-dashed border-border-warm"
           />
 
           <div className="space-y-10">
@@ -105,8 +102,7 @@ const ChangelogPage: React.FC = () => {
                 {/* Timeline circle */}
                 <div className="relative z-10 flex-shrink-0 mt-1">
                   <div
-                    className="w-[32px] h-[32px] md:w-[40px] md:h-[40px] rounded-full flex items-center justify-center"
-                    style={{ backgroundColor: '#E8654A' }}
+                    className="w-[32px] h-[32px] md:w-[40px] md:h-[40px] rounded-full flex items-center justify-center bg-brand"
                   >
                     <div className="w-[12px] h-[12px] md:w-[14px] md:h-[14px] rounded-full bg-white" />
                   </div>
@@ -116,46 +112,33 @@ const ChangelogPage: React.FC = () => {
                 <div className="flex-1 min-w-0">
                   {/* Version, date, badge row */}
                   <div className="flex flex-wrap items-center gap-3 mb-3">
-                    <span
-                      className="text-lg font-bold"
-                      style={{ color: '#E8654A' }}
-                    >
+                    <span className="text-lg font-bold text-brand">
                       {entry.version}
                     </span>
                     <span className="text-sm text-[#888]">{entry.date}</span>
                     {entry.isNew && (
-                      <span
-                        className="text-xs font-semibold px-3 py-0.5 rounded-full border"
-                        style={{
-                          color: '#E8654A',
-                          borderColor: '#E8654A',
-                        }}
-                      >
+                      <span className="text-xs font-semibold px-3 py-0.5 rounded-full border text-brand border-brand">
                         Új Verzió
                       </span>
                     )}
                   </div>
 
                   {/* Card */}
-                  <div
-                    className="rounded-xl p-5 md:p-6"
-                    style={{ backgroundColor: '#faf5f0' }}
-                  >
-                    <h3 className="text-[#1a1a1a] font-bold text-base md:text-lg mb-2">
+                  <div className="rounded-xl p-5 md:p-6 bg-surface-warm">
+                    <h3 className="text-foreground font-bold text-base md:text-lg mb-2">
                       {entry.title}
                     </h3>
-                    <p className="text-[#555] text-sm md:text-base mb-4 leading-relaxed">
+                    <p className="text-muted-foreground text-sm md:text-base mb-4 leading-relaxed">
                       {entry.description}
                     </p>
                     <ul className="space-y-1.5">
                       {entry.highlights.map((item, i) => (
                         <li
                           key={i}
-                          className="flex items-start gap-2 text-sm md:text-base text-[#333]"
+                          className="flex items-start gap-2 text-sm md:text-base text-foreground/80"
                         >
                           <span
-                            className="mt-[7px] flex-shrink-0 w-1.5 h-1.5 rounded-full"
-                            style={{ backgroundColor: '#E8654A' }}
+                            className="mt-[7px] flex-shrink-0 w-1.5 h-1.5 rounded-full bg-brand"
                           />
                           {item}
                         </li>

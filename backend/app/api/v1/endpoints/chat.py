@@ -181,11 +181,12 @@ async def chat_message(
 
     async def _timeout_wrapper():
         """Enforce stream timeout to prevent Slowloris attacks."""
-        deadline = asyncio.get_event_loop().time() + STREAM_TIMEOUT_SECONDS
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + STREAM_TIMEOUT_SECONDS
         gen = generate_events()
         try:
             async for event in gen:
-                if asyncio.get_event_loop().time() > deadline:
+                if loop.time() > deadline:
                     logger.warning(
                         "Chat stream timeout reached",
                         extra={"conversation_id": conversation_id},
