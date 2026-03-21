@@ -486,14 +486,25 @@ async def detailed_health_check():
     startup_time = get_startup_time()
     uptime = time.time() - startup_time
 
-    # Run all health checks concurrently
-    postgres, neo4j, qdrant, redis_health = await asyncio.gather(
-        check_postgres_health(),
-        check_neo4j_health(),
-        check_qdrant_health(),
-        check_redis_health(),
-        return_exceptions=True,
-    )
+    # Run all health checks concurrently with timeout to prevent hanging readiness probes
+    try:
+        postgres, neo4j, qdrant, redis_health = await asyncio.wait_for(
+            asyncio.gather(
+                check_postgres_health(),
+                check_neo4j_health(),
+                check_qdrant_health(),
+                check_redis_health(),
+                return_exceptions=True,
+            ),
+            timeout=10.0,  # 10 second timeout for all checks
+        )
+    except asyncio.TimeoutError:
+        logger.error("Health check timeout - one or more services not responding")
+        postgres = neo4j = qdrant = redis_health = ServiceHealth(
+            name="All",
+            status="unhealthy",
+            error="Health check timeout",
+        )
 
     # Handle any exceptions
     services = {}

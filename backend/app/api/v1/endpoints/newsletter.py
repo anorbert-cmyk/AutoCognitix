@@ -76,13 +76,18 @@ async def subscribe(
     )
     existing = result.scalar_one_or_none()
 
+    # Prepare standard response message (same for all cases to prevent email enumeration)
+    standard_message = (
+        "Sikeres feliratkozás! Nézd meg az email fiókodat a megerősítő linkért."
+        if payload.language == "hu"
+        else "Subscribed! Check your inbox to confirm your email."
+    )
+
     if existing:
         if existing.status == "confirmed":
-            return SubscribeResponse(
-                success=True,
-                message="Már feliratkoztál!" if payload.language == "hu" else "Already subscribed!",
-            )
-        if existing.status == "unsubscribed":
+            # Already confirmed - send confirmation email silently without revealing status
+            await _send_confirm_email(email, existing.confirm_token or secrets.token_urlsafe(32), payload.language)
+        elif existing.status == "unsubscribed":
             # Re-subscribe
             existing.status = "pending"
             existing.confirm_token = secrets.token_urlsafe(32)
@@ -90,25 +95,14 @@ async def subscribe(
             await db.flush()
 
             await _send_confirm_email(email, existing.confirm_token, payload.language)
-
-            return SubscribeResponse(
-                success=True,
-                message=(
-                    "Újra feliratkoztál! Erősítsd meg az email címed."
-                    if payload.language == "hu"
-                    else "Re-subscribed! Please confirm your email."
-                ),
-            )
-        # Status is pending - resend confirmation
-        if existing.confirm_token:
+        elif existing.confirm_token:
+            # Status is pending - resend confirmation
             await _send_confirm_email(email, existing.confirm_token, payload.language)
+
+        # Return generic success message (same as new subscriber)
         return SubscribeResponse(
             success=True,
-            message=(
-                "Már feliratkoztál - nézd meg az email fiókodat a megerősítő linkért!"
-                if payload.language == "hu"
-                else "Already signed up - check your inbox for the confirmation link!"
-            ),
+            message=standard_message,
         )
 
     # New subscriber
@@ -139,11 +133,7 @@ async def subscribe(
 
     return SubscribeResponse(
         success=True,
-        message=(
-            "Sikeres feliratkozás! Nézd meg az email fiókodat a megerősítő linkért."
-            if payload.language == "hu"
-            else "Subscribed! Check your inbox to confirm your email."
-        ),
+        message=standard_message,
     )
 
 
