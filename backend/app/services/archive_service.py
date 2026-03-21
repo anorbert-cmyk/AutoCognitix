@@ -7,7 +7,7 @@ space efficiency while preserving data for compliance (GDPR).
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast, Dict, Optional
+from typing import Optional, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, select
@@ -113,5 +113,5 @@ class ArchiveService:
         )
         archive = result.scalar_one_or_none()
         if archive:
-            return cast("Dict[Any, Any]", archive.session_data)
+            return cast("dict", archive.session_data)
         return None
