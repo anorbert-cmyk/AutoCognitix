@@ -34,11 +34,10 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 from tqdm import tqdm
-from tqdm.asyncio import tqdm as async_tqdm
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

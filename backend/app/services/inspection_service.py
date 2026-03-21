@@ -23,6 +23,7 @@ from app.api.v1.schemas.inspection import (
     InspectionRiskLevel,
     InspectionSeverity,
 )
+from app.core.log_sanitizer import sanitize_log, sanitize_exception
 from app.core.logging import get_logger
 from app.services.parts_price_service import get_parts_price_service
 
@@ -324,7 +325,7 @@ class InspectionService:
             "Műszaki vizsga értékelés indítása",
             extra={
                 "vehicle": (
-                    f"{request.vehicle_make} {request.vehicle_model} {request.vehicle_year}"
+                    f"{sanitize_log(request.vehicle_make)} {sanitize_log(request.vehicle_model)} {request.vehicle_year}"
                 ),
                 "dtc_count": len(request.dtc_codes),
             },
@@ -367,8 +368,8 @@ class InspectionService:
                     fix_recommendation = f"{issue} - javasolt alkatrészek: {', '.join(part_names)}"
             except Exception as exc:
                 logger.warning(
-                    f"Alkatrész ár lekérés sikertelen: {dtc_code} - {exc}",
-                    extra={"dtc_code": dtc_code},
+                    f"Alkatrész ár lekérés sikertelen: {sanitize_log(dtc_code)} - {sanitize_exception(exc)}",
+                    extra={"dtc_code": sanitize_log(dtc_code)},
                 )
 
             failing_items.append(

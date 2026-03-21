@@ -708,6 +708,16 @@ class FullBackupExporter:
         return archive_path
 
 
+def _safe_tar_extract(tar, dest_dir):
+    """Filter tar members to prevent path traversal attacks (CVE-2007-4559)."""
+    dest = os.path.realpath(str(dest_dir))
+    for member in tar.getmembers():
+        member_path = os.path.realpath(os.path.join(dest_dir, member.name))
+        if not member_path.startswith(dest + os.sep) and member_path != dest:
+            raise ValueError(f"Attempted path traversal in tar member: {member.name}")
+    tar.extractall(path=dest_dir)
+
+
 def verify_backup(backup_path: Path) -> bool:
     """
     Verify backup integrity.
@@ -731,7 +741,7 @@ def verify_backup(backup_path: Path) -> bool:
     try:
         # Extract archive
         with tarfile.open(backup_path, "r:gz") as tar:
-            tar.extractall(path=temp_dir)
+            _safe_tar_extract(tar, temp_dir)
 
         # Read manifest
         manifest_file = temp_dir / "manifest.json"

@@ -343,7 +343,7 @@ async def translate_batch(
             return {}
 
         if response.status_code != 200:
-            logger.error(f"{provider} API error: {response.status_code} - {response.text[:200]}")
+            logger.error(f"{provider} API error: status={response.status_code}")
             if retry_count < MAX_RETRIES:
                 await asyncio.sleep(5)
                 return await translate_batch(
@@ -384,12 +384,12 @@ async def translate_batch(
                 logger.warning(f"No JSON found in {provider} response")
                 return {}
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON decode error from {provider}: {e}")
+        except json.JSONDecodeError:
+            logger.warning(f"JSON decode error from {provider}")
             return {}
 
-    except httpx.RequestError as e:
-        logger.error(f"{provider} request error: {e}")
+    except httpx.RequestError:
+        logger.error(f"{provider} request failed")
         if retry_count < MAX_RETRIES:
             await asyncio.sleep(5 * (retry_count + 1))
             return await translate_batch(

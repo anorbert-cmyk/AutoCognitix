@@ -23,6 +23,7 @@ from app.api.v1.schemas.vehicle import (
     VINDecodeRequest,
     VINDecodeResponse,
 )
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.services.nhtsa_service import (
     Complaint,
@@ -437,7 +438,7 @@ async def get_vehicle_models(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching models for {make}: {e}")
+        logger.error(f"Error fetching models for {sanitize_log(make)}: {sanitize_exception(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch vehicle models: {e!s}",
@@ -497,7 +498,9 @@ async def get_available_years(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching years for {make} {model}: {e}")
+        logger.error(
+            f"Error fetching years for {sanitize_log(make)} {sanitize_log(model)}: {sanitize_exception(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch vehicle years: {e!s}",
@@ -623,7 +626,7 @@ async def decode_vin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error decoding VIN {vin}: {e}")
+        logger.error(f"Error decoding VIN {sanitize_log(vin)}: {sanitize_exception(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to decode VIN: {e!s}",
@@ -682,7 +685,9 @@ async def get_vehicle_recalls(
             detail=f"NHTSA API error: {e.message}",
         )
     except Exception as e:
-        logger.error(f"Error fetching recalls for {make} {model} {year}: {e}")
+        logger.error(
+            f"Error fetching recalls for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_exception(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch recalls: {e!s}",
@@ -742,7 +747,9 @@ async def get_vehicle_complaints(
             detail=f"NHTSA API error: {e.message}",
         )
     except Exception as e:
-        logger.error(f"Error fetching complaints for {make} {model} {year}: {e}")
+        logger.error(
+            f"Error fetching complaints for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_exception(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch complaints: {e!s}",
@@ -814,7 +821,9 @@ async def get_vehicle_common_issues(
         )
 
     except Exception as e:
-        logger.error(f"Error fetching common issues for {make} {model}: {e}")
+        logger.error(
+            f"Error fetching common issues for {sanitize_log(make)} {sanitize_log(model)}: {sanitize_exception(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch common issues: {e!s}",

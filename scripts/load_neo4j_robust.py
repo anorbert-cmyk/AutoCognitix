@@ -125,9 +125,10 @@ class RobustNeo4jLoader:
                     try:
                         await self.close()
                         await self.connect()
-                    except:
+                    except Exception:
                         pass
-        raise last_error
+        if last_error is not None:
+            raise last_error
 
     async def create_indexes(self):
         """Create indexes for better performance."""

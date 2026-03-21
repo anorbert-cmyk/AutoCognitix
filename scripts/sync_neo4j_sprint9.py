@@ -178,7 +178,8 @@ class Neo4jSprint9Loader:
                     )
                     await asyncio.sleep(delay)
                     await self._reconnect()
-        raise last_error  # type: ignore[misc]
+        if last_error is not None:
+            raise last_error
 
     # ------------------------------------------------------------------
     # Indexes

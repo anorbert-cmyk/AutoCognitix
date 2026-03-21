@@ -429,7 +429,7 @@ def seed_postgres(dtc_codes: List[Dict[str, Any]]) -> None:
             print("TEST USER CREATED")
             print("=" * 60)
             print(f"Email: test@autocognitix.com")
-            print(f"Password: {test_password}")
+            print(f"Password: {test_password}")  # noqa: LOG002 - deliberate one-time credential display for local dev setup
             print("=" * 60)
             print("IMPORTANT: Save this password - it will not be shown again!\n")
             logger.info("Test user created successfully - credentials printed to stdout only")

@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.v1.endpoints.auth import get_optional_current_user
 from app.api.v1.schemas.chat import ChatRequest
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import User
 from app.services.chat_service import get_chat_service
@@ -137,7 +138,7 @@ async def chat_message(
                 if not await _is_connected():
                     logger.info(
                         "Client disconnected during chat stream",
-                        extra={"conversation_id": conversation_id},
+                        extra={"conversation_id": sanitize_log(conversation_id)},
                     )
                     return
                 yield _format_sse_event(event)
@@ -145,7 +146,7 @@ async def chat_message(
         except asyncio.CancelledError:
             logger.info(
                 "Chat stream cancelled",
-                extra={"conversation_id": conversation_id},
+                extra={"conversation_id": sanitize_log(conversation_id)},
             )
             return
 
@@ -153,7 +154,7 @@ async def chat_message(
             logger.exception(
                 "Chat streaming error",
                 extra={
-                    "conversation_id": conversation_id,
+                    "conversation_id": sanitize_log(conversation_id),
                     "error_type": type(e).__name__,
                 },
             )
@@ -172,7 +173,7 @@ async def chat_message(
             except Exception:
                 logger.error(
                     "Failed to send error event for chat stream",
-                    extra={"conversation_id": conversation_id},
+                    extra={"conversation_id": sanitize_log(conversation_id)},
                 )
 
         finally:
@@ -189,7 +190,7 @@ async def chat_message(
                 if loop.time() > deadline:
                     logger.warning(
                         "Chat stream timeout reached",
-                        extra={"conversation_id": conversation_id},
+                        extra={"conversation_id": sanitize_log(conversation_id)},
                     )
                     yield _format_sse_event(
                         {

@@ -18,6 +18,7 @@ Author: AutoCognitix Team
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -251,11 +252,11 @@ class CalculatorService:
 
         logger.info(
             "Jarmu ertekbecsles: %s %s %d, %d km, %s allapot -> %s - %s HUF (atlag: %s)",
-            make,
-            model,
+            sanitize_log(make),
+            sanitize_log(model),
             year,
             mileage_km,
-            condition,
+            sanitize_log(condition),
             f"{value_min:,}",
             f"{value_max:,}",
             f"{value_avg:,}",
@@ -575,11 +576,11 @@ class CalculatorService:
         """
         logger.info(
             "Kalkulator inditas: %s %s %d, %d km, %s",
-            vehicle_make,
-            vehicle_model,
+            sanitize_log(vehicle_make),
+            sanitize_log(vehicle_model),
             vehicle_year,
             mileage_km,
-            condition,
+            sanitize_log(condition),
         )
 
         # Step 1: Estimate vehicle value
@@ -603,8 +604,6 @@ class CalculatorService:
         repair_cost_max = 0
         parts_cost = 0
         labor_cost = 0
-        confidence = 0.60
-
         if repair_cost_huf is not None:
             # User provided explicit repair cost
             repair_cost_min = int(repair_cost_huf * 0.85)
@@ -624,7 +623,7 @@ class CalculatorService:
             else:
                 logger.warning(
                     "Diagnosztika nem talalhato: %s, fallback koltseg becsles",
-                    diagnosis_id,
+                    sanitize_log(str(diagnosis_id)),
                 )
                 repair_cost_min = 50_000
                 repair_cost_max = 300_000
@@ -682,8 +681,8 @@ class CalculatorService:
 
         logger.info(
             "Kalkulator eredmeny: %s %s %d -> %s (ratio: %.2f)",
-            vehicle_make,
-            vehicle_model,
+            sanitize_log(vehicle_make),
+            sanitize_log(vehicle_model),
             vehicle_year,
             evaluation["recommendation"],
             evaluation["ratio"],

@@ -42,7 +42,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 import httpx
 from tqdm import tqdm
@@ -54,8 +54,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Try to import database dependencies
 try:
     from sqlalchemy import create_engine, text
-    from sqlalchemy.exc import IntegrityError, OperationalError
-
     HAS_SQLALCHEMY = True
 except ImportError:
     HAS_SQLALCHEMY = False

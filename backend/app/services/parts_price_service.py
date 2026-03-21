@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_log
 
 logger = logging.getLogger(__name__)
 
@@ -476,14 +477,14 @@ class PartsPriceService:
         cache_key = f"dtc_parts:{dtc_upper}:{vehicle_make}:{vehicle_model}:{vehicle_year}"
         cached = await self._cache.get(cache_key)
         if cached:
-            logger.debug(f"Cache hit DTC alkatreszek: {dtc_upper}")
+            logger.debug(f"Cache hit DTC alkatreszek: {sanitize_log(dtc_upper)}")
             result: List[Dict[str, Any]] = json.loads(cached)
             return result
 
         # Get parts from mapping
         part_keys = DTC_PARTS_MAPPING.get(dtc_upper, [])
         if not part_keys:
-            logger.info(f"Nincs ismert alkatresz a {dtc_upper} kodhoz")
+            logger.info(f"Nincs ismert alkatresz a {sanitize_log(dtc_upper)} kodhoz")
             return []
 
         # Get part details
@@ -502,7 +503,7 @@ class PartsPriceService:
         if parts:
             await self._cache.set(json.dumps(parts), cache_key)
 
-        logger.info(f"Talalt alkatreszek ({dtc_upper}): {len(parts)} db")
+        logger.info(f"Talalt alkatreszek ({sanitize_log(dtc_upper)}): {len(parts)} db")
         return parts
 
     async def estimate_repair_cost(

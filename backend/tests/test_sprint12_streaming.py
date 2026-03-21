@@ -4,7 +4,6 @@ Verifies streaming endpoint structure and email integration in auth endpoints
 by inspecting source code. All tests are synchronous and use no app imports.
 """
 
-import os
 from pathlib import Path
 
 import pytest

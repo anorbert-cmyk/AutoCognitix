@@ -1202,13 +1202,13 @@ class DiagnosisService:
             session = await self.diagnosis_repository.get(diagnosis_id)
 
             if not session:
-                logger.debug(f"Diagnosis {diagnosis_id} not found")
+                logger.debug(f"Diagnosis {sanitize_log(str(diagnosis_id))} not found")
                 return None
 
             # IDOR protection: verify ownership at service layer
             if user_id and session.user_id and str(session.user_id) != str(user_id):
                 logger.warning(
-                    f"IDOR attempt: user {user_id} tried to access diagnosis {diagnosis_id}"
+                    f"IDOR attempt: user {sanitize_log(str(user_id))} tried to access diagnosis {sanitize_log(str(diagnosis_id))}"
                 )
                 return None  # Return None (same as not found) to prevent info leakage
 

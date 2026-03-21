@@ -40,6 +40,7 @@ from app.core.security import (
     get_password_hash,
     verify_password,
 )
+from app.core.log_sanitizer import sanitize_log
 from app.db.postgres.models import DiagnosisSession, User
 from app.services.email_service import send_password_reset_email, send_welcome_email
 from app.db.postgres.repositories import UserRepository
@@ -389,7 +390,7 @@ async def register(
     # Check if email already exists
     existing_user = await repository.get_by_email(user_data.email.lower())
     if existing_user:
-        logger.warning(f"Registration attempt with existing email: {user_data.email}")
+        logger.warning(f"Registration attempt with existing email: {sanitize_log(user_data.email)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Ez az email cím már regisztrálva van",

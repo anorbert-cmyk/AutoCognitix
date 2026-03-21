@@ -311,7 +311,7 @@ class EmailService:
                 f"[DEMO] Email kuldese:\n"
                 f"  Cimzett: {to_email}\n"
                 f"  Targy: {subject}\n"
-                f"  Tartalom (elso 200 karakter): {text_content[:200]}..."
+                f"  Tartalom hossza: {len(text_content)} karakter"
             )
             return True
 
