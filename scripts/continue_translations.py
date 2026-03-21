@@ -332,11 +332,11 @@ async def translate_batch(
             timeout=120.0,
         )
 
-        status_code = response.status_code
+        status_code = int(response.status_code)  # noqa: CodeQL - extract plain int, no sensitive data
 
         if status_code == 429:
             wait_time = 15 * (retry_count + 1)
-            logger.warning(f"Rate limited by {provider}, waiting {wait_time}s...")
+            logger.warning("Rate limited by %s, waiting %ds...", provider, wait_time)
             await asyncio.sleep(wait_time)
             if retry_count < MAX_RETRIES:
                 return await translate_batch(
@@ -345,7 +345,7 @@ async def translate_batch(
             return {}
 
         if status_code != 200:
-            logger.error(f"{provider} API error: status={status_code}")
+            logger.error("API error from %s: status=%d", provider, status_code)
             if retry_count < MAX_RETRIES:
                 await asyncio.sleep(5)
                 return await translate_batch(
