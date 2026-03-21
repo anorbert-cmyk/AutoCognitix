@@ -30,7 +30,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Ruff
-        run: pip install ruff
+        run: pip install 'ruff==0.15.7'
 
       - name: Run Ruff linter
         run: |
@@ -311,7 +311,7 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    needs: [frontend-build]
+    needs: [frontend-build, backend-lint, backend-test]
     steps:
       - uses: actions/checkout@v4
 
