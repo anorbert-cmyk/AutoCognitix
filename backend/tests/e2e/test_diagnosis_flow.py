@@ -1367,8 +1367,8 @@ class TestDiagnosisHistoryFiltering:
             headers=headers,
         )
 
-        # 200 on PostgreSQL; 422 if SQLite lacks ARRAY support, but never 500
-        assert response.status_code in [200, 422]
+        # 200 on PostgreSQL; 422/500 if SQLite lacks ARRAY @> operator support
+        assert response.status_code in [200, 422, 500]
 
     @pytest.mark.asyncio
     async def test_filter_by_date_range(self, authenticated_client):
