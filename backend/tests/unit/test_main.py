@@ -13,33 +13,11 @@ Tests cover:
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.responses import PlainTextResponse
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_app_no_lifespan() -> FastAPI:
-    """Create the application with lifespan disabled so TestClient works synchronously."""
-    with patch("app.main.lifespan", new=_noop_lifespan):
-        from importlib import reload
-        import app.main as main_mod
-
-        reload(main_mod)
-        return main_mod.create_application()
-
-
-@asynccontextmanager
-async def _noop_lifespan(app: FastAPI):
-    yield
 
 
 # ---------------------------------------------------------------------------
