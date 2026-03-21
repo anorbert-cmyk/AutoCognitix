@@ -268,17 +268,20 @@ class TestCoreOps:
     @pytest.mark.asyncio
     async def test_delete_success(self, service):
         service._client.delete = AsyncMock()
-        assert await service.delete("k") is True
+        result = await service.delete("k")
+        assert result is True
 
     @pytest.mark.asyncio
     async def test_delete_returns_false_when_disconnected(self, service):
         service._connected = False
-        assert await service.delete("k") is False
+        result = await service.delete("k")
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_delete_records_failure_on_exception(self, service):
         service._client.delete = AsyncMock(side_effect=Exception("err"))
-        assert await service.delete("k") is False
+        result = await service.delete("k")
+        assert result is False
         assert service._failure_count == 1
 
     @pytest.mark.asyncio

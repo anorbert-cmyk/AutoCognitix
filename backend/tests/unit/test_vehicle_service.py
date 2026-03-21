@@ -5,7 +5,6 @@ Mocks Neo4j (neomodel_db) and PostgreSQL (async_session_maker) to test
 all service methods without real database connections.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

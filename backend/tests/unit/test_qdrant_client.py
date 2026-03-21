@@ -1,6 +1,5 @@
 """Unit tests for app.db.qdrant_client module."""
 
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 

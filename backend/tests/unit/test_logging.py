@@ -1,7 +1,6 @@
 """Tests for app.core.logging module."""
 
 import logging
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest

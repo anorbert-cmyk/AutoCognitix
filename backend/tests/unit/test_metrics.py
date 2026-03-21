@@ -1,43 +1,28 @@
 """Tests for app.core.metrics module."""
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from prometheus_client import REGISTRY
 
 from app.core.metrics import (
     ACTIVE_SESSIONS,
     DB_CONNECTION_POOL,
     DB_QUERY_COUNT,
     DB_QUERY_ERRORS,
-    DB_QUERY_LATENCY,
-    DB_ROWS_AFFECTED,
-    DIAGNOSIS_LATENCY,
     DIAGNOSIS_REQUEST_COUNT,
     DTC_CODES_TOTAL,
     DTC_LOOKUP_COUNT,
-    EMBEDDING_BATCH_SIZE,
     EMBEDDING_GENERATION_COUNT,
-    EMBEDDING_GENERATION_LATENCY,
     ERROR_COUNT,
     EXCEPTION_COUNT,
     EXTERNAL_API_CALLS,
     EXTERNAL_API_ERRORS,
-    EXTERNAL_API_LATENCY,
-    LLM_LATENCY,
     LLM_REQUESTS,
     LLM_TOKENS,
     MetricsMiddleware,
     REQUEST_COUNT,
-    REQUEST_IN_PROGRESS,
-    REQUEST_LATENCY,
-    REQUEST_SIZE,
-    RESPONSE_SIZE,
     USERS_TOTAL,
     VECTOR_SEARCH_COUNT,
-    VECTOR_SEARCH_LATENCY,
-    VECTOR_SEARCH_RESULTS,
     VEHICLE_DECODE_COUNT,
     VEHICLES_TOTAL,
     generate_metrics_response,
