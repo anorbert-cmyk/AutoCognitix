@@ -332,7 +332,9 @@ async def translate_batch(
             timeout=120.0,
         )
 
-        if response.status_code == 429:
+        status_code = response.status_code
+
+        if status_code == 429:
             wait_time = 15 * (retry_count + 1)
             logger.warning(f"Rate limited by {provider}, waiting {wait_time}s...")
             await asyncio.sleep(wait_time)
@@ -342,8 +344,8 @@ async def translate_batch(
                 )
             return {}
 
-        if response.status_code != 200:
-            logger.error(f"{provider} API error: status={response.status_code}")
+        if status_code != 200:
+            logger.error(f"{provider} API error: status={status_code}")
             if retry_count < MAX_RETRIES:
                 await asyncio.sleep(5)
                 return await translate_batch(
