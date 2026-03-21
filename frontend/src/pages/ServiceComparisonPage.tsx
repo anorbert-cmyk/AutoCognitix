@@ -28,7 +28,7 @@ export function ServiceComparisonPage() {
     service_type: '',
     sort_by: 'rating',
   })
-  const [_selectedShopId, setSelectedShopId] = useState<string | null>(null)
+  const [, setSelectedShopId] = useState<string | null>(null)
 
   // ---------------------------------------------------------------------------
   // Build search params from state

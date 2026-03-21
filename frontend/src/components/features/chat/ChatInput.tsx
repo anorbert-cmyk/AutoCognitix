@@ -60,9 +60,10 @@ export function ChatInput({
   }, [])
 
   const handleMic = useCallback(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     const SpeechRecognitionConstructor =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    /* eslint-enable @typescript-eslint/no-explicit-any */
     if (!SpeechRecognitionConstructor) {
       return
     }
