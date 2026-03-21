@@ -26,6 +26,11 @@ from app.services.vehicle_service import get_vehicle_service
 class TestVINDecode:
     """Tests for POST /api/v1/vehicles/decode-vin endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
+
     @pytest.mark.asyncio
     async def test_decode_vin_success(
         self, async_client: AsyncClient, app, mock_nhtsa_service, valid_vins: list[str]
@@ -139,6 +144,11 @@ class TestVINDecode:
 
 class TestVehicleMakes:
     """Tests for GET /api/v1/vehicles/makes endpoint (paginated)."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
 
     @pytest.fixture
     def mock_vehicle_svc(self):
@@ -271,6 +281,11 @@ class TestVehicleMakes:
 
 class TestVehicleModels:
     """Tests for GET /api/v1/vehicles/models?make=... endpoint (paginated)."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
 
     @pytest.fixture
     def mock_vehicle_svc_models(self):
@@ -405,6 +420,11 @@ class TestVehicleModels:
 class TestVehicleYears:
     """Tests for GET /api/v1/vehicles/years?make=...&model=... endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
+
     @pytest.fixture
     def mock_vehicle_svc_years(self):
         """Create a mock vehicle service with years data."""
@@ -530,6 +550,11 @@ class TestVehicleYears:
 class TestVehicleRecalls:
     """Tests for GET /api/v1/vehicles/{make}/{model}/{year}/recalls endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
+
     @pytest.mark.asyncio
     async def test_get_recalls_returns_200(
         self, async_client: AsyncClient, app, mock_nhtsa_service
@@ -583,6 +608,11 @@ class TestVehicleRecalls:
 class TestVehicleComplaints:
     """Tests for GET /api/v1/vehicles/{make}/{model}/{year}/complaints endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
+
     @pytest.mark.asyncio
     async def test_get_complaints_returns_200(
         self, async_client: AsyncClient, app, mock_nhtsa_service
@@ -625,6 +655,11 @@ class TestVehicleComplaints:
 
 class TestVehicleEndpointErrors:
     """Tests for vehicle endpoint error handling."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
     async def test_nhtsa_api_error_returns_502(self, async_client: AsyncClient, app):

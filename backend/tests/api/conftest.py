@@ -11,11 +11,8 @@ Provides comprehensive fixtures for testing all API endpoints including:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import sqlite3
 from datetime import datetime
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -26,66 +23,9 @@ from sqlalchemy.pool import StaticPool
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---- SQLite compatibility patches for PostgreSQL-specific types ----
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.dialects.sqlite import base as sqlite_base
+from tests.sqlite_compat import apply_sqlite_patches
 
-
-def _visit_ARRAY(self, type_, **kw):
-    return "JSON"
-
-
-def _visit_JSONB(self, type_, **kw):
-    return "JSON"
-
-
-sqlite_base.SQLiteTypeCompiler.visit_ARRAY = _visit_ARRAY
-sqlite_base.SQLiteTypeCompiler.visit_JSONB = _visit_JSONB
-
-# Patch ARRAY and JSONB result_processor so SQLite returns Python objects
-_orig_array_result_processor = ARRAY.result_processor
-
-
-def _array_result_processor(self, dialect, coltype):
-    if dialect.name == "sqlite":
-
-        def process(value):
-            if value is None:
-                return value
-            if isinstance(value, str):
-                return json.loads(value)
-            return value
-
-        return process
-    return _orig_array_result_processor(self, dialect, coltype)
-
-
-ARRAY.result_processor = _array_result_processor
-
-_orig_jsonb_result_processor = JSONB.result_processor
-
-
-def _jsonb_result_processor(self, dialect, coltype):
-    if dialect.name == "sqlite":
-
-        def process(value):
-            if value is None:
-                return value
-            if isinstance(value, str):
-                return json.loads(value)
-            return value
-
-        return process
-    if _orig_jsonb_result_processor:
-        return _orig_jsonb_result_processor(self, dialect, coltype)
-    return None
-
-
-JSONB.result_processor = _jsonb_result_processor
-
-# Register adapters so Python lists/dicts are stored as JSON strings in SQLite
-sqlite3.register_adapter(list, json.dumps)
-sqlite3.register_adapter(dict, json.dumps)
-
+apply_sqlite_patches()
 # ---- End SQLite patches ----
 
 from app.core.security import get_password_hash, create_access_token, create_refresh_token
@@ -125,19 +65,6 @@ def _mock_redis_blacklist():
         ),
     ):
         yield
-
-
-# =============================================================================
-# Event Loop Configuration
-# =============================================================================
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create an event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 # =============================================================================
@@ -747,9 +674,9 @@ def app(
         return JSONResponse(status_code=422, content={"detail": errors})
 
     # Register exception handlers (AutoCognitixException, SQLAlchemy, etc.)
-    from app.core.error_handlers import setup_exception_handlers
+    from app.core.error_handlers import setup_all_exception_handlers
 
-    setup_exception_handlers(test_app)
+    setup_all_exception_handlers(test_app)
 
     # Override the default RequestValidationError handler with our test-safe one
     # (must come after setup_exception_handlers since it registers its own)

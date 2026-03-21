@@ -4,7 +4,7 @@
  * Enter to send, Shift+Enter for newline.
  */
 
-import { useState, useCallback, useRef, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useState, useCallback, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { Send, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -22,7 +22,18 @@ export function ChatInput({
   placeholder = 'Irjon uzenetet...',
 }: ChatInputProps) {
   const [text, setText] = useState('')
+  const [isListening, setIsListening] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort()
+      }
+    }
+  }, [])
 
   const charCount = text.length
   const canSend = text.trim().length > 0 && !disabled && charCount <= MAX_CHARS
@@ -82,8 +93,14 @@ export function ChatInput({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recognition.onerror = (event: any) => {
       console.error('Speech recognition error:', event.error)
+      setIsListening(false)
     }
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+    recognitionRef.current = recognition
     recognition.start()
+    setIsListening(true)
   }, [])
 
   const hasSpeechRecognition =
@@ -103,7 +120,9 @@ export function ChatInput({
               'flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full transition-colors',
               disabled
                 ? 'text-gray-300 cursor-not-allowed'
-                : 'text-gray-500 hover:text-primary-600 hover:bg-primary-50'
+                : isListening
+                  ? 'text-red-500 animate-pulse'
+                  : 'text-gray-500 hover:text-primary-600 hover:bg-primary-50'
             )}
             title="Diktalas"
             aria-label="Beszedfelismeres inditasa"

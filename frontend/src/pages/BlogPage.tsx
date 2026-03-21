@@ -1,4 +1,4 @@
-import { Wrench, Search, Zap, ArrowRight } from 'lucide-react';
+import { Wrench, Search, Zap } from 'lucide-react';
 
 interface BlogPost {
   date: string;
@@ -48,13 +48,9 @@ function BlogCard({ post }: { post: BlogPost }) {
         <h3 className="text-lg font-semibold text-gray-900 mb-3">{post.title}</h3>
         <p className="text-gray-600 text-sm leading-relaxed mb-6 flex-1">{post.description}</p>
         <div>
-          <a
-            href="#"
-            className="inline-flex items-center gap-2 bg-gray-900 text-white text-sm font-medium px-5 py-2.5 rounded-full hover:bg-gray-800 transition-colors"
-          >
-            Tovább olvasom
-            <ArrowRight className="h-4 w-4" />
-          </a>
+          <span className="inline-flex items-center gap-2 bg-gray-300 text-gray-500 text-sm font-medium px-5 py-2.5 rounded-full cursor-not-allowed select-none">
+            Hamarosan...
+          </span>
         </div>
       </div>
     </div>
