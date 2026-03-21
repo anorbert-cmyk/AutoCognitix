@@ -5,7 +5,7 @@ Tests graph queries for diagnostic paths, symptoms, and components.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 import sys
 from pathlib import Path
 

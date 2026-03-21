@@ -5,8 +5,7 @@ Tests context retrieval, response generation, and confidence scoring.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from dataclasses import field
+from unittest.mock import AsyncMock, patch
 import sys
 from pathlib import Path
 

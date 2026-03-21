@@ -819,7 +819,7 @@ async def async_client(app, db_session) -> AsyncGenerator[AsyncClient, None]:
             if jti:
                 _blacklisted_jtis.add(jti)
         except Exception:
-            pass
+            pass  # Token decode may fail for invalid/expired tokens; safe to ignore
         return True
 
     with (
