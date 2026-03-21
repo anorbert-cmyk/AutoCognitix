@@ -37,6 +37,15 @@
   --status-info-dark: 29 78 216;
 
   /* ============================================
+   * BRAND COLORS
+   * Primary brand accent used across marketing pages
+   * ============================================ */
+  --brand: 14 78% 60%;           /* #E8654A */
+  --brand-foreground: 0 0% 100%; /* white */
+  --surface-warm: 28 56% 96%;    /* #faf5f0 */
+  --border-warm: 28 20% 80%;     /* #d4c9be */
+
+  /* ============================================
    * LAYOUT DIMENSIONS
    * Fixed sizes for layout components
    * ============================================ */
