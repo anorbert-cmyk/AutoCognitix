@@ -1045,13 +1045,15 @@ def restore_qdrant(backup_path: Path, dry_run: bool = False) -> bool:
 
 
 def _safe_tar_extract(tar, dest_dir):
-    """Filter tar members to prevent path traversal attacks (CVE-2007-4559)."""
+    """Safely extract tar members, rejecting path traversal (CVE-2007-4559)."""
     dest = os.path.realpath(str(dest_dir))
+    safe_members = []
     for member in tar.getmembers():
         member_path = os.path.realpath(os.path.join(dest_dir, member.name))
         if not member_path.startswith(dest + os.sep) and member_path != dest:
             raise ValueError(f"Attempted path traversal in tar member: {member.name}")
-    tar.extractall(path=dest_dir)
+        safe_members.append(member)
+    tar.extractall(path=dest_dir, members=safe_members)
 
 
 def restore_json_files(backup_path: Path, dry_run: bool = False) -> bool:

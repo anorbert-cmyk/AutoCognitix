@@ -125,8 +125,8 @@ class RobustNeo4jLoader:
                     try:
                         await self.close()
                         await self.connect()
-                    except Exception:
-                        pass
+                    except Exception as reconnect_err:
+                        print(f"  Reconnect failed: {str(reconnect_err)[:80]}")
         if last_error is not None:
             raise last_error
 
