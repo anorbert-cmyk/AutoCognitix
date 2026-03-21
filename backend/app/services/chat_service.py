@@ -243,9 +243,14 @@ class ChatService:
             context_lines: List[str] = []
 
             for code in dtc_codes[:5]:  # Limit to 5 codes
-                results = await rag_service.search_dtc_context(code)
+                results = await rag_service.retrieve_from_qdrant(
+                    query=code, collection="dtc_codes", top_k=3
+                )
                 if results:
-                    context_lines.append(f"DTC {code}: {results}")
+                    summaries = [
+                        str(r.content.get("description", r.content)) for r in results if r.content
+                    ]
+                    context_lines.append(f"DTC {code}: {'; '.join(summaries)}")
 
             if context_lines:
                 return "Diagnosztikai kontextus:\n" + "\n".join(context_lines)
@@ -259,15 +264,15 @@ class ChatService:
     async def _fetch_diagnosis_context(self, diagnosis_id: str) -> Optional[str]:
         """Fetch existing diagnosis context by ID."""
         try:
-            from app.db.postgres.session import async_session_factory
+            from app.db.postgres.session import async_session_maker
 
-            async with async_session_factory() as db:
+            async with async_session_maker() as db:
                 from app.db.postgres.repositories import DiagnosisSessionRepository
 
                 repo = DiagnosisSessionRepository(db)
                 from uuid import UUID
 
-                session = await repo.get_by_id(UUID(diagnosis_id))
+                session = await repo.get(UUID(diagnosis_id))
                 if session:
                     parts: List[str] = [
                         f"Korabbi diagnozis: {session.vehicle_make} "

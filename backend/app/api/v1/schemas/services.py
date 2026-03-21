@@ -74,3 +74,4 @@ class ServiceSearchResponse(BaseModel):
     limit: int = Field(20, ge=1, le=100, description="Results per page")
     offset: int = Field(0, ge=0, description="Results offset")
     has_more: bool = Field(False, description="Whether more results available")
+    regions: List[Region] = Field(default_factory=list, description="Available regions")
