@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -741,7 +741,7 @@ async def async_client(app, db_session) -> AsyncGenerator[AsyncClient, None]:
         sync_patch("app.core.security.blacklist_token", side_effect=_mock_blacklist),
         sync_patch("app.api.v1.endpoints.auth.blacklist_token", side_effect=_mock_blacklist),
     ):
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield client
 
     app.dependency_overrides.clear()
@@ -782,7 +782,7 @@ async def authenticated_client(app, db_session, seeded_db) -> AsyncGenerator[Dic
         sync_patch("app.core.security.blacklist_token", side_effect=_mock_blacklist),
         sync_patch("app.api.v1.endpoints.auth.blacklist_token", side_effect=_mock_blacklist),
     ):
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield {
                 "client": client,
                 "user": test_user,
@@ -1243,7 +1243,7 @@ async def admin_client(app, db_session, seeded_db) -> AsyncGenerator[Dict[str, A
         sync_patch("app.core.security.blacklist_token", side_effect=_mock_blacklist),
         sync_patch("app.api.v1.endpoints.auth.blacklist_token", side_effect=_mock_blacklist),
     ):
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield {
                 "client": client,
                 "user": admin_user,
@@ -1287,7 +1287,7 @@ async def mechanic_client(app, db_session, seeded_db) -> AsyncGenerator[Dict[str
         sync_patch("app.core.security.blacklist_token", side_effect=_mock_blacklist),
         sync_patch("app.api.v1.endpoints.auth.blacklist_token", side_effect=_mock_blacklist),
     ):
-        async with AsyncClient(app=app, base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield {
                 "client": client,
                 "user": mechanic_user,

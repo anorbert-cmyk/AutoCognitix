@@ -16,6 +16,7 @@ import sqlite3
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.sqlite import base as sqlite_base
 
+
 def apply_sqlite_patches() -> None:
     """Apply all SQLite compatibility patches (idempotent)."""
     if getattr(apply_sqlite_patches, "_done", False):
