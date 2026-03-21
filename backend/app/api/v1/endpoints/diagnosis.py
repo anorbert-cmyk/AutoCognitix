@@ -343,7 +343,10 @@ async def get_diagnosis(
     except Exception as e:
         logger.exception(
             "Error retrieving diagnosis",
-            extra={"diagnosis_id": sanitize_log(str(diagnosis_id)), "error_message": sanitize_exception(e)},
+            extra={
+                "diagnosis_id": sanitize_log(str(diagnosis_id)),
+                "error_message": sanitize_exception(e),
+            },
         )
         raise DiagnosisException(
             message="Hiba tortent a diagnozis lekeresekor.",
