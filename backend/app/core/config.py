@@ -65,7 +65,11 @@ class Settings(BaseSettings):
         return v
 
     # CORS - Use Union type to handle both string (from env) and list formats
-    BACKEND_CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
+    BACKEND_CORS_ORIGINS: Union[List[str], str] = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://autocognitix-landing-production.up.railway.app",
+    ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
@@ -143,6 +147,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: Optional[str] = None
     EMAIL_FROM: str = "AutoCognitix <noreply@autocognitix.hu>"
     EMAIL_DEMO_MODE: bool = True  # True = csak logolás, nincs tényleges küldés
+
+    # Landing Page
+    LANDING_PAGE_URL: str = "https://autocognitix-landing-production.up.railway.app"
 
     # Logging
     LOG_LEVEL: str = "INFO"

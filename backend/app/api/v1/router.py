@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     health,
     inspection,
     metrics,
+    newsletter,
     services,
     vehicles,
 )
@@ -24,6 +25,12 @@ api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Authentication"],
+)
+
+api_router.include_router(
+    newsletter.router,
+    prefix="/newsletter",
+    tags=["Newsletter"],
 )
 
 api_router.include_router(

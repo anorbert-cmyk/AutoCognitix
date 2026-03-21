@@ -218,6 +218,10 @@ def create_application() -> FastAPI:
             "description": "Vehicle information management. Decode VINs, lookup vehicle makes/models, and retrieve NHTSA recall and complaint data.",
         },
         {
+            "name": "Newsletter",
+            "description": "Newsletter subscription management. Subscribe, confirm, and unsubscribe from the AutoCognitix newsletter. Public endpoints, no auth required.",
+        },
+        {
             "name": "Metrics",
             "description": "Prometheus metrics for monitoring. Track request counts, latencies, and application health metrics.",
         },
