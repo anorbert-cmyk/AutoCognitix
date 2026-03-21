@@ -343,7 +343,7 @@ async def get_diagnosis(
     except Exception as e:
         logger.exception(
             "Error retrieving diagnosis",
-            extra={"diagnosis_id": str(diagnosis_id), "error_message": sanitize_exception(e)},
+            extra={"diagnosis_id": sanitize_log(str(diagnosis_id)), "error_message": sanitize_exception(e)},
         )
         raise DiagnosisException(
             message="Hiba tortent a diagnozis lekeresekor.",
@@ -527,7 +527,7 @@ async def delete_diagnosis(
     except Exception as e:
         logger.exception(
             "Error deleting diagnosis",
-            extra={"diagnosis_id": str(diagnosis_id), "error": sanitize_exception(e)},
+            extra={"diagnosis_id": sanitize_log(str(diagnosis_id)), "error": sanitize_exception(e)},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

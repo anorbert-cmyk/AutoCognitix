@@ -686,7 +686,7 @@ async def get_vehicle_recalls(
         )
     except Exception as e:
         logger.error(
-            f"Error fetching recalls for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_exception(e)}"
+            f"Error fetching recalls for {sanitize_log(make)} {sanitize_log(model)} {sanitize_log(year)}: {sanitize_exception(e)}"
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -748,7 +748,7 @@ async def get_vehicle_complaints(
         )
     except Exception as e:
         logger.error(
-            f"Error fetching complaints for {sanitize_log(make)} {sanitize_log(model)} {year}: {sanitize_exception(e)}"
+            f"Error fetching complaints for {sanitize_log(make)} {sanitize_log(model)} {sanitize_log(year)}: {sanitize_exception(e)}"
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
