@@ -1114,11 +1114,12 @@ async def analyze_vehicle_stream(  # noqa: PLR0915
 
     async def _timeout_wrapper():
         """Enforce stream timeout to prevent Slowloris attacks."""
-        deadline = asyncio.get_event_loop().time() + STREAM_TIMEOUT_SECONDS
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + STREAM_TIMEOUT_SECONDS
         gen = generate_events()
         try:
             async for event in gen:
-                if asyncio.get_event_loop().time() > deadline:
+                if loop.time() > deadline:
                     logger.warning(f"Stream timeout reached for diagnosis {diagnosis_id}")
                     yield _format_sse_event(
                         StreamingEvent(
