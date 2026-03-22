@@ -31,11 +31,24 @@ logger = logging.getLogger(__name__)
 def _sanitize_log(value: str) -> str:
     """Sanitize a user-provided value before including it in a log message.
 
-    Strips control characters (newlines, carriage returns, tabs, etc.) to
-    prevent log injection attacks where an attacker could forge additional
-    log entries by embedding newline sequences in user-controlled input.
+    Removes control characters (newlines, carriage returns, tabs, and other
+    non-printable ASCII) to prevent log injection attacks where an attacker
+    could forge additional log entries by embedding newline sequences in
+    user-controlled input. Truncates overly long values to avoid log flooding.
     """
-    return re.sub(r"[\r\n\t\x00-\x1f\x7f]", "_", str(value))
+    # Safely convert to string
+    s = str(value)
+    # Explicitly remove newlines and carriage returns to prevent log entry splitting
+    s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Remove any remaining non-printable ASCII control characters
+    s = re.sub(r"[\x00-\x1f\x7f]", "", s)
+    # Collapse multiple whitespace characters and trim
+    s = re.sub(r"\s+", " ", s).strip()
+    # Truncate to a reasonable length to prevent log flooding
+    max_len = 200
+    if len(s) > max_len:
+        s = s[:max_len] + "...[truncated]"
+    return s if s else "<empty>"
 
 
 # =============================================================================
@@ -411,10 +424,9 @@ class EmailService:
 
         if self._demo_mode:
             logger.info(
-                "[DEMO] Email küldése: Címzett=%s | Tárgy=%s | Tartalom (első 200 karakter): %s...",
+                "[DEMO] Email küldése: Címzett=%s | Tárgy=%s",
                 _sanitize_log(to_email),
                 _sanitize_log(subject),
-                _sanitize_log(text_content[:200]),
             )
             return True
 
