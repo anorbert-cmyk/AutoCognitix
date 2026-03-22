@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.sqlite import base as sqlite_base
 
 

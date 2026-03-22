@@ -1387,6 +1387,6 @@ class TestTokenClaims:
         tokens = login_response.json()
 
         # Decode refresh token
-        payload = await decode_token(tokens["refresh_token"])
+        payload = await decode_token(tokens["refresh_token"], expected_type="refresh")
         assert payload is not None
         assert payload.get("type") == "refresh"
