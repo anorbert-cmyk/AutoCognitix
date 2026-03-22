@@ -75,6 +75,46 @@ AutoCognitix/
 - `backend/app/db/neo4j_models.py` - Gráf séma
 - `backend/app/api/v1/schemas/diagnosis.py` - Fő API kontraktus
 
+## Globális Skills & Automatizáció (minden projektre érvényes)
+
+### Telepített Skills (`~/.claude/skills/`)
+
+| Skill | Trigger | Mit csinál |
+|-------|---------|-----------|
+| **systematic-debugging** | Bug report, error, failing test | 4-fázisú root cause analysis. NEM javít root cause nélkül |
+| **test-driven-development** | Új feature, bug fix, kódváltozás | Red-Green-Refactor. NEM ír production kódot teszt nélkül |
+| **writing-plans** | 3+ lépéses feladat, feature request | Részletes implementációs terv 2-5 perces taskokra bontva |
+| **executing-plans** | Terv jóváhagyása után | Strukturált végrehajtás checkpointokkal |
+| **verification-before-completion** | Bármilyen "kész" állítás előtt | Friss bizonyíték KÖTELEZŐ minden befejezés-állításhoz |
+| **dispatching-parallel-agents** | Független problémák párhuzamosan | Subagent-ek egyidejű futtatása, eredmények összesítése |
+| **subagent-driven-development** | Terv végrehajtás izolált taskokkal | Fresh subagent per task + 2 szintű review |
+| **frontend-design** | UI komponens, oldal, styling | "AI slop" mentes, egyedi design. SOHA nem generic |
+| **deep-research** | "deep research", "compare X vs Y", "analyze" | 8-fázisú kutatás citációkkal, auto-continue |
+| **context-optimization** | Automatikus, nagy codebase/context esetén | KV-cache, observation masking, compaction, partitioning |
+
+### MCP Szerverek (`~/.claude/.mcp.json`)
+
+| MCP | Használat | Automatikus permission |
+|-----|-----------|----------------------|
+| **Context7** | `resolve-library-id` → `get-library-docs` | Naprakész library doksi (FastAPI, React, Neo4j, stb.) |
+| **Tavily** | `tavily-search`, `tavily-extract` | AI-alapú web keresés (TAVILY_API_KEY szükséges) |
+
+### Hooks (`~/.claude/settings.json`)
+
+| Hook | Esemény | Mit csinál |
+|------|---------|-----------|
+| **SessionStart** | Session induláskor | npm ci, git status, projekt felismerés |
+| **PostToolUse (Write\|Edit)** | Fájl írás/szerkesztés után | Auto ruff (Python) / prettier (TS/JS) formázás |
+| **Stop** | Session leállításkor | Git uncommitted changes ellenőrzés |
+
+### Hogyan Használd Más Projekteken
+
+1. **Semmi tennivaló** — a skills, MCP, hooks mind `~/.claude/` alatt vannak = globálisak
+2. **Projekt-specifikus override**: `.claude/settings.json` és `.claude/settings.local.json` a projekt gyökerében
+3. **Context7 használata**: Amikor library doksira van szükség, Claude automatikusan lekéri a legfrissebb verziót
+4. **Tavily**: Alkatrész ár kutatás, API doksi keresés, bármi ami web search kell
+5. **Skills automatikus trigger**: A skill description-ben lévő trigger szavak alapján Claude automatikusan aktiválja
+
 ## Workflow Orchestration - MINDIG KÖTELEZŐ
 
 ### 1. Plan Mode Default
