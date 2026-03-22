@@ -275,13 +275,14 @@ export function PartStoreCardGrid({ parts, className = '' }: PartStoreCardGridPr
 
   const storeLegendItems = useMemo(() => {
     const storeNames = ['Bárdi Autó', 'Unix Autó', 'AUTODOC'] as const;
-    return storeNames
-      .map((name) => {
-        const store = parts[0]?.stores.find((s) => s.storeName === name);
-        if (!store) return null;
-        return { name, color: store.storeLogoColor };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
+    const items: { name: string; color: string }[] = [];
+    for (const name of storeNames) {
+      const store = parts[0]?.stores.find((s) => s.storeName === name);
+      if (store) {
+        items.push({ name, color: store.storeLogoColor });
+      }
+    }
+    return items;
   }, [parts]);
 
   if (!parts || parts.length === 0) return null;
