@@ -136,7 +136,11 @@ async def subscribe(
     db.add(subscriber)
     await db.flush()
 
-    logger.info(f"New newsletter subscriber: {email[:3]}***@*** (source: {payload.source})")
+    masked_email = f"{email[:3]}***@***" if len(email) > 3 else "***@***"
+    logger.info(
+        "New newsletter subscriber",
+        extra={"masked_email": masked_email, "source": payload.source},
+    )
 
     # Send confirmation email
     await _send_confirm_email(email, confirm_token, payload.language)

@@ -894,7 +894,7 @@ async def embed_batch_async(
     preprocess: bool = False,
     batch_size: Optional[int] = None,
     use_cache: bool = True,
-) -> List[List[float]]:
+) -> List[Optional[List[float]]]:
     """
     Async batch embedding generation.
 
@@ -905,6 +905,6 @@ async def embed_batch_async(
         use_cache: Whether to use Redis cache.
 
     Returns:
-        List[List[float]]: List of embedding vectors.
+        List of embedding vectors (None for failed embeddings).
     """
     return await get_embedding_service().embed_batch_async(texts, preprocess, batch_size, use_cache)

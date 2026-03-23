@@ -885,7 +885,7 @@ class DiagnosisService:
                         f"Parts lookup failed for a DTC code: {sanitize_log(str(result))}"
                     )
                     continue
-                for part in result:
+                for part in result:  # type: ignore[union-attr]
                     part_id = part.get("id", "")
                     if part_id not in seen_part_ids:
                         seen_part_ids.add(part_id)
