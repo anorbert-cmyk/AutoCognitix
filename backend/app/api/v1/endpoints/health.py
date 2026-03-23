@@ -20,7 +20,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.v1.endpoints.auth import get_current_user_from_token
+from app.db.postgres.models import User
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -462,7 +465,9 @@ async def readiness_check():
 
 
 @router.get("/detailed", response_model=DetailedHealthResponse, tags=["Health"])
-async def detailed_health_check():
+async def detailed_health_check(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Detailed health check for all services.
 
@@ -516,6 +521,7 @@ async def detailed_health_check():
             error=str(postgres),
         )
     else:
+        assert isinstance(postgres, ServiceHealth)
         services["postgres"] = postgres
 
     if isinstance(neo4j, Exception):
@@ -525,6 +531,7 @@ async def detailed_health_check():
             error=str(neo4j),
         )
     else:
+        assert isinstance(neo4j, ServiceHealth)
         services["neo4j"] = neo4j
 
     if isinstance(qdrant, Exception):
@@ -534,6 +541,7 @@ async def detailed_health_check():
             error=str(qdrant),
         )
     else:
+        assert isinstance(qdrant, ServiceHealth)
         services["qdrant"] = qdrant
 
     if isinstance(redis_health, Exception):
@@ -543,6 +551,7 @@ async def detailed_health_check():
             error=str(redis_health),
         )
     else:
+        assert isinstance(redis_health, ServiceHealth)
         services["redis"] = redis_health
 
     # Determine overall status
@@ -577,7 +586,9 @@ async def detailed_health_check():
 
 
 @router.get("/db", tags=["Health"])
-async def database_stats():
+async def database_stats(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Get database statistics.
 
@@ -598,21 +609,25 @@ async def database_stats():
         return_exceptions=True,
     )
 
+    def _get_details(result: object, name: str) -> object:
+        if isinstance(result, Exception):
+            return {"error": str(result)}
+        assert isinstance(result, ServiceHealth)
+        return result.details
+
     return {
-        "postgres": postgres.details
-        if not isinstance(postgres, Exception)
-        else {"error": str(postgres)},
-        "neo4j": neo4j.details if not isinstance(neo4j, Exception) else {"error": str(neo4j)},
-        "qdrant": qdrant.details if not isinstance(qdrant, Exception) else {"error": str(qdrant)},
-        "redis": redis_health.details
-        if not isinstance(redis_health, Exception)
-        else {"error": str(redis_health)},
+        "postgres": _get_details(postgres, "PostgreSQL"),
+        "neo4j": _get_details(neo4j, "Neo4j"),
+        "qdrant": _get_details(qdrant, "Qdrant"),
+        "redis": _get_details(redis_health, "Redis"),
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/consistency", response_model=ConsistencyResponse, tags=["Health"])
-async def consistency_check():
+async def consistency_check(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Cross-database consistency check.
 

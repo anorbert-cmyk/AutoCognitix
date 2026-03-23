@@ -283,11 +283,11 @@ class TestRateLimitMiddleware:
         assert mw._get_client_ip(req) == "10.0.0.1"
 
     def test_get_client_ip_forwarded(self):
-        """X-Forwarded-For header, takes last IP."""
+        """X-Forwarded-For header, takes first IP (original client)."""
         app = MagicMock()
         mw = RateLimitMiddleware(app)
         req = _make_request(headers={"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 3.3.3.3"})
-        assert mw._get_client_ip(req) == "3.3.3.3"
+        assert mw._get_client_ip(req) == "1.1.1.1"
 
     def test_get_client_ip_real_ip(self):
         """X-Real-IP header."""

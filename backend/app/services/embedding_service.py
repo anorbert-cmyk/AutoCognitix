@@ -219,7 +219,8 @@ class HungarianEmbeddingService:
                 settings.HUBERT_MODEL,
                 torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
             )
-            assert self._model is not None
+            if self._model is None:
+                raise RuntimeError("Failed to load huBERT model")
             self._model.to(self._device)
             self._model.eval()
 
@@ -351,8 +352,10 @@ class HungarianEmbeddingService:
             return [0.0] * settings.EMBEDDING_DIMENSION
 
         # Tokenize
-        assert self._tokenizer is not None, "Tokenizer not loaded"
-        assert self._model is not None, "Model not loaded"
+        if self._tokenizer is None:
+            raise RuntimeError("Tokenizer not loaded")
+        if self._model is None:
+            raise RuntimeError("Model not loaded")
         encoded = self._tokenizer(
             text, padding=True, truncation=True, max_length=512, return_tensors="pt"
         )
@@ -494,8 +497,10 @@ class HungarianEmbeddingService:
             batch_texts = [item[1] for item in non_empty_items]
 
             # Tokenize batch
-            assert self._tokenizer is not None, "Tokenizer not loaded"
-            assert self._model is not None, "Model not loaded"
+            if self._tokenizer is None:
+                raise RuntimeError("Tokenizer not loaded")
+            if self._model is None:
+                raise RuntimeError("Model not loaded")
             encoded = self._tokenizer(
                 batch_texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
             )
@@ -695,7 +700,7 @@ class HungarianEmbeddingService:
         preprocess: bool = False,
         batch_size: Optional[int] = None,
         use_cache: bool = True,
-    ) -> List[List[float]]:
+    ) -> List[Optional[List[float]]]:
         """
         Async version of embed_batch with cache integration.
 
@@ -706,7 +711,7 @@ class HungarianEmbeddingService:
             use_cache: Whether to use Redis cache.
 
         Returns:
-            List[List[float]]: List of embedding vectors.
+            List[Optional[List[float]]]: List of embedding vectors (None for failed entries).
         """
         if not texts:
             return []
@@ -769,7 +774,7 @@ class HungarianEmbeddingService:
                 except Exception:
                     pass
 
-        return results  # type: ignore
+        return results
 
     def disable_cache(self) -> None:
         """Disable embedding cache (for testing)."""
@@ -889,7 +894,7 @@ async def embed_batch_async(
     preprocess: bool = False,
     batch_size: Optional[int] = None,
     use_cache: bool = True,
-) -> List[List[float]]:
+) -> List[Optional[List[float]]]:
     """
     Async batch embedding generation.
 
@@ -900,6 +905,6 @@ async def embed_batch_async(
         use_cache: Whether to use Redis cache.
 
     Returns:
-        List[List[float]]: List of embedding vectors.
+        List of embedding vectors (None for failed embeddings).
     """
     return await get_embedding_service().embed_batch_async(texts, preprocess, batch_size, use_cache)

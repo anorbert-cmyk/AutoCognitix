@@ -210,7 +210,7 @@ class DiagnosisService:
             logger.info(f"Validated {len(dtc_details)} DTC codes")
 
             # Step 3: Preprocess Hungarian symptoms
-            preprocessed_symptoms = self._preprocess_symptoms(request.symptoms)
+            preprocessed_symptoms = await self._preprocess_symptoms(request.symptoms)
             logger.debug(f"Preprocessed symptoms: {sanitize_log(preprocessed_symptoms[:100])}...")
 
             # Step 4: Fetch NHTSA recalls and complaints (parallel)
@@ -407,7 +407,7 @@ class DiagnosisService:
     # Symptom Preprocessing
     # =========================================================================
 
-    def _preprocess_symptoms(self, symptoms: str) -> str:
+    async def _preprocess_symptoms(self, symptoms: str) -> str:
         """
         Preprocess Hungarian symptom text.
 
@@ -423,7 +423,8 @@ class DiagnosisService:
             Preprocessed symptom text.
         """
         try:
-            return preprocess_hungarian(symptoms)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, preprocess_hungarian, symptoms)
         except Exception as e:
             logger.warning(f"Symptom preprocessing failed: {sanitize_log(str(e))}, using raw text")
             return symptoms
@@ -828,7 +829,7 @@ class DiagnosisService:
         return {
             "probable_causes": probable_causes,
             "recommended_repairs": recommended_repairs,
-            "confidence_score": min(0.8, confidence),
+            "confidence_score": max(0.0, min(1.0, confidence)),
             "sources": sources,
             "used_fallback": True,
             "safety_warnings": [],
@@ -866,15 +867,25 @@ class DiagnosisService:
             all_parts = []
             seen_part_ids = set()
 
-            # Get parts for each DTC code
-            for code in dtc_codes:
-                parts = await service.get_parts_for_dtc(
+            # Get parts for all DTC codes in parallel
+            tasks = [
+                service.get_parts_for_dtc(
                     dtc_code=code,
                     vehicle_make=vehicle_make,
                     vehicle_model=vehicle_model,
                     vehicle_year=vehicle_year,
                 )
-                for part in parts:
+                for code in dtc_codes
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.warning(
+                        f"Parts lookup failed for a DTC code: {sanitize_log(str(result))}"
+                    )
+                    continue
+                for part in result:  # type: ignore[union-attr]
                     part_id = part.get("id", "")
                     if part_id not in seen_part_ids:
                         seen_part_ids.add(part_id)
@@ -1017,7 +1028,8 @@ class DiagnosisService:
         for recall in recalls[:3]:
             if recall.consequence:
                 safety_warnings.append(
-                    f"VISSZAHIVAS ({recall.component}): {recall.consequence[:150]}..."
+                    f"VISSZAHIVAS ({recall.component}): {recall.consequence[:150]}"
+                    + ("..." if len(recall.consequence) > 150 else "")
                 )
 
         # Add critical DTC warnings
@@ -1122,13 +1134,13 @@ class DiagnosisService:
                 ):
                     return "critical"
             urgency = "high"
-        # Check for complaints with crash/fire
-        elif any(complaint.crash or complaint.fire for complaint in complaints) or any(
+        # Check for complaints with crash/fire or high severity DTCs
+        if any(complaint.crash or complaint.fire for complaint in complaints) or any(
             dtc.severity == "high" for dtc in dtc_details
         ):
             urgency = "high"
         # Check for medium severity DTCs
-        elif any(dtc.severity == "medium" for dtc in dtc_details):
+        if urgency not in ("high",) and any(dtc.severity == "medium" for dtc in dtc_details):
             urgency = "medium"
 
         return urgency
@@ -1180,7 +1192,7 @@ class DiagnosisService:
             }
 
             await self.diagnosis_repository.create(session_data)
-            await self.db.commit()
+            await self.db.flush()
             logger.debug(f"Saved diagnosis session {diagnosis_id}")
             return True
 

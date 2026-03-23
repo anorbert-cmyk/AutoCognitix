@@ -6,6 +6,7 @@ supporting both local and cloud deployments with Hungarian error messages.
 """
 
 import asyncio
+import threading
 from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
@@ -485,13 +486,16 @@ class QdrantService:
 # this module does not open a network connection (important for tests/CI
 # where Qdrant may not be running).
 _qdrant_instance: Optional[QdrantService] = None
+_qdrant_lock = threading.Lock()
 
 
 def _get_qdrant_instance() -> QdrantService:
     """Return (and lazily create) the global QdrantService singleton."""
     global _qdrant_instance
     if _qdrant_instance is None:
-        _qdrant_instance = QdrantService()
+        with _qdrant_lock:
+            if _qdrant_instance is None:
+                _qdrant_instance = QdrantService()
     return _qdrant_instance
 
 

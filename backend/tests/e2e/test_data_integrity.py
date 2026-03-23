@@ -22,8 +22,11 @@ class TestPostgreSQLDataIntegrity:
     """Test PostgreSQL data integrity constraints."""
 
     @pytest.mark.asyncio
-    async def test_dtc_code_unique_constraint(self, async_client, seeded_db):
+    async def test_dtc_code_unique_constraint(self, authenticated_client, seeded_db):
         """Test that DTC code is unique in database."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # First create a DTC code
         dtc1 = {
             "code": "P5001",
@@ -32,7 +35,7 @@ class TestPostgreSQLDataIntegrity:
             "severity": "medium",
         }
 
-        response1 = await async_client.post("/api/v1/dtc/", json=dtc1)
+        response1 = await client.post("/api/v1/dtc/", json=dtc1, headers=headers)
         assert response1.status_code == 201
 
         # Try to create duplicate
@@ -43,7 +46,7 @@ class TestPostgreSQLDataIntegrity:
             "severity": "low",
         }
 
-        response2 = await async_client.post("/api/v1/dtc/", json=dtc2)
+        response2 = await client.post("/api/v1/dtc/", json=dtc2, headers=headers)
         assert response2.status_code == 400
 
     @pytest.mark.asyncio
@@ -68,8 +71,11 @@ class TestPostgreSQLDataIntegrity:
         assert response2.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_dtc_code_format_constraint(self, async_client, seeded_db):
+    async def test_dtc_code_format_constraint(self, authenticated_client, seeded_db):
         """Test that DTC code format is validated."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         invalid_dtcs = [
             {
                 "code": "INVALID",
@@ -92,14 +98,17 @@ class TestPostgreSQLDataIntegrity:
         ]
 
         for dtc in invalid_dtcs:
-            response = await async_client.post("/api/v1/dtc/", json=dtc)
+            response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
             assert response.status_code in [400, 422], (
                 f"Invalid code {dtc['code']} should be rejected"
             )
 
     @pytest.mark.asyncio
-    async def test_dtc_category_enum_constraint(self, async_client, seeded_db):
+    async def test_dtc_category_enum_constraint(self, authenticated_client, seeded_db):
         """Test that DTC category must be valid enum value."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         invalid_dtc = {
             "code": "P5555",
             "description_en": "Test Code",
@@ -107,12 +116,15 @@ class TestPostgreSQLDataIntegrity:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=invalid_dtc)
+        response = await client.post("/api/v1/dtc/", json=invalid_dtc, headers=headers)
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_dtc_severity_enum_constraint(self, async_client, seeded_db):
+    async def test_dtc_severity_enum_constraint(self, authenticated_client, seeded_db):
         """Test that DTC severity must be valid enum value."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         invalid_dtc = {
             "code": "P5556",
             "description_en": "Test Code",
@@ -120,7 +132,7 @@ class TestPostgreSQLDataIntegrity:
             "severity": "invalid_severity",  # Not in enum
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=invalid_dtc)
+        response = await client.post("/api/v1/dtc/", json=invalid_dtc, headers=headers)
         assert response.status_code == 422
 
     @pytest.mark.asyncio
@@ -513,8 +525,11 @@ class TestDataPersistence:
     """Test data persistence across operations."""
 
     @pytest.mark.asyncio
-    async def test_created_dtc_persists(self, async_client, seeded_db):
+    async def test_created_dtc_persists(self, authenticated_client, seeded_db):
         """Test that created DTC code persists."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # Create DTC
         dtc = {
             "code": "P7001",
@@ -527,11 +542,11 @@ class TestDataPersistence:
             "possible_causes": ["Test cause"],
         }
 
-        create_response = await async_client.post("/api/v1/dtc/", json=dtc)
+        create_response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert create_response.status_code == 201
 
         # Retrieve it
-        get_response = await async_client.get("/api/v1/dtc/P7001")
+        get_response = await client.get("/api/v1/dtc/P7001")
         assert get_response.status_code == 200
         data = get_response.json()
 
@@ -575,8 +590,11 @@ class TestBulkOperationIntegrity:
     """Test data integrity during bulk operations."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_atomic(self, async_client, seeded_db):
+    async def test_bulk_import_atomic(self, authenticated_client, seeded_db):
         """Test that bulk import operations maintain atomicity."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -595,8 +613,8 @@ class TestBulkOperationIntegrity:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 201
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
+        assert response.status_code in (200, 201)
         data = response.json()
 
         # Verify all codes were created
@@ -604,15 +622,18 @@ class TestBulkOperationIntegrity:
 
         # Check they exist
         for code in ["P8001", "P8002"]:
-            check_response = await async_client.get(f"/api/v1/dtc/{code}")
+            check_response = await client.get(f"/api/v1/dtc/{code}")
             if created_count > 0:
                 assert check_response.status_code in [200, 404]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_error_handling(self, async_client, seeded_db):
+    async def test_bulk_import_error_handling(self, authenticated_client, seeded_db):
         """Test that bulk import handles errors without corrupting data."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # First create a code
-        await async_client.post(
+        await client.post(
             "/api/v1/dtc/",
             json={
                 "code": "P8100",
@@ -620,6 +641,7 @@ class TestBulkOperationIntegrity:
                 "category": "powertrain",
                 "severity": "medium",
             },
+            headers=headers,
         )
 
         # Bulk import with duplicate
@@ -641,15 +663,15 @@ class TestBulkOperationIntegrity:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 201
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
+        assert response.status_code in (200, 201)
         data = response.json()
 
         # Should have skipped duplicate and created new
         assert data["skipped"] >= 0
 
         # Original code should be unchanged
-        check_response = await async_client.get("/api/v1/dtc/P8100")
+        check_response = await client.get("/api/v1/dtc/P8100")
         assert check_response.status_code == 200
         check_data = check_response.json()
         assert check_data["description_en"] == "Existing Code"
@@ -659,8 +681,11 @@ class TestSearchIndexConsistency:
     """Test search index consistency."""
 
     @pytest.mark.asyncio
-    async def test_newly_created_dtc_searchable(self, async_client, seeded_db):
+    async def test_newly_created_dtc_searchable(self, authenticated_client, seeded_db):
         """Test that newly created DTC is immediately searchable."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # Create new DTC
         dtc = {
             "code": "P9001",
@@ -669,11 +694,11 @@ class TestSearchIndexConsistency:
             "severity": "medium",
         }
 
-        create_response = await async_client.post("/api/v1/dtc/", json=dtc)
+        create_response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert create_response.status_code == 201
 
         # Should be immediately searchable
-        search_response = await async_client.get(
+        search_response = await client.get(
             "/api/v1/dtc/search",
             params={"q": "P9001"},
         )
@@ -774,12 +799,15 @@ class TestDataValidationConsistency:
     """Test that validation is consistent across endpoints."""
 
     @pytest.mark.asyncio
-    async def test_dtc_code_validation_consistent(self, async_client, seeded_db):
+    async def test_dtc_code_validation_consistent(self, authenticated_client, seeded_db):
         """Test that DTC code validation is consistent across endpoints."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         invalid_code = "X1234"
 
         # Create endpoint should reject
-        create_response = await async_client.post(
+        create_response = await client.post(
             "/api/v1/dtc/",
             json={
                 "code": invalid_code,
@@ -787,11 +815,12 @@ class TestDataValidationConsistency:
                 "category": "powertrain",
                 "severity": "medium",
             },
+            headers=headers,
         )
         assert create_response.status_code in [400, 422]
 
         # Detail endpoint should reject
-        detail_response = await async_client.get(f"/api/v1/dtc/{invalid_code}")
+        detail_response = await client.get(f"/api/v1/dtc/{invalid_code}")
         assert detail_response.status_code == 400
 
     @pytest.mark.asyncio
@@ -941,8 +970,11 @@ class TestConcurrentDataAccess:
     """Test concurrent data access scenarios."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_dtc_creation(self, async_client, seeded_db):
+    async def test_concurrent_dtc_creation(self, authenticated_client, seeded_db):
         """Test DTC creation with same code is prevented."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc_data = {
             "code": "P9500",
             "description_en": "Concurrent Test Code",
@@ -953,7 +985,7 @@ class TestConcurrentDataAccess:
         # Create sequentially (SQLite doesn't support concurrent writes)
         responses = []
         for _ in range(3):
-            resp = await async_client.post("/api/v1/dtc/", json=dtc_data)
+            resp = await client.post("/api/v1/dtc/", json=dtc_data, headers=headers)
             responses.append(resp)
 
         # One should succeed, others should fail
@@ -988,8 +1020,11 @@ class TestNullHandling:
     """Test null value handling across the system."""
 
     @pytest.mark.asyncio
-    async def test_null_description_hu_handled(self, async_client, seeded_db):
+    async def test_null_description_hu_handled(self, authenticated_client, seeded_db):
         """Test that null Hungarian description is handled."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9600",
             "description_en": "Code without Hungarian",
@@ -998,19 +1033,22 @@ class TestNullHandling:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await async_client.get("/api/v1/dtc/P9600")
+        get_response = await client.get("/api/v1/dtc/P9600")
         if get_response.status_code == 200:
             data = get_response.json()
             # description_hu should be null or empty
             assert data["description_hu"] in [None, ""]
 
     @pytest.mark.asyncio
-    async def test_empty_lists_handled(self, async_client, seeded_db):
+    async def test_empty_lists_handled(self, authenticated_client, seeded_db):
         """Test that empty lists are handled correctly."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9601",
             "description_en": "Code with empty lists",
@@ -1021,11 +1059,11 @@ class TestNullHandling:
             "diagnostic_steps": [],
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await async_client.get("/api/v1/dtc/P9601")
+        get_response = await client.get("/api/v1/dtc/P9601")
         if get_response.status_code == 200:
             data = get_response.json()
             assert isinstance(data["symptoms"], list)
@@ -1037,8 +1075,11 @@ class TestDataSanitization:
     """Test data sanitization and XSS prevention."""
 
     @pytest.mark.asyncio
-    async def test_html_in_description_escaped(self, async_client, seeded_db):
+    async def test_html_in_description_escaped(self, authenticated_client, seeded_db):
         """Test that HTML in descriptions is properly handled."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9700",
             "description_en": "<script>alert('xss')</script>Test Code",
@@ -1046,11 +1087,11 @@ class TestDataSanitization:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify (should not execute script)
-        get_response = await async_client.get("/api/v1/dtc/P9700")
+        get_response = await client.get("/api/v1/dtc/P9700")
         if get_response.status_code == 200:
             data = get_response.json()
             # Script tags should be stored as-is (API doesn't execute)

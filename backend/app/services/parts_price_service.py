@@ -281,6 +281,7 @@ class PartsPriceCache:
 
     CACHE_PREFIX = "parts:"
     DEFAULT_TTL = 86400  # 24 hours
+    MAX_IN_MEMORY_SIZE = 1000
 
     def __init__(self):
         self._redis = None
@@ -342,8 +343,19 @@ class PartsPriceCache:
             except Exception as e:
                 logger.warning(f"Redis set hiba: {e}")
 
-        # Fallback to in-memory cache
-        expiry = datetime.now().timestamp() + ttl
+        # Fallback to in-memory cache with bounded size
+        now = datetime.now().timestamp()
+        if len(self._in_memory_cache) >= self.MAX_IN_MEMORY_SIZE:
+            # Evict expired entries first
+            expired = [k for k, (_, exp) in self._in_memory_cache.items() if exp <= now]
+            for k in expired:
+                del self._in_memory_cache[k]
+            # If still at capacity, evict oldest entry
+            if len(self._in_memory_cache) >= self.MAX_IN_MEMORY_SIZE:
+                oldest_key = min(self._in_memory_cache, key=lambda k: self._in_memory_cache[k][1])
+                del self._in_memory_cache[oldest_key]
+
+        expiry = now + ttl
         self._in_memory_cache[key] = (value, expiry)
 
     async def close(self) -> None:

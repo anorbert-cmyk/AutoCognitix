@@ -60,6 +60,8 @@ describe('AuthContext', () => {
   });
 
   it('should have no user when not authenticated', async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValue(new Error('Not authenticated'));
+
     const { result } = renderHook(() => useAuth(), {
       wrapper: createWrapper(),
     });

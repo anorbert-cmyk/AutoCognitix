@@ -36,8 +36,8 @@ class TestDiagnosisServiceFixes:
     def setup(self):
         self.source = _read_backend("services/diagnosis_service.py")
 
-    def test_save_diagnosis_session_commits(self):
-        """_save_diagnosis_session must call db.commit() to persist data."""
+    def test_save_diagnosis_session_flushes(self):
+        """_save_diagnosis_session must call db.flush() (commit handled by get_db dependency)."""
         # Find the _save_diagnosis_session method body
         method_start = self.source.find("async def _save_diagnosis_session")
         assert method_start > 0, "_save_diagnosis_session method not found"
@@ -48,8 +48,9 @@ class TestDiagnosisServiceFixes:
             next_method = len(self.source)
         method_body = self.source[method_start:next_method]
 
-        assert "await self.db.commit()" in method_body, (
-            "_save_diagnosis_session must call await self.db.commit() to persist the session"
+        assert "await self.db.flush()" in method_body, (
+            "_save_diagnosis_session must call await self.db.flush() "
+            "(commit is handled by the get_db dependency auto-commit)"
         )
 
     def test_fallback_diagnosis_has_used_fallback_true(self):

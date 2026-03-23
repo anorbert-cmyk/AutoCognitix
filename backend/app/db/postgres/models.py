@@ -20,7 +20,7 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -72,7 +72,7 @@ class NewsletterSubscriber(Base):
 
     __tablename__ = "newsletter_subscribers"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), default="pending"

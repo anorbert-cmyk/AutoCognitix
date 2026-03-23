@@ -61,6 +61,11 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         try:
             body_bytes = await request.body()
             body_hash = hashlib.sha256(body_bytes).hexdigest()[:16]
+
+            async def receive():
+                return {"type": "http.request", "body": body_bytes}
+
+            request._receive = receive
         except Exception:
             body_hash = "nobody"
 

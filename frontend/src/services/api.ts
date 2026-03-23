@@ -138,6 +138,20 @@ api.interceptors.request.use(
 // Response Interceptors
 // =============================================================================
 
+let isRefreshing = false
+let failedQueue: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+
+const processQueue = (error: unknown) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error)
+    } else {
+      prom.resolve(undefined)
+    }
+  })
+  failedQueue = []
+}
+
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError<ApiErrorDetail>) => {
@@ -145,7 +159,18 @@ api.interceptors.response.use(
 
     // Handle 401 errors (token expired) - attempt silent refresh via cookie
     if (error.response?.status === 401 && !originalRequest?._retry) {
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject })
+        }).then(() => {
+          if (originalRequest) {
+            return api(originalRequest)
+          }
+        })
+      }
+
       originalRequest._retry = true
+      isRefreshing = true
 
       try {
         // Refresh token is sent automatically via httpOnly cookie
@@ -157,14 +182,19 @@ api.interceptors.response.use(
           setCsrfToken(csrf_token)
         }
 
+        processQueue(null)
+
         // Retry the original request (cookies are updated automatically)
         if (originalRequest) {
           return api(originalRequest)
         }
       } catch (refreshError) {
+        processQueue(refreshError)
         // Refresh failed, clear CSRF token and redirect to login
         setCsrfToken(null)
         window.location.href = '/login'
+      } finally {
+        isRefreshing = false
       }
     }
 

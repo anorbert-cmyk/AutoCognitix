@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
+
 from app.services.nhtsa_service import get_nhtsa_service
 from app.services.vehicle_service import get_vehicle_service
 
