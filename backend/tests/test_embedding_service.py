@@ -316,11 +316,7 @@ class TestDeviceDetection:
     def test_cpu_fallback(self):
         """Test CPU fallback when no GPU available."""
 
-        def detect_device():
-            # Simulate no CUDA and no MPS
-            cuda_available = False
-            mps_available = False
-
+        def detect_device(cuda_available: bool, mps_available: bool):
             if cuda_available:
                 return "cuda"
             elif mps_available:
@@ -328,7 +324,7 @@ class TestDeviceDetection:
             else:
                 return "cpu"
 
-        device = detect_device()
+        device = detect_device(cuda_available=False, mps_available=False)
         assert device == "cpu"
 
     def test_cuda_detection(self):

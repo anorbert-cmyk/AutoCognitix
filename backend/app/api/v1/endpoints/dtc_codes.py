@@ -309,9 +309,7 @@ def _compute_text_relevance(dtc: DTCCodeModel, query_lower: str) -> float:
     return 0.5
 
 
-def _dtc_model_to_search_result(
-    dtc: DTCCodeModel, relevance_score: Optional[float] = None
-) -> DTCSearchResult:
+def _dtc_model_to_search_result(dtc: DTCCodeModel, relevance_score: float = 0.0) -> DTCSearchResult:
     """Convert PostgreSQL model to API schema."""
     return DTCSearchResult(
         code=dtc.code,
@@ -507,7 +505,7 @@ async def search_dtc_codes(
             logger.warning(f"Semantic search failed, using text results only: {e}")
 
     # Sort by relevance score
-    results.sort(key=lambda x: x.relevance_score or 0, reverse=True)
+    results.sort(key=lambda x: x.relevance_score, reverse=True)
 
     final_results = results[:limit]
 
@@ -765,7 +763,7 @@ async def get_related_codes(
                     break
 
     # Sort by relevance
-    results.sort(key=lambda x: x.relevance_score or 0, reverse=True)
+    results.sort(key=lambda x: x.relevance_score, reverse=True)
 
     return results[:limit]
 
@@ -856,7 +854,7 @@ async def create_dtc_code(
 @router.post(
     "/bulk",
     response_model=Dict[str, Any],
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_201_CREATED,
     responses=BULK_IMPORT_RESPONSES,
     summary="Bulk import DTC codes",
     description="""

@@ -209,13 +209,13 @@ class HungarianEmbeddingService:
 
         try:
             # Load tokenizer with fast implementation
-            self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B614
+            self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B614 B615
                 settings.HUBERT_MODEL,
                 use_fast=True,  # Use fast tokenizer implementation
             )
 
             # Load model with optimizations
-            self._model = AutoModel.from_pretrained(  # nosec B614
+            self._model = AutoModel.from_pretrained(  # nosec B614 B615
                 settings.HUBERT_MODEL,
                 torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
             )
@@ -421,11 +421,7 @@ class HungarianEmbeddingService:
 
         if use_cache and self._cache_enabled:
             try:
-                # Import here to avoid circular dependency
-                # This is sync code, so we need to run async in new loop
-                # In production, this should be called from async context
-                import asyncio
-
+                # asyncio already imported at module level
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:

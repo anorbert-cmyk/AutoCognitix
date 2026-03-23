@@ -15,8 +15,9 @@ interface RatingStarsProps {
 
 export function RatingStars({ rating, reviewCount, size = 'sm' }: RatingStarsProps) {
   const clampedRating = Math.max(0, Math.min(5, rating))
-  const fullStars = Math.floor(clampedRating)
-  const hasHalf = clampedRating - fullStars >= 0.25 && clampedRating - fullStars < 0.75
+  const fraction = clampedRating - Math.floor(clampedRating)
+  const fullStars = fraction >= 0.75 ? Math.floor(clampedRating) + 1 : Math.floor(clampedRating)
+  const hasHalf = fraction >= 0.25 && fraction < 0.75
   const emptyStart = hasHalf ? fullStars + 1 : fullStars
 
   const iconSize = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'

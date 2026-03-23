@@ -13,9 +13,9 @@ export function SuggestionChips({ suggestions, onSelect }: SuggestionChipsProps)
 
   return (
     <div className="flex gap-2 overflow-x-auto px-4 py-2 scrollbar-hide">
-      {suggestions.map((suggestion) => (
+      {suggestions.map((suggestion, idx) => (
         <button
-          key={suggestion}
+          key={`${idx}-${suggestion}`}
           type="button"
           onClick={() => onSelect(suggestion)}
           className="flex-shrink-0 rounded-full border border-primary-300 bg-white px-4 py-2 text-sm text-primary-700 font-medium hover:bg-primary-50 hover:border-primary-400 active:bg-primary-100 transition-colors whitespace-nowrap"

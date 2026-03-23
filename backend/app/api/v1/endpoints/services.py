@@ -17,6 +17,7 @@ from app.api.v1.schemas.services import (
     ServiceSearchResponse,
     ServiceShop,
 )
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.services.service_shop_service import get_service_shop_service
 
@@ -189,7 +190,7 @@ async def get_shop_by_id(
         if shop is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"A szerviz nem található: {shop_id}",
+                detail="A keresett szerviz nem található.",
             )
 
         return ServiceShop(**shop)
@@ -197,7 +198,7 @@ async def get_shop_by_id(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Szerviz lekérdezési hiba ({shop_id}): {e}")
+        logger.error(f"Szerviz lekérdezési hiba ({sanitize_log(shop_id)}): {sanitize_exception(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Nem sikerült a szerviz lekérdezése. Kérjük, próbálja újra később.",

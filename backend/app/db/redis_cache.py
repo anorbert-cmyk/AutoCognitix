@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 from collections.abc import Callable
 from functools import wraps
 from typing import Any, List, Mapping, Optional, Tuple
@@ -101,6 +102,7 @@ class RedisCacheService:
     """
 
     _instance: Optional["RedisCacheService"] = None
+    _instance_lock: threading.Lock = threading.Lock()
     _pool: Optional[ConnectionPool] = None
     _initialized: bool = False
 
@@ -108,10 +110,12 @@ class RedisCacheService:
     CIRCUIT_BREAKER_COOLDOWN = 30
 
     def __new__(cls) -> "RedisCacheService":
-        """Singleton pattern for shared connection pool."""
+        """Singleton pattern for shared connection pool with double-checked locking."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self) -> None:
@@ -171,6 +175,10 @@ class RedisCacheService:
 
     async def disconnect(self) -> None:
         """Disconnect from Redis and close pool."""
+        if self._reset_task and not self._reset_task.done():
+            self._reset_task.cancel()
+            self._reset_task = None
+
         if self._client:
             await self._client.close()
             self._client = None
@@ -223,7 +231,17 @@ class RedisCacheService:
             logger.warning("Redis circuit breaker opened due to failures")
 
             # Schedule circuit reset after cooldown period
-            self._reset_task = asyncio.create_task(self._reset_circuit())
+            task = asyncio.create_task(self._reset_circuit())
+            task.add_done_callback(self._on_reset_done)
+            self._reset_task = task
+
+    def _on_reset_done(self, task: asyncio.Task) -> None:
+        """Log exceptions from circuit reset task to prevent silent failures."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(f"Redis circuit breaker reset failed: {exc}")
 
     async def _reset_circuit(self) -> None:
         """Reset the circuit breaker after cooldown period."""

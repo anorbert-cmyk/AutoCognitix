@@ -16,7 +16,6 @@ import {
   Minus,
   Shield,
   Fuel,
-  Info,
 } from 'lucide-react';
 
 import { PageContainer } from '@/components/layouts';
@@ -153,13 +152,9 @@ function FactorsList({ factors }: { factors: CalculatorResponse['factors'] }) {
                 <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-100">
                   <Plus className="h-3.5 w-3.5 text-green-600" />
                 </div>
-              ) : factor.impact === 'negative' ? (
+              ) : (
                 <div className="flex items-center justify-center w-6 h-6 rounded-full bg-red-100">
                   <Minus className="h-3.5 w-3.5 text-red-600" />
-                </div>
-              ) : (
-                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100">
-                  <Info className="h-3.5 w-3.5 text-slate-500" />
                 </div>
               )}
             </div>
@@ -186,14 +181,11 @@ function AlternativeScenarios({ scenarios }: { scenarios: CalculatorResponse['al
             key={index}
             className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 hover:border-slate-200 transition-colors"
           >
-            <h4 className="text-sm font-bold text-slate-800 mb-1">{scenario.title}</h4>
+            <h4 className="text-sm font-bold text-slate-800 mb-1">{scenario.scenario}</h4>
             <p className="text-xs text-slate-500 mb-3 leading-relaxed">{scenario.description}</p>
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-slate-900 tabular-nums">
-                {formatHUF(scenario.estimated_cost_huf)}
-              </span>
-              <span className="text-[11px] text-slate-400 font-medium">
-                {scenario.recommendation}
+                {formatHUF(scenario.estimated_value)}
               </span>
             </div>
           </div>
@@ -246,8 +238,10 @@ export default function CalculatorPage() {
     return (
       vehicleMake.length > 0 &&
       vehicleModel.trim().length > 0 &&
-      parseInt(vehicleYear) >= 1970 &&
+      parseInt(vehicleYear) >= 1990 &&
+      parseInt(vehicleYear) <= 2030 &&
       parseInt(mileageKm) >= 0 &&
+      parseInt(mileageKm) <= 999999 &&
       condition !== ''
     );
   }, [vehicleMake, vehicleModel, vehicleYear, mileageKm, condition]);
@@ -337,8 +331,8 @@ export default function CalculatorPage() {
                 id="calc-year"
                 type="number"
                 placeholder="pl. 2018"
-                min={1970}
-                max={new Date().getFullYear() + 1}
+                min={1990}
+                max={2030}
                 value={vehicleYear}
                 onChange={(e) => setVehicleYear(e.target.value)}
               />
@@ -354,7 +348,7 @@ export default function CalculatorPage() {
                 type="number"
                 placeholder="pl. 150000"
                 min={0}
-                max={1000000}
+                max={999999}
                 value={mileageKm}
                 onChange={(e) => setMileageKm(e.target.value)}
               />

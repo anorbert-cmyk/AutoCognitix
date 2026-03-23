@@ -664,7 +664,8 @@ class TestCheckRateLimitDependency:
             with pytest.raises(HTTPException) as exc_info:
                 await check_rate_limit(req, resp)
             # Retry-After header should NOT be present when retry_after is None
-            assert "Retry-After" not in exc_info.value.headers
+            headers = exc_info.value.headers or {}
+            assert "Retry-After" not in headers
 
     @pytest.mark.asyncio
     async def test_stores_info_on_request_state(self):

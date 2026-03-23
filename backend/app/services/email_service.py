@@ -1,24 +1,54 @@
 """
 Email Service for AutoCognitix.
 
-Email kuldes Resend API-val vagy demo modban logolassal.
+Email küldés n8n webhook-on, Resend API-val, vagy demo módban logolással.
+
+Priority: n8n webhook → Resend API → demo mode (log only)
 
 Features:
-- Jelszo visszaallitas email
-- Udvozlo email regisztracio utan
-- Demo mod (csak logolas, nincs tenyleges kuldes)
-- Async mukodes
+- n8n webhook integráció (newsletter double opt-in, welcome email)
+- Resend API fallback
+- Jelszó visszaállítás email
+- Üdvözlő email regisztráció után
+- Demo mód (csak logolás, nincs tényleges küldés)
+- Async működés
 
 Author: AutoCognitix Team
 """
 
 import asyncio
 import logging
+import re
 from typing import Optional
+
+import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_log(value: str) -> str:
+    """Sanitize a user-provided value before including it in a log message.
+
+    Removes control characters (newlines, carriage returns, tabs, and other
+    non-printable ASCII) to prevent log injection attacks where an attacker
+    could forge additional log entries by embedding newline sequences in
+    user-controlled input. Truncates overly long values to avoid log flooding.
+    """
+    # Safely convert to string
+    s = str(value)
+    # Explicitly remove newlines and carriage returns to prevent log entry splitting
+    s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Remove any remaining non-printable ASCII control characters
+    s = re.sub(r"[\x00-\x1f\x7f]", "", s)
+    # Collapse multiple whitespace characters and trim
+    s = re.sub(r"\s+", " ", s).strip()
+    # Truncate to a reasonable length to prevent log flooding
+    max_len = 200
+    if len(s) > max_len:
+        s = s[:max_len] + "...[truncated]"
+    return s if s else "<empty>"
 
 
 # =============================================================================
@@ -184,9 +214,13 @@ class EmailService:
         self._resend_client = None
         self._demo_mode = getattr(settings, "EMAIL_DEMO_MODE", True)
         self._from_email = getattr(settings, "EMAIL_FROM", "noreply@autocognitix.com")
+        self._n8n_webhook_url = getattr(settings, "N8N_WEBHOOK_URL", None)
 
-        if self._demo_mode:
-            logger.info("EmailService: DEMO mod - emailek csak logolasra kerulnek")
+        if self._n8n_webhook_url:
+            logger.info(f"EmailService: n8n webhook mód — {self._n8n_webhook_url}")
+            self._demo_mode = False
+        elif self._demo_mode:
+            logger.info("EmailService: DEMO mód — emailek csak logolásra kerülnek")
         else:
             self._init_resend()
 
@@ -285,6 +319,68 @@ class EmailService:
             html_content=html_content,
         )
 
+    async def send_via_n8n(
+        self,
+        to_email: str,
+        email_type: str = "confirm",
+        language: str = "hu",
+        token: Optional[str] = None,
+        name: Optional[str] = None,
+    ) -> bool:
+        """
+        Send email via n8n webhook.
+
+        Args:
+            to_email: Recipient email
+            email_type: 'confirm' or 'welcome'
+            language: 'hu' or 'en'
+            token: Confirmation token (for confirm type)
+            name: User name (for welcome type)
+
+        Returns:
+            True if n8n accepted the request
+        """
+        if not self._n8n_webhook_url:
+            return False
+
+        webhook_url = f"{self._n8n_webhook_url}/newsletter-email"
+
+        payload = {
+            "email": to_email,
+            "type": email_type,
+            "language": language,
+            "base_url": getattr(
+                settings,
+                "LANDING_PAGE_URL",
+                "https://autocognitix-landing-production.up.railway.app",
+            ),
+        }
+
+        if token:
+            payload["token"] = token
+        if name:
+            payload["name"] = name
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(webhook_url, json=payload)
+                if response.status_code == 200:
+                    logger.info(
+                        "Email sent via n8n: %s (type=%s, lang=%s)",
+                        _sanitize_log(to_email),
+                        _sanitize_log(email_type),
+                        _sanitize_log(language),
+                    )
+                    return True
+                else:
+                    logger.warning(
+                        f"n8n webhook returned {response.status_code}: {response.text[:200]}"
+                    )
+                    return False
+        except Exception as e:
+            logger.error("n8n webhook error (%s): %s", _sanitize_log(to_email), e)
+            return False
+
     async def _send_email(
         self,
         to_email: str,
@@ -295,7 +391,7 @@ class EmailService:
         """
         Internal email sending implementation.
 
-        In demo mode, just logs instead of sending.
+        Priority: n8n webhook → Resend API → demo mode (log only).
 
         Args:
             to_email: Recipient
@@ -306,17 +402,36 @@ class EmailService:
         Returns:
             True if successful
         """
+        # Try n8n webhook first (for newsletter/confirm emails)
+        if self._n8n_webhook_url:
+            # Detect email type from subject
+            email_type = "confirm"
+            language = "hu"
+            if "Welcome" in subject or "Üdvözöljük" in subject or "Üdvözlünk" in subject:
+                email_type = "welcome"
+            if any(eng in subject for eng in ["Welcome", "Confirm your"]):
+                language = "en"
+
+            success = await self.send_via_n8n(
+                to_email=to_email,
+                email_type=email_type,
+                language=language,
+            )
+            if success:
+                return True
+            # Fall through to Resend or demo mode if n8n fails
+            logger.warning("n8n webhook failed for %s, falling back", _sanitize_log(to_email))
+
         if self._demo_mode:
             logger.info(
-                f"[DEMO] Email kuldese:\n"
-                f"  Cimzett: {to_email}\n"
-                f"  Targy: {subject}\n"
-                f"  Tartalom (elso 200 karakter): {text_content[:200]}..."
+                "[DEMO] Email küldése: Címzett=%s | Tárgy=%s",
+                _sanitize_log(to_email),
+                _sanitize_log(subject),
             )
             return True
 
         if not self._resend_client:
-            logger.error("Resend kliens nem elerheto")
+            logger.error("Resend kliens nem elérhető")
             return False
 
         try:
@@ -331,17 +446,21 @@ class EmailService:
                 params["html"] = html_content
 
             # Resend is synchronous, run in executor
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 None,
                 lambda: self._resend_client.Emails.send(params),
             )
 
-            logger.info(f"Email sikeresen elkuldve: {to_email}, id: {result.get('id', 'N/A')}")
+            logger.info(
+                "Email sikeresen elküldve: %s, id: %s",
+                _sanitize_log(to_email),
+                result.get("id", "N/A"),
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Email kuldesi hiba ({to_email}): {e}")
+            logger.error("Email küldési hiba (%s): %s", _sanitize_log(to_email), e)
             return False
 
     @property

@@ -67,6 +67,26 @@ class User(Base):
     diagnosis_sessions = relationship("DiagnosisSession", back_populates="user")
 
 
+class NewsletterSubscriber(Base):
+    """Newsletter subscriber model for landing page signups."""
+
+    __tablename__ = "newsletter_subscribers"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending, confirmed, unsubscribed
+    confirm_token: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    unsubscribe_token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), default="landing_page")
+    language: Mapped[str] = mapped_column(String(5), default="hu")
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45))
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    unsubscribed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class VehicleMake(Base):
     """Vehicle manufacturer/make model."""
 
@@ -231,7 +251,9 @@ class DiagnosisArchive(Base):
 
     id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
     original_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     archived_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -349,10 +371,10 @@ class VehicleModelEngine(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     model_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("vehicle_models.id", ondelete="CASCADE"), nullable=False
+        String(50), ForeignKey("vehicle_models.id", ondelete="CASCADE"), nullable=False, index=True
     )
     engine_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("vehicle_engines.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("vehicle_engines.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Production years for this combination

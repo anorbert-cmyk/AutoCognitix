@@ -155,12 +155,15 @@ def get_password_hash(password: str) -> str:
     return hashed
 
 
-async def decode_token(token: str) -> Optional[Dict[str, Any]]:
+async def decode_token(token: str, expected_type: str = "access") -> Optional[Dict[str, Any]]:
     """
     Decode and verify a JWT token.
 
     Args:
         token: The JWT token to decode
+        expected_type: Expected token type claim (default "access").
+            Prevents token type confusion attacks (e.g. using a
+            refresh token as an access token).
 
     Returns:
         The decoded token payload or None if invalid
@@ -172,6 +175,13 @@ async def decode_token(token: str) -> Optional[Dict[str, Any]]:
             algorithms=[settings.JWT_ALGORITHM],
             leeway=30,
         )
+
+        # Validate token type to prevent type confusion attacks
+        if payload.get("type") != expected_type:
+            logger.warning(
+                f"Token type mismatch: expected={expected_type}, got={payload.get('type')}"
+            )
+            return None
 
         # Check if token is blacklisted
         jti = payload.get("jti")
@@ -249,16 +259,19 @@ async def is_token_blacklisted(jti: str) -> bool:
 
         cache = await get_cache_service()
 
-        # If circuit breaker is open, fail closed (reject token)
+        # If circuit breaker is open, fail open (accept token)
+        # Rationale: fail-closed locks out ALL users during Redis outage.
+        # Token blacklisting is a secondary defence; JWTs still have expiry.
+        # Rate limiting remains fail-closed (that protects against abuse).
         if cache.is_circuit_open():
-            logger.critical("Redis circuit breaker open - rejecting token for safety")
-            return True
+            logger.warning("Redis circuit breaker open - accepting token (fail-open)")
+            return False
 
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.critical(f"Token blacklist check failed - rejecting token for safety: {e}")
-        return True
+        logger.warning(f"Token blacklist check failed - accepting token (fail-open): {e}")
+        return False
 
 
 def check_password_strength(password: str) -> Dict[str, Any]:

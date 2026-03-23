@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, status
+from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.exc import (
@@ -449,13 +449,17 @@ class TestRequestContextMiddleware:
         mock_response.status_code = 200
         mock_response.headers = {}
 
-        async def mock_call_next(req):
-            # At this point, request.state.request_id should be set
+        # Capture request_id inside call_next to verify it was set
+        captured_id = None
+
+        async def capturing_call_next(req):
+            nonlocal captured_id
+            captured_id = getattr(req.state, "request_id", None)
             return mock_response
 
-        await middleware.dispatch(request, mock_call_next)
-        # Verify request_id was set on state
-        assert hasattr(request.state, "request_id")
+        await middleware.dispatch(request, capturing_call_next)
+        # Verify request_id was actually set (not just MagicMock auto-attribute)
+        assert captured_id is not None
 
 
 # =============================================================================

@@ -18,7 +18,6 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 from neo4j import AsyncGraphDatabase
 from tqdm import tqdm
@@ -156,7 +155,7 @@ class Neo4jLoader:
 
                     try:
                         year_int = int(year) if year else None
-                    except:
+                    except Exception:
                         year_int = None
 
                     # Create Complaint node
@@ -235,7 +234,7 @@ class Neo4jLoader:
 
                 try:
                     year_int = int(year) if year else None
-                except:
+                except Exception:
                     year_int = None
 
                 # Create Recall node

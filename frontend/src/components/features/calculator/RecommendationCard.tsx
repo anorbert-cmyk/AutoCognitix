@@ -74,7 +74,7 @@ export function RecommendationCard({ recommendation, text, ratio }: Recommendati
             <span
               className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-white ${config.badgeBgClass}`}
             >
-              {ratio}%
+              {Math.round(ratio * 100)}%
             </span>
           </div>
           <p className={`text-sm sm:text-base ${config.textColorClass} leading-relaxed`}>

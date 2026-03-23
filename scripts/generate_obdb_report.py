@@ -19,7 +19,8 @@ unique_units = set()
 
 for f in files:
     try:
-        data = json.load(open(f))
+        with open(f) as fh:
+            data = json.load(fh)
         commands = data.get("commands", [])
 
         file_signals = []

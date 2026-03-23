@@ -23,6 +23,7 @@ from app.api.v1.schemas.inspection import (
     InspectionRiskLevel,
     InspectionSeverity,
 )
+from app.core.log_sanitizer import sanitize_log, sanitize_exception
 from app.core.logging import get_logger
 from app.services.parts_price_service import get_parts_price_service
 
@@ -85,6 +86,18 @@ _DTC_PREFIX_RULES: List[Tuple[str, str, str, InspectionSeverity, str]] = [
     ("B01", "B02", "lighting", InspectionSeverity.WARNING, "Világítás / jelzőrendszer hiba"),
     # B03xx+: Body electrical
     ("B03", "B0F", "electrical", InspectionSeverity.WARNING, "Karosszéria elektromos hiba"),
+    # --- Manufacturer-specific Powertrain (P1xxx-P3xxx) ---
+    ("P10", "P1F", "engine_drivetrain", InspectionSeverity.WARNING, "Gyártó-specifikus motor hiba"),
+    ("P20", "P2F", "emissions", InspectionSeverity.WARNING, "Gyártó-specifikus emisszió hiba"),
+    (
+        "P30",
+        "P3F",
+        "engine_drivetrain",
+        InspectionSeverity.WARNING,
+        "Gyártó-specifikus hajtáslánc hiba",
+    ),
+    # P0Axx: Hybrid / electric drivetrain
+    ("P0A", "P0A", "electrical", InspectionSeverity.WARNING, "Hibrid/elektromos hajtáslánc hiba"),
     # --- Network (U) codes ---
     # U0xxx - U3xxx: Electrical / communication
     (
@@ -97,6 +110,7 @@ _DTC_PREFIX_RULES: List[Tuple[str, str, str, InspectionSeverity, str]] = [
 ]
 
 # Static severity overrides for specific well-known DTC codes
+# Format: (severity, issue_description, optional_category_override)
 _DTC_SEVERITY_OVERRIDES: Dict[str, Tuple[InspectionSeverity, str]] = {
     # Catalytic converter efficiency - auto FAIL on emissions
     "P0420": (InspectionSeverity.FAIL, "Katalizátor hatásfok alatt (Bank 1)"),
@@ -120,6 +134,12 @@ _DTC_SEVERITY_OVERRIDES: Dict[str, Tuple[InspectionSeverity, str]] = {
     "B0002": (InspectionSeverity.FAIL, "Első légzsák hiba"),
     # Headlight - lighting FAIL
     "B1318": (InspectionSeverity.FAIL, "Fényszóró magasságállítás hiba"),
+}
+
+# Category overrides for specific DTCs whose prefix-based category is wrong
+_DTC_CATEGORY_OVERRIDES: Dict[str, str] = {
+    "C0265": "braking",  # ABS module → braking, not suspension_steering
+    "B1318": "lighting",  # Headlight adjuster → lighting (confirm)
 }
 
 
@@ -164,7 +184,8 @@ class InspectionService:
         # Check specific overrides first
         if dtc_code in _DTC_SEVERITY_OVERRIDES:
             severity, issue = _DTC_SEVERITY_OVERRIDES[dtc_code]
-            category = self._get_category_for_dtc(dtc_code)
+            # Use category override if exists, otherwise fall back to prefix
+            category = _DTC_CATEGORY_OVERRIDES.get(dtc_code, self._get_category_for_dtc(dtc_code))
             return category, severity, issue
 
         # Match against prefix rules
@@ -304,7 +325,7 @@ class InspectionService:
             "Műszaki vizsga értékelés indítása",
             extra={
                 "vehicle": (
-                    f"{request.vehicle_make} {request.vehicle_model} {request.vehicle_year}"
+                    f"{sanitize_log(request.vehicle_make)} {sanitize_log(request.vehicle_model)} {request.vehicle_year}"
                 ),
                 "dtc_count": len(request.dtc_codes),
             },
@@ -313,8 +334,17 @@ class InspectionService:
         failing_items: List[FailingItem] = []
         affected_categories: set = set()
 
+        # Deduplicate DTC codes preserving order
+        seen_codes: set = set()
+        unique_dtc_codes: List[str] = []
+        for code in request.dtc_codes:
+            upper_code = code.upper().strip()
+            if upper_code and upper_code not in seen_codes:
+                seen_codes.add(upper_code)
+                unique_dtc_codes.append(upper_code)
+
         # Classify each DTC code
-        for dtc_code in request.dtc_codes:
+        for dtc_code in unique_dtc_codes:
             category, severity, issue = self._classify_dtc(dtc_code)
             affected_categories.add(category)
 
@@ -338,8 +368,8 @@ class InspectionService:
                     fix_recommendation = f"{issue} - javasolt alkatrészek: {', '.join(part_names)}"
             except Exception as exc:
                 logger.warning(
-                    f"Alkatrész ár lekérés sikertelen: {dtc_code} - {exc}",
-                    extra={"dtc_code": dtc_code},
+                    f"Alkatrész ár lekérés sikertelen: {sanitize_log(dtc_code)} - {sanitize_exception(exc)}",
+                    extra={"dtc_code": sanitize_log(dtc_code)},
                 )
 
             failing_items.append(
@@ -406,7 +436,7 @@ class InspectionService:
             estimated_total_fix_cost_min=total_min,
             estimated_total_fix_cost_max=total_max,
             vehicle_info=vehicle_info,
-            dtc_count=len(request.dtc_codes),
+            dtc_count=len(unique_dtc_codes),
         )
 
 

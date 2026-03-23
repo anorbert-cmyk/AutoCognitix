@@ -85,7 +85,7 @@ describe('diagnosisService', () => {
       expect(options.method).toBe('POST');
     });
 
-    it('should include auth token in request headers', async () => {
+    it('should use cookie-based auth with credentials include', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         body: createMockSSEStream([]),
@@ -100,7 +100,7 @@ describe('diagnosisService', () => {
       });
 
       const [, options] = mockFetch.mock.calls[0];
-      expect(options.headers['Authorization']).toBe('Bearer test-token');
+      expect(options.credentials).toBe('include');
       expect(options.headers['Content-Type']).toBe('application/json');
       expect(options.headers['Accept']).toBe('text/event-stream');
     });
@@ -510,7 +510,7 @@ describe('diagnosisService', () => {
       expect(onError).not.toHaveBeenCalled();
     });
 
-    it('should not include Authorization header when no token is stored', async () => {
+    it('should use credentials include regardless of stored tokens', async () => {
       localStorage.removeItem('access_token');
 
       const mockFetch = vi.fn().mockResolvedValue({
@@ -527,6 +527,7 @@ describe('diagnosisService', () => {
       });
 
       const [, options] = mockFetch.mock.calls[0];
+      expect(options.credentials).toBe('include');
       expect(options.headers['Authorization']).toBeUndefined();
     });
 

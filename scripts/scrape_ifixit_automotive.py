@@ -34,7 +34,6 @@ from urllib.parse import urljoin, urlparse, unquote
 
 import aiohttp
 from bs4 import BeautifulSoup, Tag
-from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 
 # Configure logging

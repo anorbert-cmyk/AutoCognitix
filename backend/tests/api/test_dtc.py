@@ -12,7 +12,6 @@ Tests:
 
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch, AsyncMock
 
 
 class TestDTCSearch:

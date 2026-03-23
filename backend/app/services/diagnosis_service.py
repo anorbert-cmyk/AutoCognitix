@@ -259,11 +259,12 @@ class DiagnosisService:
             )
 
             if not save_ok:
-                # Save failed - strip ID so client doesn't reference a non-existent record
-                logger.warning(
-                    f"Diagnosis {diagnosis_id} save failed, returning result without persisted ID"
+                # Save failed - keep ID for traceability but flag the error
+                # so the client knows the result was NOT persisted.
+                logger.error(
+                    f"Failed to persist diagnosis {diagnosis_id} - flagging save_error in response"
                 )
-                response = response.model_copy(update={"id": None})
+                response = response.model_copy(update={"save_error": True})
 
             logger.info(
                 f"Diagnosis {diagnosis_id} completed with confidence "
@@ -273,7 +274,7 @@ class DiagnosisService:
 
         except DiagnosisServiceError:
             raise
-        except Exception as e:
+        except (ValueError, TypeError, KeyError) as e:
             logger.error(f"Diagnosis {diagnosis_id} failed: {sanitize_log(str(e))}", exc_info=True)
             raise DiagnosisServiceError(
                 message=f"Diagnosis failed: {e!s}",
@@ -451,14 +452,17 @@ class DiagnosisService:
         nhtsa = await self._get_nhtsa_service()
 
         try:
-            # Fetch recalls and complaints in parallel
+            # Fetch recalls and complaints in parallel with timeout
             recalls_task = nhtsa.get_recalls(make, model, year)
             complaints_task = nhtsa.get_complaints(make, model, year)
 
-            results = await asyncio.gather(
-                recalls_task,
-                complaints_task,
-                return_exceptions=True,
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    recalls_task,
+                    complaints_task,
+                    return_exceptions=True,
+                ),
+                timeout=15.0,
             )
 
             # Handle exceptions gracefully - narrow types from gather
@@ -482,6 +486,9 @@ class DiagnosisService:
 
             return final_recalls, final_complaints
 
+        except asyncio.TimeoutError:
+            logger.warning("NHTSA data fetch timed out after 15s")
+            return [], []
         except Exception as e:
             logger.error(f"NHTSA data fetch error: {sanitize_log(str(e))}")
             return [], []
@@ -1202,13 +1209,13 @@ class DiagnosisService:
             session = await self.diagnosis_repository.get(diagnosis_id)
 
             if not session:
-                logger.debug(f"Diagnosis {diagnosis_id} not found")
+                logger.debug(f"Diagnosis {sanitize_log(str(diagnosis_id))} not found")
                 return None
 
             # IDOR protection: verify ownership at service layer
             if user_id and session.user_id and str(session.user_id) != str(user_id):
                 logger.warning(
-                    f"IDOR attempt: user {user_id} tried to access diagnosis {diagnosis_id}"
+                    f"IDOR attempt: user {sanitize_log(str(user_id))} tried to access diagnosis {sanitize_log(str(diagnosis_id))}"
                 )
                 return None  # Return None (same as not found) to prevent info leakage
 

@@ -268,6 +268,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate deployment variables
+        run: |
+          if [ -z "${{ vars.API_URL }}" ]; then echo "::warning::API_URL not set, skipping smoke tests"; exit 0; fi
+          if [ -z "${{ vars.FRONTEND_URL }}" ]; then echo "::warning::FRONTEND_URL not set, skipping smoke tests"; exit 0; fi
+
       - name: Wait for deployment to be ready
         run: sleep 30
 

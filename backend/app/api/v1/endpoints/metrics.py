@@ -17,7 +17,6 @@ from fastapi import APIRouter, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import (
     DTC_CODES_TOTAL,
@@ -72,19 +71,13 @@ async def get_metrics_summary_endpoint():
     # Get base summary
     summary = get_metrics_summary()
 
-    # Add database metrics
+    # Add database metrics using async engine
     dtc_count = 0
     try:
-        # Use sync engine for simple query
-        db_url = settings.DATABASE_URL
-        if db_url.startswith("postgresql+asyncpg://"):
-            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        from app.db.postgres.session import async_session_maker
 
-        from sqlalchemy import create_engine
-
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT COUNT(*) FROM dtc_codes"))
+        async with async_session_maker() as session:
+            result = await session.execute(text("SELECT COUNT(*) FROM dtc_codes"))
             row = result.fetchone()
             dtc_count = row[0] if row else 0
     except Exception as e:

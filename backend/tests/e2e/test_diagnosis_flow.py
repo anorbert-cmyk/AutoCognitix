@@ -664,14 +664,14 @@ class TestDiagnosisResultRetrieval:
         fake_id = str(uuid4())
         response = await async_client.get(f"/api/v1/diagnosis/{fake_id}")
         # Endpoint requires auth, so unauthenticated request returns 401
-        assert response.status_code in [401, 404]
+        assert response.status_code == 401  # Unauthenticated requests must return 401
 
     @pytest.mark.asyncio
     async def test_get_diagnosis_with_invalid_uuid_returns_422(self, async_client, seeded_db):
         """Test that invalid UUID returns 422 (or 401 without auth)."""
         response = await async_client.get("/api/v1/diagnosis/invalid-uuid-format")
         # Endpoint requires auth, so unauthenticated request returns 401
-        assert response.status_code in [401, 422]
+        assert response.status_code == 401  # Unauthenticated requests must return 401
 
     @pytest.mark.asyncio
     async def test_get_diagnosis_returns_correct_data(
@@ -779,8 +779,8 @@ class TestDiagnosisHistory:
         """Test that history endpoint requires authentication."""
         response = await async_client.get("/api/v1/diagnosis/history/list")
 
-        # Should return 401 without auth (or 200 with empty list depending on implementation)
-        assert response.status_code in [200, 401]
+        # Should return 401 without auth
+        assert response.status_code == 401  # Unauthenticated requests must return 401
 
     @pytest.mark.asyncio
     async def test_history_pagination_params(self, async_client, seeded_db):
@@ -790,8 +790,8 @@ class TestDiagnosisHistory:
             params={"skip": 0, "limit": 5},
         )
 
-        # Should accept pagination params
-        assert response.status_code in [200, 401]
+        # No auth token sent, so must return 401
+        assert response.status_code == 401  # Unauthenticated requests must return 401
 
     @pytest.mark.asyncio
     async def test_history_invalid_limit_rejected(self, async_client, seeded_db):
@@ -934,8 +934,8 @@ class TestVINValidation:
             if len(vin) != 17:
                 assert response.status_code == 422, f"VIN {vin} should be rejected (wrong length)"
             else:
-                assert response.status_code in [201, 400, 422], (
-                    f"VIN {vin} should be rejected or handled gracefully"
+                assert response.status_code in [400, 422], (
+                    f"VIN {vin} with invalid chars must never return 201"
                 )
 
     @pytest.mark.asyncio
@@ -993,7 +993,7 @@ class TestDiagnosisErrorHandling:
 
             # DiagnosisService catches RAG failures and uses fallback diagnosis,
             # so it may still return 201 with a fallback result
-            assert response.status_code in [201, 400, 500]
+            assert response.status_code in [201, 400]  # RAG failure should not cause 500
 
     @pytest.mark.asyncio
     async def test_malformed_json_returns_422(self, async_client, seeded_db):
@@ -1367,8 +1367,8 @@ class TestDiagnosisHistoryFiltering:
             headers=headers,
         )
 
-        # 200 on PostgreSQL; SQLite doesn't support ARRAY contains, so 500 is acceptable in test env
-        assert response.status_code in [200, 500]
+        # 200 on PostgreSQL; 422/500 if SQLite lacks ARRAY @> operator support
+        assert response.status_code in [200, 422, 500]
 
     @pytest.mark.asyncio
     async def test_filter_by_date_range(self, authenticated_client):

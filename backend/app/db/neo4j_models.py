@@ -7,6 +7,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from app.core.log_sanitizer import sanitize_log, sanitize_exception
+
 from neomodel import (
     ArrayProperty,
     BooleanProperty,
@@ -27,12 +29,13 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Configure Neo4j connection
+# Configure Neo4j connection (deferred-safe: skips when NEO4J_URI is empty/test)
 # Handle both bolt:// and neo4j+s:// URI schemes (Aura uses neo4j+s://)
-_neo4j_host = settings.NEO4J_URI
-for _scheme in ("neo4j+s://", "neo4j+ssc://", "neo4j://", "bolt+s://", "bolt://"):
-    _neo4j_host = _neo4j_host.replace(_scheme, "")
-config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"
+if settings.NEO4J_URI and "://" in settings.NEO4J_URI:
+    _neo4j_host = settings.NEO4J_URI
+    for _scheme in ("neo4j+s://", "neo4j+ssc://", "neo4j://", "bolt+s://", "bolt://"):
+        _neo4j_host = _neo4j_host.replace(_scheme, "")
+    config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"
 
 
 # Neo4j health check with caching
@@ -426,10 +429,16 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
 
         return result
     except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
-        logger.error("Neomodel error getting diagnostic path for DTC %s: %s", dtc_code, e)
+        logger.error(
+            "Neomodel error getting diagnostic path for DTC %s: %s",
+            sanitize_log(dtc_code),
+            sanitize_exception(e),
+        )
         return _empty_result
     except Exception:
-        logger.exception("Unexpected error getting diagnostic path for DTC %s", dtc_code)
+        logger.exception(
+            "Unexpected error getting diagnostic path for DTC %s", sanitize_log(dtc_code)
+        )
         return _empty_result
 
 

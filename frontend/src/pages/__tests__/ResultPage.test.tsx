@@ -421,20 +421,20 @@ describe('ResultPage', () => {
   // ── Edge cases: missing/undefined arrays ───────────────────────────────
 
   describe('handles missing/undefined data safely', () => {
-    it('handles missing dtc_codes array gracefully (uses fallback P0303)', () => {
+    it('handles missing dtc_codes array gracefully (uses fallback N/A)', () => {
       setupHookReturn({
         data: createMockResult({ dtc_codes: undefined as unknown as string[] }),
       });
       render(<ResultPage />);
       // With dtc_codes undefined, the optional chaining ?.[0] returns undefined,
-      // so it falls back to 'P0303'
-      expect(screen.getByText('P0303')).toBeInTheDocument();
+      // so it falls back to 'N/A'
+      expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
     });
 
-    it('handles empty dtc_codes array (uses fallback P0303)', () => {
+    it('handles empty dtc_codes array (uses fallback N/A)', () => {
       setupHookReturn({ data: createMockResult({ dtc_codes: [] }) });
       render(<ResultPage />);
-      expect(screen.getByText('P0303')).toBeInTheDocument();
+      expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
     });
 
     it('handles empty recommended_repairs (shows no-repairs message)', () => {
@@ -473,18 +473,19 @@ describe('ResultPage', () => {
         }),
       });
       render(<ResultPage />);
-      // Falls back to default DTC description
-      expect(screen.getByText('Henger 3 Égéskimaradás')).toBeInTheDocument();
+      // Falls back to generic DTC description
+      expect(screen.getByText('Nincs leírás')).toBeInTheDocument();
       // Falls back to default AI analysis text
       expect(screen.getByText('Az AI elemzés nem tartalmaz részletes leírást ehhez a hibakódhoz.')).toBeInTheDocument();
     });
 
-    it('handles missing symptoms (uses default complaint text)', () => {
+    it('handles missing symptoms (hides complaint section)', () => {
       setupHookReturn({ data: createMockResult({ symptoms: '' }) });
       render(<ResultPage />);
+      // Customer complaint section should be hidden when no symptoms
       expect(
-        screen.getByText(/Reggelente rángat a motor hidegindításnál/),
-      ).toBeInTheDocument();
+        screen.queryByText('Ügyfél panasz'),
+      ).not.toBeInTheDocument();
     });
   });
 

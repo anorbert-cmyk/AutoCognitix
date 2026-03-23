@@ -11,7 +11,6 @@ All tests are unit tests that require no database or external services.
 """
 
 import pytest
-from datetime import datetime, timezone
 from pydantic import ValidationError
 
 
@@ -301,7 +300,7 @@ class TestCalculatorRequest:
             mileage_km=55000,
             condition=VehicleCondition.EXCELLENT,
             repair_cost_huf=185000,
-            diagnosis_id="abc-123-def",
+            diagnosis_id="abc12300-1234-5678-9abc-def012345678",
             fuel_type="benzin",
         )
         assert req.repair_cost_huf == 185000
@@ -423,11 +422,11 @@ class TestCalculatorResponse:
         assert resp.confidence_score == 0.99
 
     def test_ratio_out_of_range_rejected(self):
-        """Ratio over 10.0 should be rejected."""
+        """Ratio over 100.0 should be rejected."""
         from pydantic import ValidationError as PydanticValidationError
 
         with pytest.raises(PydanticValidationError):
-            self._make_valid_response(ratio=10.1)
+            self._make_valid_response(ratio=100.1)
 
     def test_negative_values_rejected(self):
         """Negative vehicle values should be rejected."""

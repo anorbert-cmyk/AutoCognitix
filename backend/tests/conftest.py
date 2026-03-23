@@ -19,8 +19,8 @@ os.environ.setdefault("NEO4J_PASSWORD", "test_password")
 os.environ.setdefault("QDRANT_HOST", "localhost")
 os.environ.setdefault("QDRANT_PORT", "6333")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
-os.environ.setdefault("SECRET_KEY", "test_secret_key_for_testing_only")
-os.environ.setdefault("JWT_SECRET_KEY", "test_jwt_secret_for_testing_only")
+os.environ.setdefault("SECRET_KEY", "test_secret_key_for_testing_only_1234567890")
+os.environ.setdefault("JWT_SECRET_KEY", "test_jwt_secret_for_testing_only_1234567890")
 os.environ.setdefault("ENVIRONMENT", "testing")
 
 import pytest

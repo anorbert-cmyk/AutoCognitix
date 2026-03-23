@@ -125,9 +125,10 @@ class RobustNeo4jLoader:
                     try:
                         await self.close()
                         await self.connect()
-                    except:
-                        pass
-        raise last_error
+                    except Exception as reconnect_err:
+                        print(f"  Reconnect failed: {str(reconnect_err)[:80]}")
+        if last_error is not None:
+            raise last_error
 
     async def create_indexes(self):
         """Create indexes for better performance."""

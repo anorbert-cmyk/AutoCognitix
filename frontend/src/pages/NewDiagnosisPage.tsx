@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Wrench, HelpCircle } from 'lucide-react';
 
@@ -41,6 +41,16 @@ export default function NewDiagnosisPage() {
   );
   const [currentAnalysisStepIndex, setCurrentAnalysisStepIndex] = useState(0);
   const [diagnosisId, setDiagnosisId] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   // API mutation
   const analyzeDiagnosis = useAnalyzeDiagnosis();
@@ -79,6 +89,7 @@ export default function NewDiagnosisPage() {
 
     // Simulate step-by-step progress
     let stepIndex = 0;
+    if (intervalRef.current) clearInterval(intervalRef.current);
     const interval = setInterval(() => {
       setAnalysisSteps((prevSteps) => {
         const newSteps = [...prevSteps];
@@ -103,6 +114,7 @@ export default function NewDiagnosisPage() {
         });
       }
     }, 1500);
+    intervalRef.current = interval;
   }, []);
 
   // Handle form submission
@@ -134,7 +146,8 @@ export default function NewDiagnosisPage() {
   // Handle analysis completion
   const handleAnalysisComplete = useCallback(() => {
     // Small delay before navigating
-    setTimeout(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
       setCurrentStep('report');
       // Navigate to result page
       if (diagnosisId) {

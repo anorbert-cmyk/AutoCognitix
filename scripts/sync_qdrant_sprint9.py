@@ -575,7 +575,6 @@ class Sprint9QdrantIndexer:
         # Flush remaining
         if points:
             self._upload_points(points)
-            points = []
 
         self.checkpoint.state["dtc_done"] = True
         self.checkpoint.state["dtc_last_idx"] = total
@@ -703,7 +702,6 @@ class Sprint9QdrantIndexer:
         # Flush remaining
         if points:
             self._upload_points(points)
-            points = []
 
         self.checkpoint.state["complaints_done"] = True
         self.checkpoint.state["complaints_last_idx"] = total
@@ -823,7 +821,6 @@ class Sprint9QdrantIndexer:
         # Flush remaining
         if points:
             self._upload_points(points)
-            points = []
 
         self.checkpoint.state["epa_done"] = True
         self.checkpoint.state["epa_last_idx"] = total

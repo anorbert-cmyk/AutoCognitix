@@ -3,7 +3,7 @@
  *
  * Szimulált hibakód: P0300 (Több hengeres égéskimaradás)
  * Jármű: Volkswagen Golf VII 1.4 TSI (2018)
- * Árak: Valós magyar alkatrész webshopokból (Bárdi Autó, Uni Autó, AUTODOC)
+ * Árak: Valós magyar alkatrész webshopokból (Bárdi Autó, Unix Autó, AUTODOC)
  * Utolsó ár-frissítés: 2026-03-01
  */
 

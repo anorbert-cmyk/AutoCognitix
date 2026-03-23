@@ -5,41 +5,7 @@ Tests user registration, login, token refresh, and protected endpoints.
 """
 
 import pytest
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
-
-# Add backend to path
-backend_path = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(backend_path))
-
-
-# =============================================================================
-# Mock Redis-dependent security functions (no Redis in test environment)
-# =============================================================================
-
-
-@pytest.fixture(autouse=True)
-def _mock_redis_security():
-    """Mock token blacklist functions to avoid Redis dependency in tests.
-
-    The security module uses a fail-closed policy: when Redis is unavailable,
-    is_token_blacklisted returns True (= reject token). We mock both functions
-    so tests don't depend on a running Redis instance.
-    """
-    with (
-        patch(
-            "app.core.security.is_token_blacklisted",
-            new_callable=AsyncMock,
-            return_value=False,
-        ),
-        patch(
-            "app.core.security.blacklist_token",
-            new_callable=AsyncMock,
-            return_value=True,
-        ),
-    ):
-        yield
 
 
 # =============================================================================
@@ -71,6 +37,34 @@ async def _register_and_login(async_client):
         },
     )
     return login_response
+
+
+# =============================================================================
+# Mock Redis-dependent security functions (no Redis in test environment)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _mock_redis_security():
+    """Mock token blacklist functions to avoid Redis dependency in tests.
+
+    The security module uses a fail-closed policy: when Redis is unavailable,
+    is_token_blacklisted returns True (= reject token). We mock both functions
+    so tests don't depend on a running Redis instance.
+    """
+    with (
+        patch(
+            "app.core.security.is_token_blacklisted",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.core.security.blacklist_token",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        yield
 
 
 class TestUserRegistration:

@@ -481,10 +481,31 @@ class QdrantService:
         return stats
 
 
-# Global instance
-qdrant_client = QdrantService()
+# Lazy global instance -initialised on first access so that importing
+# this module does not open a network connection (important for tests/CI
+# where Qdrant may not be running).
+_qdrant_instance: Optional[QdrantService] = None
+
+
+def _get_qdrant_instance() -> QdrantService:
+    """Return (and lazily create) the global QdrantService singleton."""
+    global _qdrant_instance
+    if _qdrant_instance is None:
+        _qdrant_instance = QdrantService()
+    return _qdrant_instance
+
+
+class _LazyQdrantProxy:
+    """Transparent proxy that defers QdrantService creation until first use."""
+
+    def __getattr__(self, name: str):
+        return getattr(_get_qdrant_instance(), name)
+
+
+# Importable module-level name -behaves like QdrantService but is lazy.
+qdrant_client: QdrantService = _LazyQdrantProxy()  # type: ignore[assignment]
 
 
 async def get_qdrant_service() -> QdrantService:
     """Get the global Qdrant service instance."""
-    return qdrant_client
+    return _get_qdrant_instance()

@@ -6,7 +6,7 @@
 
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMemo } from 'react';
-import { Loader2, Calculator, MessageSquare, MapPin } from 'lucide-react';
+import { Loader2, Calculator, MessageSquare, MapPin, ClipboardCheck } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useDiagnosisDetail } from '../services/hooks';
 import { DiagnosisResponse, PartWithPrice } from '../services/api';
@@ -34,15 +34,15 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const engineInfo = 'N/A';
 
   // Elsődleges DTC kód
-  const primaryDTC = result.dtc_codes?.[0] || 'P0303';
-  const dtcDescription = result.probable_causes[0]?.title || 'Henger 3 Égéskimaradás';
+  const primaryDTC = result.dtc_codes?.[0] || 'N/A';
+  const dtcDescription = result.probable_causes?.[0]?.title || 'Nincs leírás';
 
   // Ügyfél panasza
-  const customerComplaint = result.symptoms || 'Reggelente rángat a motor hidegindításnál. A check engine lámpa villog, amikor autópályára hajtok fel.';
+  const customerComplaint = result.symptoms || '';
 
   // AI elemzés szöveg
   const aiAnalysisDetails = result.root_cause_analysis
-    || result.probable_causes[0]?.description
+    || result.probable_causes?.[0]?.description
     || 'Az AI elemzés nem tartalmaz részletes leírást ehhez a hibakódhoz.';
 
   // Konfidencia százalék
@@ -206,6 +206,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                 </div>
 
                 {/* Customer Complaint */}
+                {customerComplaint && (
                 <div>
                   <h4 className="text-xs font-bold uppercase text-slate-400 mb-3 flex items-center gap-2 tracking-wide">
                     <MaterialIcon name="person" className="text-base" />
@@ -218,6 +219,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                     </p>
                   </div>
                 </div>
+                )}
               </div>
             </div>
           </div>
@@ -416,14 +418,21 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
         <div className="max-w-7xl mx-auto px-4 md:px-8 lg:px-10 mt-10 mb-6 print:hidden">
           <div className="flex flex-wrap gap-3">
             <Link
-              to={`/calculator?diagnosis_id=${result.id}`}
+              to={`/inspection?make=${encodeURIComponent(result.vehicle_make || '')}&model=${encodeURIComponent(result.vehicle_model || '')}&year=${result.vehicle_year || ''}&dtc=${(result.dtc_codes || []).join(',')}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
+            >
+              <ClipboardCheck className="h-4 w-4" />
+              Műszaki vizsga kockázat
+            </Link>
+            <Link
+              to={`/calculator?diagnosis_id=${result.id}&make=${encodeURIComponent(result.vehicle_make || '')}&model=${encodeURIComponent(result.vehicle_model || '')}&year=${result.vehicle_year || ''}`}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
             >
               <Calculator className="h-4 w-4" />
               Megéri megjavítani?
             </Link>
             <Link
-              to={`/chat?diagnosis_id=${result.id}`}
+              to={`/chat?diagnosis_id=${result.id}&make=${encodeURIComponent(result.vehicle_make || '')}&model=${encodeURIComponent(result.vehicle_model || '')}&year=${result.vehicle_year || ''}&dtc=${(result.dtc_codes || []).join(',')}`}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 border-slate-300 text-slate-700 font-semibold hover:bg-slate-50 transition-colors text-sm"
             >
               <MessageSquare className="h-4 w-4" />

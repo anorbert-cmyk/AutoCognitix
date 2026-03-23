@@ -4,9 +4,10 @@
  * Enter to send, Shift+Enter for newline.
  */
 
-import { useState, useCallback, useRef, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useState, useCallback, useRef, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { Send, Mic } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getSpeechRecognitionCtor, hasSpeechRecognition as checkSpeechSupport } from '@/lib/speechRecognition'
 
 const MAX_CHARS = 1000
 
@@ -22,7 +23,18 @@ export function ChatInput({
   placeholder = 'Irjon uzenetet...',
 }: ChatInputProps) {
   const [text, setText] = useState('')
+  const [isListening, setIsListening] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort()
+      }
+    }
+  }, [])
 
   const charCount = text.length
   const canSend = text.trim().length > 0 && !disabled && charCount <= MAX_CHARS
@@ -60,35 +72,34 @@ export function ChatInput({
   }, [])
 
   const handleMic = useCallback(() => {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const SpeechRecognitionConstructor =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-    if (!SpeechRecognitionConstructor) {
+    const Ctor = getSpeechRecognitionCtor()
+    if (!Ctor) {
       return
     }
-    const recognition = new SpeechRecognitionConstructor()
+    const recognition = new Ctor()
     recognition.lang = 'hu-HU'
     recognition.continuous = false
     recognition.interimResults = false
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript: string = event.results[0][0].transcript
       setText((prev) => {
         const combined = prev + (prev ? ' ' : '') + transcript
         return combined.slice(0, MAX_CHARS)
       })
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error)
+      setIsListening(false)
     }
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+    recognitionRef.current = recognition
     recognition.start()
+    setIsListening(true)
   }, [])
 
-  const hasSpeechRecognition =
-    typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+  const hasSpeechRecognition = checkSpeechSupport()
 
   return (
     <div className="border-t border-gray-200 bg-white px-4 py-3">
@@ -103,9 +114,11 @@ export function ChatInput({
               'flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full transition-colors',
               disabled
                 ? 'text-gray-300 cursor-not-allowed'
-                : 'text-gray-500 hover:text-primary-600 hover:bg-primary-50'
+                : isListening
+                  ? 'text-red-500 animate-pulse'
+                  : 'text-gray-500 hover:text-primary-600 hover:bg-primary-50'
             )}
-            title="Diktalaas"
+            title="Diktalas"
             aria-label="Beszedfelismeres inditasa"
           >
             <Mic className="h-5 w-5" aria-hidden="true" />

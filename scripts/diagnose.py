@@ -275,7 +275,12 @@ class OutputFormatter:
         """Format multiple DTC codes."""
         raise NotImplementedError
 
-    def format_diagnosis(self, diagnosis: Dict[str, Any]) -> str:
+    def format_diagnosis(
+        self,
+        codes: List[Dict[str, Any]],
+        symptoms: str,
+        vehicle: Optional[Dict[str, str]] = None,
+    ) -> Optional[str]:
         """Format diagnosis results."""
         raise NotImplementedError
 
@@ -395,7 +400,7 @@ class PrettyFormatter(OutputFormatter):
         codes: List[Dict[str, Any]],
         symptoms: str,
         vehicle: Optional[Dict[str, str]] = None,
-    ) -> None:
+    ) -> Optional[str]:
         """Display full diagnosis results."""
         # Header
         self.console.print()
@@ -458,6 +463,8 @@ class PrettyFormatter(OutputFormatter):
         else:
             self.console.print("[yellow]Nem talalhato ismert DTC kod.[/yellow]")
 
+        return None
+
 
 class JSONFormatter(OutputFormatter):
     """JSON output formatter."""
@@ -480,7 +487,7 @@ class JSONFormatter(OutputFormatter):
         codes: List[Dict[str, Any]],
         symptoms: str,
         vehicle: Optional[Dict[str, str]] = None,
-    ) -> str:
+    ) -> Optional[str]:
         """Format diagnosis results as JSON."""
         output = {
             "diagnosis": {
@@ -538,7 +545,7 @@ class CSVFormatter(OutputFormatter):
         codes: List[Dict[str, Any]],
         symptoms: str,
         vehicle: Optional[Dict[str, str]] = None,
-    ) -> str:
+    ) -> Optional[str]:
         """Format diagnosis results as CSV."""
         # For diagnosis, include vehicle info in each row
         output = io.StringIO()
