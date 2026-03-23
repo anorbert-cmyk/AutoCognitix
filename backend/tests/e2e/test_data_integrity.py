@@ -970,8 +970,11 @@ class TestConcurrentDataAccess:
     """Test concurrent data access scenarios."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_dtc_creation(self, async_client, seeded_db):
+    async def test_concurrent_dtc_creation(self, authenticated_client, seeded_db):
         """Test DTC creation with same code is prevented."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc_data = {
             "code": "P9500",
             "description_en": "Concurrent Test Code",
@@ -982,7 +985,7 @@ class TestConcurrentDataAccess:
         # Create sequentially (SQLite doesn't support concurrent writes)
         responses = []
         for _ in range(3):
-            resp = await async_client.post("/api/v1/dtc/", json=dtc_data)
+            resp = await client.post("/api/v1/dtc/", json=dtc_data, headers=headers)
             responses.append(resp)
 
         # One should succeed, others should fail
@@ -1017,8 +1020,11 @@ class TestNullHandling:
     """Test null value handling across the system."""
 
     @pytest.mark.asyncio
-    async def test_null_description_hu_handled(self, async_client, seeded_db):
+    async def test_null_description_hu_handled(self, authenticated_client, seeded_db):
         """Test that null Hungarian description is handled."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9600",
             "description_en": "Code without Hungarian",
@@ -1027,19 +1033,22 @@ class TestNullHandling:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await async_client.get("/api/v1/dtc/P9600")
+        get_response = await client.get("/api/v1/dtc/P9600")
         if get_response.status_code == 200:
             data = get_response.json()
             # description_hu should be null or empty
             assert data["description_hu"] in [None, ""]
 
     @pytest.mark.asyncio
-    async def test_empty_lists_handled(self, async_client, seeded_db):
+    async def test_empty_lists_handled(self, authenticated_client, seeded_db):
         """Test that empty lists are handled correctly."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9601",
             "description_en": "Code with empty lists",
@@ -1050,11 +1059,11 @@ class TestNullHandling:
             "diagnostic_steps": [],
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await async_client.get("/api/v1/dtc/P9601")
+        get_response = await client.get("/api/v1/dtc/P9601")
         if get_response.status_code == 200:
             data = get_response.json()
             assert isinstance(data["symptoms"], list)
@@ -1066,8 +1075,11 @@ class TestDataSanitization:
     """Test data sanitization and XSS prevention."""
 
     @pytest.mark.asyncio
-    async def test_html_in_description_escaped(self, async_client, seeded_db):
+    async def test_html_in_description_escaped(self, authenticated_client, seeded_db):
         """Test that HTML in descriptions is properly handled."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P9700",
             "description_en": "<script>alert('xss')</script>Test Code",
@@ -1075,11 +1087,11 @@ class TestDataSanitization:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Retrieve and verify (should not execute script)
-        get_response = await async_client.get("/api/v1/dtc/P9700")
+        get_response = await client.get("/api/v1/dtc/P9700")
         if get_response.status_code == 200:
             data = get_response.json()
             # Script tags should be stored as-is (API doesn't execute)

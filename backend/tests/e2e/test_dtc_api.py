@@ -1169,8 +1169,11 @@ class TestDTCManufacturerSpecific:
     """Test manufacturer-specific DTC handling."""
 
     @pytest.mark.asyncio
-    async def test_create_manufacturer_specific_code(self, async_client, seeded_db):
+    async def test_create_manufacturer_specific_code(self, authenticated_client, seeded_db):
         """Test creating manufacturer-specific DTC code."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P1234",  # Manufacturer-specific range
             "description_en": "Manufacturer Specific Code",
@@ -1181,15 +1184,18 @@ class TestDTCManufacturerSpecific:
             "system": "Fuel System",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         data = response.json()
         assert data["code"] == "P1234"
 
     @pytest.mark.asyncio
-    async def test_generic_vs_manufacturer_flag(self, async_client, seeded_db):
+    async def test_generic_vs_manufacturer_flag(self, authenticated_client, seeded_db):
         """Test is_generic flag handling."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # Create generic code
         generic_dtc = {
             "code": "P0200",
@@ -1199,11 +1205,11 @@ class TestDTCManufacturerSpecific:
             "is_generic": True,
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=generic_dtc)
+        response = await client.post("/api/v1/dtc/", json=generic_dtc, headers=headers)
         assert response.status_code == 201
 
         # Verify flag
-        get_response = await async_client.get("/api/v1/dtc/P0200")
+        get_response = await client.get("/api/v1/dtc/P0200")
         if get_response.status_code == 200:
             data = get_response.json()
             assert data["is_generic"] is True
@@ -1213,8 +1219,11 @@ class TestDTCDiagnosticSteps:
     """Test DTC diagnostic steps handling."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_with_diagnostic_steps(self, async_client, seeded_db):
+    async def test_create_dtc_with_diagnostic_steps(self, authenticated_client, seeded_db):
         """Test creating DTC with diagnostic steps."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P6200",
             "description_en": "Test Code with Steps",
@@ -1228,11 +1237,11 @@ class TestDTCDiagnosticSteps:
             ],
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Verify steps saved
-        get_response = await async_client.get("/api/v1/dtc/P6200")
+        get_response = await client.get("/api/v1/dtc/P6200")
         if get_response.status_code == 200:
             data = get_response.json()
             assert len(data["diagnostic_steps"]) == 4
