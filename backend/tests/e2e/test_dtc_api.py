@@ -555,8 +555,11 @@ class TestDTCCreateEndpoint:
     """Test POST /api/v1/dtc endpoint."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_code(self, async_client, seeded_db):
+    async def test_create_dtc_code(self, authenticated_client, seeded_db):
         """Test creating a new DTC code."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         new_dtc = {
             "code": "P1234",
             "description_en": "Test DTC Code",
@@ -566,15 +569,18 @@ class TestDTCCreateEndpoint:
             "is_generic": True,
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=new_dtc)
+        response = await client.post("/api/v1/dtc/", json=new_dtc, headers=headers)
 
         assert response.status_code == 201
         data = response.json()
         assert data["code"] == "P1234"
 
     @pytest.mark.asyncio
-    async def test_create_duplicate_dtc_fails(self, async_client, seeded_db):
+    async def test_create_duplicate_dtc_fails(self, authenticated_client, seeded_db):
         """Test that creating duplicate DTC code fails."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         duplicate_dtc = {
             "code": "P0101",  # Already exists in seeded data
             "description_en": "Duplicate Test",
@@ -582,13 +588,16 @@ class TestDTCCreateEndpoint:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=duplicate_dtc)
+        response = await client.post("/api/v1/dtc/", json=duplicate_dtc, headers=headers)
 
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_create_dtc_validates_code_format(self, async_client, seeded_db):
+    async def test_create_dtc_validates_code_format(self, authenticated_client, seeded_db):
         """Test that create validates DTC code format."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         invalid_dtc = {
             "code": "X999",  # Invalid prefix
             "description_en": "Invalid Code",
@@ -596,21 +605,24 @@ class TestDTCCreateEndpoint:
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=invalid_dtc)
+        response = await client.post("/api/v1/dtc/", json=invalid_dtc, headers=headers)
 
         # Should reject invalid code format
         assert response.status_code in [400, 422]
 
     @pytest.mark.asyncio
-    async def test_create_dtc_requires_description(self, async_client, seeded_db):
+    async def test_create_dtc_requires_description(self, authenticated_client, seeded_db):
         """Test that create requires description."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         incomplete_dtc = {
             "code": "P5555",
             "category": "powertrain",
             "severity": "medium",
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=incomplete_dtc)
+        response = await client.post("/api/v1/dtc/", json=incomplete_dtc, headers=headers)
 
         assert response.status_code == 422
 
@@ -619,8 +631,11 @@ class TestDTCBulkImportEndpoint:
     """Test POST /api/v1/dtc/bulk endpoint."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_multiple_codes(self, async_client, seeded_db):
+    async def test_bulk_import_multiple_codes(self, authenticated_client, seeded_db):
         """Test bulk importing multiple DTC codes."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -639,7 +654,7 @@ class TestDTCBulkImportEndpoint:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         assert response.status_code in (200, 201)
         data = response.json()
@@ -647,8 +662,11 @@ class TestDTCBulkImportEndpoint:
         assert data["created"] >= 0
 
     @pytest.mark.asyncio
-    async def test_bulk_import_skips_existing_by_default(self, async_client, seeded_db):
+    async def test_bulk_import_skips_existing_by_default(self, authenticated_client, seeded_db):
         """Test that bulk import skips existing codes by default."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -661,15 +679,18 @@ class TestDTCBulkImportEndpoint:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         assert response.status_code in (200, 201)
         data = response.json()
         assert data["skipped"] >= 1
 
     @pytest.mark.asyncio
-    async def test_bulk_import_can_overwrite(self, async_client, seeded_db):
+    async def test_bulk_import_can_overwrite(self, authenticated_client, seeded_db):
         """Test that bulk import can overwrite existing codes."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -682,15 +703,18 @@ class TestDTCBulkImportEndpoint:
             "overwrite_existing": True,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         assert response.status_code in (200, 201)
         data = response.json()
         assert data["updated"] >= 0 or data["created"] >= 0
 
     @pytest.mark.asyncio
-    async def test_bulk_import_returns_summary(self, async_client, seeded_db):
+    async def test_bulk_import_returns_summary(self, authenticated_client, seeded_db):
         """Test that bulk import returns summary."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -703,7 +727,7 @@ class TestDTCBulkImportEndpoint:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         assert response.status_code in (200, 201)
         data = response.json()
@@ -841,8 +865,11 @@ class TestDTCUpdateEndpoint:
     """Test DTC code update functionality."""
 
     @pytest.mark.asyncio
-    async def test_update_dtc_description(self, async_client, seeded_db):
+    async def test_update_dtc_description(self, authenticated_client, seeded_db):
         """Test updating DTC description."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         # First create a DTC
         dtc = {
             "code": "P6001",
@@ -852,7 +879,7 @@ class TestDTCUpdateEndpoint:
             "severity": "medium",
         }
 
-        create_response = await async_client.post("/api/v1/dtc/", json=dtc)
+        create_response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert create_response.status_code == 201
 
         # Update via bulk with overwrite
@@ -869,11 +896,11 @@ class TestDTCUpdateEndpoint:
             "overwrite_existing": True,
         }
 
-        update_response = await async_client.post("/api/v1/dtc/bulk", json=update_data)
+        update_response = await client.post("/api/v1/dtc/bulk", json=update_data, headers=headers)
         assert update_response.status_code in (200, 201)
 
         # Verify update
-        get_response = await async_client.get("/api/v1/dtc/P6001")
+        get_response = await client.get("/api/v1/dtc/P6001")
         if get_response.status_code == 200:
             data = get_response.json()
             assert data["severity"] == "high"
@@ -928,8 +955,11 @@ class TestDTCHungarianContent:
     """Test Hungarian content handling in DTC operations."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_with_hungarian_description(self, async_client, seeded_db):
+    async def test_create_dtc_with_hungarian_description(self, authenticated_client, seeded_db):
         """Test creating DTC with Hungarian description."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         dtc = {
             "code": "P6100",
             "description_en": "Test Code",
@@ -940,11 +970,11 @@ class TestDTCHungarianContent:
             "possible_causes": ["Ok 1", "Ok 2"],
         }
 
-        response = await async_client.post("/api/v1/dtc/", json=dtc)
+        response = await client.post("/api/v1/dtc/", json=dtc, headers=headers)
         assert response.status_code == 201
 
         # Verify Hungarian content was saved
-        get_response = await async_client.get("/api/v1/dtc/P6100")
+        get_response = await client.get("/api/v1/dtc/P6100")
         if get_response.status_code == 200:
             data = get_response.json()
             assert data["description_hu"] == dtc["description_hu"]
@@ -996,21 +1026,27 @@ class TestDTCBulkOperations:
     """Test DTC bulk operation edge cases."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_empty_list(self, async_client, seeded_db):
+    async def test_bulk_import_empty_list(self, authenticated_client, seeded_db):
         """Test bulk import with empty list."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [],
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         # Should handle empty list gracefully
         assert response.status_code in [201, 422]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_with_invalid_codes(self, async_client, seeded_db):
+    async def test_bulk_import_with_invalid_codes(self, authenticated_client, seeded_db):
         """Test bulk import with some invalid codes."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         bulk_data = {
             "codes": [
                 {
@@ -1029,14 +1065,17 @@ class TestDTCBulkOperations:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
         # Should either reject all or create valid ones and report errors
         assert response.status_code in [200, 201, 422]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_large_batch(self, async_client, seeded_db):
+    async def test_bulk_import_large_batch(self, authenticated_client, seeded_db):
         """Test bulk import with larger batch."""
+        client = authenticated_client["client"]
+        headers = authenticated_client["headers"]
+
         codes = [
             {
                 "code": f"P7{i:03d}",
@@ -1052,7 +1091,7 @@ class TestDTCBulkOperations:
             "overwrite_existing": False,
         }
 
-        response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
+        response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
         assert response.status_code in (200, 201)
 
         data = response.json()

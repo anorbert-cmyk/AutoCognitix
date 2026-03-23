@@ -411,7 +411,7 @@ async def register(
 
     await db.commit()
 
-    logger.info(f"User registered: {user.email}")
+    logger.info(f"User registered: {user.email[:3]}***@***")
 
     # Send welcome email (best-effort, don't block registration)
     try:
@@ -423,7 +423,7 @@ async def register(
             login_link=login_link,
         )
     except Exception as e:
-        logger.warning(f"Failed to send welcome email to {user.email}: {e}")
+        logger.warning(f"Failed to send welcome email to {user.email[:3]}***@***: {e}")
 
     response.headers["Location"] = f"/api/v1/auth/users/{user.id}"
 
@@ -522,7 +522,7 @@ async def login(
         await db.commit()
 
         if is_locked:
-            logger.warning(f"Account locked due to failed attempts: {form_data.username}")
+            logger.warning(f"Account locked due to failed attempts: {form_data.username[:3]}***")
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail="Fiók zárolva túl sok sikertelen bejelentkezési kísérlet miatt. Próbálja újra később.",
@@ -551,7 +551,7 @@ async def login(
     # Set httpOnly secure cookies for browser clients
     _set_auth_cookies(response, access_token, refresh_token)
 
-    logger.info(f"User logged in: {user.email}")
+    logger.info(f"User logged in: {user.email[:3]}***@***")
 
     # Return tokens in body for backward compatibility (API clients)
     return Token(
@@ -666,7 +666,7 @@ async def refresh_tokens(
     # Set new httpOnly cookies for browser clients
     _set_auth_cookies(response, access_token, new_refresh_token)
 
-    logger.info(f"Tokens refreshed for user: {user.email}")
+    logger.info(f"Tokens refreshed for user: {user.email[:3]}***@***")
 
     return Token(
         access_token=access_token,
@@ -819,7 +819,7 @@ async def update_me(
         user = await repository.update(current_user.id, update_dict)
         await db.commit()
         if user:
-            logger.info(f"User profile updated: {user.email}")
+            logger.info(f"User profile updated: {user.email[:3]}***@***")
             return UserResponse(
                 id=str(user.id),
                 email=user.email,
@@ -936,9 +936,9 @@ async def forgot_password(
                 reset_link=reset_link,
             )
         except Exception as e:
-            logger.warning(f"Failed to send password reset email to {user.email}: {e}")
+            logger.warning(f"Failed to send password reset email to {user.email[:3]}***@***: {e}")
 
-        logger.info(f"Password reset requested for: {user.email}")
+        logger.info(f"Password reset requested for: {user.email[:3]}***@***")
 
     # Always return same response for security (prevents email enumeration)
     return ForgotPasswordResponse()
@@ -1005,7 +1005,7 @@ async def reset_password(
     # Blacklist the used reset token
     await blacklist_token(request_data.token)
 
-    logger.info(f"Password reset completed for: {user.email}")
+    logger.info(f"Password reset completed for: {user.email[:3]}***@***")
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 

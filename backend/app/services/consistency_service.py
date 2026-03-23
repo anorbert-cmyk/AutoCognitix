@@ -115,30 +115,21 @@ class ConsistencyService:
 
     async def _get_neo4j_dtc_codes(self) -> Set[str]:
         """Get all DTC codes from Neo4j."""
-        from neo4j import GraphDatabase
+        from app.db.neo4j_models import is_neo4j_available
 
-        from app.core.config import settings
+        from neomodel import db
 
-        driver = GraphDatabase.driver(
-            settings.NEO4J_URI,
-            auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
-        )
-        try:
+        if not await is_neo4j_available():
+            raise RuntimeError("Neo4j unavailable")
 
-            def _query(tx):
-                result = tx.run(
-                    "MATCH (d:DTCCode) RETURN d.code AS code",
-                    timeout=10,
-                )
-                return {record["code"] for record in result}
+        def _run():
+            results, _ = db.cypher_query(
+                "MATCH (d:DTCCode) RETURN d.code AS code",
+                resolve_objects=False,
+            )
+            return {row[0] for row in results}
 
-            def _run():
-                with driver.session() as session:
-                    return session.execute_read(_query)
-
-            return await asyncio.to_thread(_run)
-        finally:
-            driver.close()
+        return await asyncio.to_thread(_run)
 
     async def _get_qdrant_vector_count(self) -> int:
         """Get total vector count from Qdrant DTC embedding collections."""

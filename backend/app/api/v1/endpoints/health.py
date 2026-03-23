@@ -20,7 +20,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.v1.endpoints.auth import get_current_user_from_token
+from app.db.postgres.models import User
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -462,7 +465,9 @@ async def readiness_check():
 
 
 @router.get("/detailed", response_model=DetailedHealthResponse, tags=["Health"])
-async def detailed_health_check():
+async def detailed_health_check(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Detailed health check for all services.
 
@@ -577,7 +582,9 @@ async def detailed_health_check():
 
 
 @router.get("/db", tags=["Health"])
-async def database_stats():
+async def database_stats(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Get database statistics.
 
@@ -612,7 +619,9 @@ async def database_stats():
 
 
 @router.get("/consistency", response_model=ConsistencyResponse, tags=["Health"])
-async def consistency_check():
+async def consistency_check(
+    current_user: User = Depends(get_current_user_from_token),
+):
     """
     Cross-database consistency check.
 

@@ -15,7 +15,6 @@ Author: AutoCognitix Team
 import asyncio
 import contextvars
 import hashlib
-import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -26,6 +25,8 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from enum import Enum
 
 from sqlalchemy import func, or_, select
+
+from app.core.sql_utils import escape_ilike as _escape_ilike
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -61,11 +62,6 @@ logger = get_logger(__name__)
 # Maximum estimated tokens for the prompt sent to the LLM.
 # Rough estimation: 1 token ≈ 4 characters.
 MAX_PROMPT_TOKENS = 8000
-
-
-def _escape_ilike(value: str) -> str:
-    """Escape SQL ILIKE special characters (%, _, \\) to prevent wildcard injection."""
-    return re.sub(r"([%_\\])", r"\\\1", value)
 
 
 # ContextVar for request-scoped DB session (thread-safe for singleton RAGService)
@@ -185,7 +181,7 @@ class RAGContext:
 
 
 @dataclass
-class RepairRecommendation:
+class RAGRepairRecommendation:
     """Repair recommendation with cost and time estimates."""
 
     name: str
@@ -217,7 +213,7 @@ class DiagnosisResult:
 
     # Structured results
     probable_causes: List[Dict[str, Any]] = field(default_factory=list)
-    repair_recommendations: List[RepairRecommendation] = field(default_factory=list)
+    repair_recommendations: List[RAGRepairRecommendation] = field(default_factory=list)
     safety_warnings: List[str] = field(default_factory=list)
     diagnostic_steps: List[str] = field(default_factory=list)
 
@@ -728,7 +724,11 @@ class RAGService:
         context = RAGContext()
 
         # Preprocess symptoms for search
-        preprocessed_symptoms = preprocess_hungarian(symptoms) if symptoms else ""
+        if symptoms:
+            loop = asyncio.get_running_loop()
+            preprocessed_symptoms = await loop.run_in_executor(None, preprocess_hungarian, symptoms)
+        else:
+            preprocessed_symptoms = ""
 
         # Build search query combining symptoms and DTC codes
         search_query = f"{' '.join(dtc_codes)} {preprocessed_symptoms}".strip()
@@ -1146,7 +1146,7 @@ class RAGService:
         repair_recommendations = []
         for repair in diagnosis.recommended_repairs or []:
             repair_recommendations.append(
-                RepairRecommendation(
+                RAGRepairRecommendation(
                     name=repair.get("title", ""),
                     description=repair.get("description", ""),
                     difficulty=repair.get("difficulty", "intermediate"),

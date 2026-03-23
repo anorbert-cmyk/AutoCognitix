@@ -9,6 +9,7 @@ Provides conversational AI interface with:
 - Follow-up suggestion generation
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -82,6 +83,7 @@ class ChatService:
 
     def __init__(self) -> None:
         self._conversations: Dict[str, List[Dict[str, str]]] = {}
+        self._lock = asyncio.Lock()
 
     async def process_message(
         self,
@@ -127,19 +129,23 @@ class ChatService:
             system_prompt = CHAT_SYSTEM_PROMPT
             user_prompt = await self._build_user_prompt(safe_message, vehicle_context, diagnosis_id)
 
-            # Evict oldest conversations if at capacity
-            if (
-                conversation_id not in self._conversations
-                and len(self._conversations) >= MAX_CONVERSATIONS
-            ):
-                oldest_key = next(iter(self._conversations))
-                del self._conversations[oldest_key]
+            # Thread-safe conversation management
+            async with self._lock:
+                # Evict oldest conversations if at capacity
+                if (
+                    conversation_id not in self._conversations
+                    and len(self._conversations) >= MAX_CONVERSATIONS
+                ):
+                    oldest_key = next(iter(self._conversations))
+                    del self._conversations[oldest_key]
 
-            # Store conversation history
-            if conversation_id not in self._conversations:
-                self._conversations[conversation_id] = []
+                # Store conversation history
+                if conversation_id not in self._conversations:
+                    self._conversations[conversation_id] = []
 
-            self._conversations[conversation_id].append({"role": "user", "content": user_prompt})
+                self._conversations[conversation_id].append(
+                    {"role": "user", "content": user_prompt}
+                )
 
             # Include recent conversation history in prompt
             history_prompt = self._build_history_prompt(conversation_id)

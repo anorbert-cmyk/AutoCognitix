@@ -695,7 +695,7 @@ class HungarianEmbeddingService:
         preprocess: bool = False,
         batch_size: Optional[int] = None,
         use_cache: bool = True,
-    ) -> List[List[float]]:
+    ) -> List[Optional[List[float]]]:
         """
         Async version of embed_batch with cache integration.
 
@@ -706,7 +706,7 @@ class HungarianEmbeddingService:
             use_cache: Whether to use Redis cache.
 
         Returns:
-            List[List[float]]: List of embedding vectors.
+            List[Optional[List[float]]]: List of embedding vectors (None for failed entries).
         """
         if not texts:
             return []
@@ -769,7 +769,7 @@ class HungarianEmbeddingService:
                 except Exception:
                     pass
 
-        return results  # type: ignore
+        return results
 
     def disable_cache(self) -> None:
         """Disable embedding cache (for testing)."""

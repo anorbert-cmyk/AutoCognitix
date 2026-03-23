@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
@@ -208,6 +208,13 @@ class MaxBodySizeMiddleware:
                 except ValueError:
                     pass
         await self.app(scope, receive, send)
+
+
+def _get_auth_dependency():
+    """Lazy import of auth dependency to avoid circular imports."""
+    from app.api.v1.endpoints.auth import get_current_user_from_token
+
+    return get_current_user_from_token
 
 
 def create_application() -> FastAPI:
@@ -414,25 +421,29 @@ For API support, visit the [project repository](https://github.com/autocognitix)
 
     # Detailed health endpoint at root level (redirects to API v1)
     @application.get("/health/detailed", tags=["Health"])
-    async def health_detailed():
+    async def health_detailed(
+        current_user=Depends(_get_auth_dependency()),
+    ):
         """
-        Detailed health check - redirects to API v1 health endpoint.
+        Detailed health check - requires authentication.
         For full details, use /api/v1/health/detailed
         """
         from app.api.v1.endpoints.health import detailed_health_check
 
-        return await detailed_health_check()
+        return await detailed_health_check(current_user=current_user)
 
     # Database stats at root level
     @application.get("/health/db", tags=["Health"])
-    async def health_db():
+    async def health_db(
+        current_user=Depends(_get_auth_dependency()),
+    ):
         """
-        Database statistics - redirects to API v1 health endpoint.
+        Database statistics - requires authentication.
         For full details, use /api/v1/health/db
         """
         from app.api.v1.endpoints.health import database_stats
 
-        return await database_stats()
+        return await database_stats(current_user=current_user)
 
     # Metrics endpoint at root level
     @application.get("/metrics", tags=["Metrics"])

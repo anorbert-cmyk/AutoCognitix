@@ -640,31 +640,23 @@ class TestRootLevelProxyEndpoints:
             response = client.get("/health/ready")
             assert response.status_code == 200
 
-    def test_health_detailed_endpoint(self):
+    def test_health_detailed_endpoint_requires_auth(self):
         from app.main import create_application
 
         application = create_application()
-        with patch(
-            "app.api.v1.endpoints.health.detailed_health_check",
-            new_callable=AsyncMock,
-            return_value={"status": "detailed"},
-        ):
-            client = TestClient(application, raise_server_exceptions=False)
-            response = client.get("/health/detailed")
-            assert response.status_code == 200
+        client = TestClient(application, raise_server_exceptions=False)
+        response = client.get("/health/detailed")
+        # Requires authentication - returns 401 or 403 without token
+        assert response.status_code in (401, 403)
 
-    def test_health_db_endpoint(self):
+    def test_health_db_endpoint_requires_auth(self):
         from app.main import create_application
 
         application = create_application()
-        with patch(
-            "app.api.v1.endpoints.health.database_stats",
-            new_callable=AsyncMock,
-            return_value={"db": "ok"},
-        ):
-            client = TestClient(application, raise_server_exceptions=False)
-            response = client.get("/health/db")
-            assert response.status_code == 200
+        client = TestClient(application, raise_server_exceptions=False)
+        response = client.get("/health/db")
+        # Requires authentication - returns 401 or 403 without token
+        assert response.status_code in (401, 403)
 
     def test_metrics_endpoint(self):
         from app.main import create_application

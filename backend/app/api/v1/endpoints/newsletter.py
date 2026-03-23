@@ -136,7 +136,7 @@ async def subscribe(
     db.add(subscriber)
     await db.flush()
 
-    logger.info(f"New newsletter subscriber: {email} (source: {payload.source})")
+    logger.info(f"New newsletter subscriber: {email[:3]}***@*** (source: {payload.source})")
 
     # Send confirmation email
     await _send_confirm_email(email, confirm_token, payload.language)
@@ -177,7 +177,7 @@ async def confirm(
     subscriber.confirm_token = None  # Invalidate token
     await db.flush()
 
-    logger.info(f"Newsletter subscription confirmed: {subscriber.email}")
+    logger.info(f"Newsletter subscription confirmed: {subscriber.email[:3]}***@***")
 
     return SubscribeResponse(
         success=True,
@@ -214,7 +214,7 @@ async def unsubscribe(
     subscriber.unsubscribed_at = datetime.now(timezone.utc)
     await db.flush()
 
-    logger.info(f"Newsletter unsubscribe: {subscriber.email}")
+    logger.info(f"Newsletter unsubscribe: {subscriber.email[:3]}***@***")
 
     return UnsubscribeResponse(
         success=True,

@@ -350,7 +350,7 @@ async def get_vehicle_makes(
         logger.error(f"Error fetching makes: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch vehicle makes: {e!s}",
+            detail="Failed to fetch vehicle makes. Please try again later.",
         )
 
 
@@ -441,7 +441,7 @@ async def get_vehicle_models(
         logger.error(f"Error fetching models for {sanitize_log(make)}: {sanitize_exception(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch vehicle models: {e!s}",
+            detail="Failed to fetch vehicle models. Please try again later.",
         )
 
 
@@ -503,7 +503,7 @@ async def get_available_years(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch vehicle years: {e!s}",
+            detail="Failed to fetch vehicle years. Please try again later.",
         )
 
 
@@ -629,7 +629,7 @@ async def decode_vin(
         logger.error(f"Error decoding VIN {sanitize_log(vin)}: {sanitize_exception(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to decode VIN: {e!s}",
+            detail="Failed to decode VIN. Please try again later.",
         )
 
 
@@ -690,7 +690,7 @@ async def get_vehicle_recalls(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch recalls: {e!s}",
+            detail="Failed to fetch recalls. Please try again later.",
         )
 
 
@@ -752,7 +752,7 @@ async def get_vehicle_complaints(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch complaints: {e!s}",
+            detail="Failed to fetch complaints. Please try again later.",
         )
 
 
@@ -826,5 +826,5 @@ async def get_vehicle_common_issues(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch common issues: {e!s}",
+            detail="Failed to fetch common issues. Please try again later.",
         )
