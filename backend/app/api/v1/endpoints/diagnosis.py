@@ -912,7 +912,7 @@ async def analyze_vehicle_stream(
             )
 
         # Step 3: Symptom preprocessing
-        preprocessed_symptoms = service._preprocess_symptoms(request.symptoms)
+        preprocessed_symptoms = await service._preprocess_symptoms(request.symptoms)
         if include_context:
             yield _format_sse_event(
                 StreamingEvent(

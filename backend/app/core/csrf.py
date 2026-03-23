@@ -4,6 +4,7 @@ CSRF Protection Middleware for FastAPI
 Implements double-submit cookie pattern for CSRF protection.
 """
 
+import hmac
 import secrets
 from typing import List, Optional
 
@@ -69,7 +70,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 status_code=403,
             )
 
-        if token_header != token_cookie:
+        if not hmac.compare_digest(token_header, token_cookie):
             logger.warning(
                 f"CSRF token mismatch - Method: {request.method}, Path: {request.url.path}"
             )

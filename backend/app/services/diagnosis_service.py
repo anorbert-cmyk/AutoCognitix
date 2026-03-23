@@ -829,7 +829,7 @@ class DiagnosisService:
         return {
             "probable_causes": probable_causes,
             "recommended_repairs": recommended_repairs,
-            "confidence_score": min(0.8, confidence),
+            "confidence_score": max(0.0, min(1.0, confidence)),
             "sources": sources,
             "used_fallback": True,
             "safety_warnings": [],
@@ -1028,7 +1028,8 @@ class DiagnosisService:
         for recall in recalls[:3]:
             if recall.consequence:
                 safety_warnings.append(
-                    f"VISSZAHIVAS ({recall.component}): {recall.consequence[:150]}..."
+                    f"VISSZAHIVAS ({recall.component}): {recall.consequence[:150]}"
+                    + ("..." if len(recall.consequence) > 150 else "")
                 )
 
         # Add critical DTC warnings
@@ -1133,13 +1134,13 @@ class DiagnosisService:
                 ):
                     return "critical"
             urgency = "high"
-        # Check for complaints with crash/fire
-        elif any(complaint.crash or complaint.fire for complaint in complaints) or any(
+        # Check for complaints with crash/fire or high severity DTCs
+        if any(complaint.crash or complaint.fire for complaint in complaints) or any(
             dtc.severity == "high" for dtc in dtc_details
         ):
             urgency = "high"
         # Check for medium severity DTCs
-        elif any(dtc.severity == "medium" for dtc in dtc_details):
+        if urgency not in ("high",) and any(dtc.severity == "medium" for dtc in dtc_details):
             urgency = "medium"
 
         return urgency

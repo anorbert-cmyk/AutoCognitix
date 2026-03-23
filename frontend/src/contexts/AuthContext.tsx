@@ -71,15 +71,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Check authentication on mount
   useEffect(() => {
     const initAuth = async () => {
-      if (checkAuth()) {
-        try {
-          const userData = await getCurrentUser()
-          setUser(userData)
-        } catch (err) {
-          // Token is invalid or expired
-          clearTokens()
-          setUser(null)
-        }
+      try {
+        const userData = await getCurrentUser()
+        setUser(userData)
+      } catch (err) {
+        clearTokens()
+        setUser(null)
       }
       setIsLoading(false)
     }

@@ -80,7 +80,7 @@ def _set_auth_cookies(
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
-        path="/api/v1/auth/",
+        path="/api/",
         domain=settings.COOKIE_DOMAIN,
     )
 
@@ -94,7 +94,7 @@ def _clear_auth_cookies(response: Response) -> None:
     )
     response.delete_cookie(
         key="refresh_token",
-        path="/api/v1/auth/",
+        path="/api/",
         domain=settings.COOKIE_DOMAIN,
     )
 
