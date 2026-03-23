@@ -9,6 +9,7 @@ import api, {
   DiagnosisRequest,
   DiagnosisResponse,
   QuickAnalyzeResult,
+  getCsrfToken,
 } from './api'
 import { isValidDTCFormat } from './dtcService'
 import type {
@@ -359,14 +360,15 @@ export function streamDiagnosis(
     include_progress: true,
   }
 
-  // Build headers
+  // Build headers — auth is handled via httpOnly cookies (credentials: 'include')
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
   }
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+  // Attach CSRF token for POST requests (mirrors the axios interceptor)
+  const csrfToken = getCsrfToken()
+  if (csrfToken) {
+    headers['X-CSRF-Token'] = csrfToken
   }
 
   // Start streaming in the background
@@ -382,6 +384,7 @@ export function streamDiagnosis(
           headers,
           body: JSON.stringify(requestBody),
           signal: controller.signal,
+          credentials: 'include',
         })
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {

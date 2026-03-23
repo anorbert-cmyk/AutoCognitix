@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from app.core.log_sanitizer import sanitize_log, sanitize_exception
 from app.core.logging import get_logger
 from app.services.llm_provider import LLMConfig, get_llm_provider, is_llm_available
 
@@ -301,7 +302,7 @@ class ChatService:
         except Exception as e:
             logger.warning(
                 "Failed to fetch RAG context for chat",
-                extra={"dtc_codes": dtc_codes, "error": str(e)},
+                extra={"dtc_codes": sanitize_log(str(dtc_codes)), "error": sanitize_exception(e)},
             )
         return None
 

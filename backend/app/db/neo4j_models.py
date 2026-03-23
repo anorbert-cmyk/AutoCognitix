@@ -7,6 +7,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from app.core.log_sanitizer import sanitize_log, sanitize_exception
+
 from neomodel import (
     ArrayProperty,
     BooleanProperty,
@@ -427,10 +429,16 @@ async def get_diagnostic_path(dtc_code: str) -> dict:
 
         return result
     except (DoesNotExist, MultipleNodesReturned, NeomodelException) as e:
-        logger.error("Neomodel error getting diagnostic path for DTC %s: %s", dtc_code, e)
+        logger.error(
+            "Neomodel error getting diagnostic path for DTC %s: %s",
+            sanitize_log(dtc_code),
+            sanitize_exception(e),
+        )
         return _empty_result
     except Exception:
-        logger.exception("Unexpected error getting diagnostic path for DTC %s", dtc_code)
+        logger.exception(
+            "Unexpected error getting diagnostic path for DTC %s", sanitize_log(dtc_code)
+        )
         return _empty_result
 
 

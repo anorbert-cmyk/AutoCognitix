@@ -133,9 +133,25 @@ class TestConnectionPoolConfig:
         """session.py pool size should be at least 10 (production mode)."""
         session_file = BACKEND_DIR / "db" / "postgres" / "session.py"
         content = session_file.read_text()
-        # Match both direct assignment (POOL_SIZE = 10) and expression-based
-        # (POOL_SIZE = int((settings.DEBUG and 5) or 10))
+
+        # Match direct integer assignment: POOL_SIZE = 10
+        # or expression-based: POOL_SIZE = int((settings.DEBUG and 5) or 10)
         match = re.search(r"POOL_SIZE\s*=\s*(?:int\(.*?or\s+)?(\d+)", content)
-        assert match, "POOL_SIZE not found in session.py"
-        pool_size = int(match.group(1))
-        assert pool_size >= 10, f"POOL_SIZE too small: {pool_size}"
+
+        if match:
+            pool_size = int(match.group(1))
+            assert pool_size >= 10, f"POOL_SIZE too small: {pool_size}"
+        else:
+            # POOL_SIZE may delegate to settings (e.g. POOL_SIZE = settings.DB_POOL_SIZE).
+            # In that case verify the settings default is adequate.
+            settings_match = re.search(r"POOL_SIZE\s*=\s*settings\.(\w+)", content)
+            assert settings_match, "POOL_SIZE not found in session.py"
+            setting_name = settings_match.group(1)
+            config_file = BACKEND_DIR / "core" / "config.py"
+            config_content = config_file.read_text()
+            cfg_match = re.search(rf"{setting_name}\s*:\s*int\s*=\s*(\d+)", config_content)
+            assert cfg_match, f"{setting_name} default not found in config.py"
+            pool_size = int(cfg_match.group(1))
+            assert pool_size >= 10, (
+                f"{setting_name} default too small: {pool_size} (need >= 10 for production)"
+            )

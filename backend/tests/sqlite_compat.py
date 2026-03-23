@@ -23,7 +23,7 @@ def apply_sqlite_patches() -> None:
         return
     apply_sqlite_patches._done = True
 
-    # -- Type compilation: render ARRAY / JSONB as JSON in SQLite -----------
+    # -- Type compilation: render ARRAY / JSONB as JSON, UUID as CHAR in SQLite
 
     def _visit_ARRAY(self, type_, **kw):
         return "JSON"
@@ -31,8 +31,12 @@ def apply_sqlite_patches() -> None:
     def _visit_JSONB(self, type_, **kw):
         return "JSON"
 
+    def _visit_UUID(self, type_, **kw):
+        return "CHAR(36)"
+
     sqlite_base.SQLiteTypeCompiler.visit_ARRAY = _visit_ARRAY
     sqlite_base.SQLiteTypeCompiler.visit_JSONB = _visit_JSONB
+    sqlite_base.SQLiteTypeCompiler.visit_UUID = _visit_UUID
 
     # -- Result processors: deserialise JSON strings back to Python objects --
 

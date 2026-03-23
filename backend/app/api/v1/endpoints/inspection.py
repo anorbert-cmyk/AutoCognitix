@@ -17,6 +17,7 @@ from app.api.v1.schemas.inspection import (
     InspectionRequest,
     InspectionResponse,
 )
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import User
 from app.services.inspection_service import (
@@ -66,12 +67,16 @@ EVALUATE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
                         "visibility",
                     ],
                     "recommendations": [
-                        "1 kritikus hiba - a műszaki vizsga "
-                        "NEM lenne sikeres a jelenlegi "
-                        "állapotban.",
-                        "Emisszió-szabályozás javítása "
-                        "szükséges a szonda/katalizátor/"
-                        "EGR rendszerben.",
+                        (
+                            "1 kritikus hiba - a műszaki vizsga "
+                            "NEM lenne sikeres a jelenlegi "
+                            "állapotban."
+                        ),
+                        (
+                            "Emisszió-szabályozás javítása "
+                            "szükséges a szonda/katalizátor/"
+                            "EGR rendszerben."
+                        ),
                     ],
                     "estimated_total_fix_cost_min": 92000,
                     "estimated_total_fix_cost_max": 535000,
@@ -123,8 +128,8 @@ async def evaluate_inspection(
         "Műszaki vizsga kérés érkezett",
         extra={
             "user": user_info,
-            "vehicle_make": request.vehicle_make,
-            "vehicle_model": request.vehicle_model,
+            "vehicle_make": sanitize_log(request.vehicle_make),
+            "vehicle_model": sanitize_log(request.vehicle_model),
             "vehicle_year": request.vehicle_year,
             "dtc_count": len(request.dtc_codes),
         },
@@ -147,8 +152,8 @@ async def evaluate_inspection(
 
     except InspectionServiceError as exc:
         logger.error(
-            f"Műszaki vizsga szolgáltatás hiba: {exc.message}",
-            extra={"details": exc.details},
+            f"Műszaki vizsga szolgáltatás hiba: {sanitize_exception(exc)}",
+            extra={"details": sanitize_log(exc.details)},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

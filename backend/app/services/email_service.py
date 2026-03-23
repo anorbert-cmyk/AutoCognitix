@@ -18,6 +18,7 @@ Author: AutoCognitix Team
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -25,6 +26,29 @@ import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_log(value: str) -> str:
+    """Sanitize a user-provided value before including it in a log message.
+
+    Removes control characters (newlines, carriage returns, tabs, and other
+    non-printable ASCII) to prevent log injection attacks where an attacker
+    could forge additional log entries by embedding newline sequences in
+    user-controlled input. Truncates overly long values to avoid log flooding.
+    """
+    # Safely convert to string
+    s = str(value)
+    # Explicitly remove newlines and carriage returns to prevent log entry splitting
+    s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Remove any remaining non-printable ASCII control characters
+    s = re.sub(r"[\x00-\x1f\x7f]", "", s)
+    # Collapse multiple whitespace characters and trim
+    s = re.sub(r"\s+", " ", s).strip()
+    # Truncate to a reasonable length to prevent log flooding
+    max_len = 200
+    if len(s) > max_len:
+        s = s[:max_len] + "...[truncated]"
+    return s if s else "<empty>"
 
 
 # =============================================================================
@@ -325,7 +349,11 @@ class EmailService:
             "email": to_email,
             "type": email_type,
             "language": language,
-            "base_url": getattr(settings, "LANDING_PAGE_URL", "https://autocognitix-landing-production.up.railway.app"),
+            "base_url": getattr(
+                settings,
+                "LANDING_PAGE_URL",
+                "https://autocognitix-landing-production.up.railway.app",
+            ),
         }
 
         if token:
@@ -337,7 +365,12 @@ class EmailService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(webhook_url, json=payload)
                 if response.status_code == 200:
-                    logger.info(f"Email sent via n8n: {to_email} (type={email_type}, lang={language})")
+                    logger.info(
+                        "Email sent via n8n: %s (type=%s, lang=%s)",
+                        _sanitize_log(to_email),
+                        _sanitize_log(email_type),
+                        _sanitize_log(language),
+                    )
                     return True
                 else:
                     logger.warning(
@@ -345,7 +378,7 @@ class EmailService:
                     )
                     return False
         except Exception as e:
-            logger.error(f"n8n webhook error ({to_email}): {e}")
+            logger.error("n8n webhook error (%s): %s", _sanitize_log(to_email), e)
             return False
 
     async def _send_email(
@@ -387,14 +420,13 @@ class EmailService:
             if success:
                 return True
             # Fall through to Resend or demo mode if n8n fails
-            logger.warning(f"n8n webhook failed for {to_email}, falling back")
+            logger.warning("n8n webhook failed for %s, falling back", _sanitize_log(to_email))
 
         if self._demo_mode:
             logger.info(
-                f"[DEMO] Email küldése:\n"
-                f"  Címzett: {to_email}\n"
-                f"  Tárgy: {subject}\n"
-                f"  Tartalom (első 200 karakter): {text_content[:200]}..."
+                "[DEMO] Email küldése: Címzett=%s | Tárgy=%s",
+                _sanitize_log(to_email),
+                _sanitize_log(subject),
             )
             return True
 
@@ -420,11 +452,15 @@ class EmailService:
                 lambda: self._resend_client.Emails.send(params),
             )
 
-            logger.info(f"Email sikeresen elküldve: {to_email}, id: {result.get('id', 'N/A')}")
+            logger.info(
+                "Email sikeresen elküldve: %s, id: %s",
+                _sanitize_log(to_email),
+                result.get("id", "N/A"),
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Email küldési hiba ({to_email}): {e}")
+            logger.error("Email küldési hiba (%s): %s", _sanitize_log(to_email), e)
             return False
 
     @property

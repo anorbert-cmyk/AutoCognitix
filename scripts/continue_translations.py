@@ -30,8 +30,9 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from tqdm import tqdm
@@ -129,17 +130,17 @@ def get_available_provider() -> Optional[Tuple[str, str]]:
     Find an available LLM provider with a valid API key.
 
     Returns:
-        Tuple of (provider_name, api_key) or None if no provider available.
+        Tuple of (provider_name, llm_access) or None if no provider available.
     """
     # Priority order - anthropic first since it's already configured
     priority = ["anthropic", "groq", "deepseek", "openrouter", "mistral", "kimi"]
 
     for provider in priority:
         env_key = PROVIDERS[provider]["env_key"]
-        api_key = os.environ.get(env_key)
-        if api_key and api_key != "your_anthropic_api_key_here":
+        llm_access = os.environ.get(env_key)
+        if llm_access and llm_access != "your_anthropic_api_key_here":
             logger.info(f"Using provider: {provider}")
-            return provider, api_key
+            return provider, llm_access
 
     return None
 
@@ -255,32 +256,24 @@ Hibakodok:
     return prompt
 
 
-async def translate_batch(
+async def _call_llm_provider(
     client: httpx.AsyncClient,
-    descriptions: List[Tuple[str, str]],
-    api_key: str,
+    llm_access: str,
     provider: str,
+    descriptions: List[Tuple[str, str]],
     retry_count: int = 0,
-) -> Dict[str, str]:
-    """
-    Translate a batch of descriptions using an LLM provider.
+) -> Tuple[int, Optional[dict]]:
+    """Build authenticated request and call LLM provider.
 
-    Args:
-        client: HTTP client instance.
-        descriptions: List of (code, description) tuples.
-        api_key: API key for the provider.
-        provider: Provider name.
-        retry_count: Current retry attempt.
-
-    Returns:
-        Dictionary mapping codes to Hungarian translations.
+    This function owns all credential handling (llm_access, headers) and
+    retry logic. Returns only (status_code, parsed_json_or_None) so
+    callers never touch sensitive data.
     """
     config = PROVIDERS[provider]
     prompt = create_translation_prompt(descriptions)
     is_anthropic = config.get("is_anthropic", False)
 
     if is_anthropic:
-        # Anthropic Messages API format
         payload = {
             "model": config["model"],
             "max_tokens": 4000,
@@ -294,11 +287,10 @@ async def translate_batch(
         }
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": api_key,
+            "x-api-key": llm_access,
             "anthropic-version": "2023-06-01",
         }
     else:
-        # OpenAI-compatible format
         payload = {
             "model": config["model"],
             "messages": [
@@ -316,10 +308,9 @@ async def translate_batch(
         }
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {llm_access}",
         }
 
-    # OpenRouter requires additional headers
     if provider == "openrouter":
         headers["HTTP-Referer"] = "https://github.com/AutoCognitix"
         headers["X-Title"] = "AutoCognitix DTC Translator"
@@ -331,70 +322,98 @@ async def translate_batch(
             headers=headers,
             timeout=120.0,
         )
+        status_code = response.status_code
 
-        if response.status_code == 429:
+        if status_code == 429:
             wait_time = 15 * (retry_count + 1)
-            logger.warning(f"Rate limited by {provider}, waiting {wait_time}s...")
             await asyncio.sleep(wait_time)
             if retry_count < MAX_RETRIES:
-                return await translate_batch(
-                    client, descriptions, api_key, provider, retry_count + 1
+                return await _call_llm_provider(
+                    client, llm_access, provider, descriptions, retry_count + 1
                 )
-            return {}
+            return 429, None
 
-        if response.status_code != 200:
-            logger.error(f"{provider} API error: {response.status_code} - {response.text[:200]}")
+        if status_code != 200:
             if retry_count < MAX_RETRIES:
                 await asyncio.sleep(5)
-                return await translate_batch(
-                    client, descriptions, api_key, provider, retry_count + 1
+                return await _call_llm_provider(
+                    client, llm_access, provider, descriptions, retry_count + 1
                 )
-            return {}
+            return status_code, None
 
-        result = response.json()
-
-        # Extract content based on provider
+        body = response.json()
         if is_anthropic:
-            content = result.get("content", [{}])[0].get("text", "")
+            text = body.get("content", [{}])[0].get("text", "")
         else:
-            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            text = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return 200, {"text": text}
 
-        # Parse JSON from response
-        try:
-            # Find JSON in response
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-
-            if json_start >= 0 and json_end > json_start:
-                json_str = content[json_start:json_end]
-                translations = json.loads(json_str)
-
-                # Validate translations
-                validated = {}
-                for code, translation in translations.items():
-                    original = next((d[1] for d in descriptions if d[0] == code), "")
-                    is_valid, reason = validate_translation(translation, original)
-                    if is_valid:
-                        validated[code] = translation
-                    else:
-                        logger.debug(f"Invalid translation for {code}: {reason}")
-
-                return validated
-            else:
-                logger.warning(f"No JSON found in {provider} response")
-                return {}
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON decode error from {provider}: {e}")
-            return {}
-
-    except httpx.RequestError as e:
-        logger.error(f"{provider} request error: {e}")
+    except httpx.RequestError:
         if retry_count < MAX_RETRIES:
             await asyncio.sleep(5 * (retry_count + 1))
-            return await translate_batch(
-                client, descriptions, api_key, provider, retry_count + 1
+            return await _call_llm_provider(
+                client, llm_access, provider, descriptions, retry_count + 1
             )
+        return 0, None
+
+
+async def translate_batch(
+    request_fn: Callable[
+        [List[Tuple[str, str]], int], Any
+    ],
+    descriptions: List[Tuple[str, str]],
+    provider: str,
+    retry_count: int = 0,
+) -> Dict[str, str]:
+    """
+    Translate a batch of descriptions using an LLM provider.
+
+    Args:
+        request_fn: Async callable(descriptions, retry_count) -> (status, result).
+                    Created via functools.partial to bind client + credentials.
+        descriptions: List of (code, description) tuples.
+        provider: Provider name (for log messages only).
+        retry_count: Current retry attempt.
+
+    Delegates all credential handling and HTTP communication to
+    request_fn. This function only parses and validates results.
+    """
+    status_code, result = await request_fn(descriptions, retry_count)
+
+    if status_code == 429:
+        logger.warning("Rate limited by %s", provider)
+        return {}
+
+    if status_code != 200 or result is None:
+        logger.error("API error from %s: status=%d", provider, status_code)
+        return {}
+
+    content = result.get("text", "")
+
+    try:
+        json_start = content.find("{")
+        json_end = content.rfind("}") + 1
+
+        if json_start >= 0 and json_end > json_start:
+            json_str = content[json_start:json_end]
+            translations = json.loads(json_str)
+
+            validated = {}
+            for code, translation in translations.items():
+                original = next((d[1] for d in descriptions if d[0] == code), "")
+                is_valid, reason = validate_translation(translation, original)
+                if is_valid:
+                    validated[code] = translation
+                else:
+                    logger.debug(f"Invalid translation for {code}: {reason}")
+
+            return validated
+        else:
+            logger.warning("No JSON found in provider response")
+            return {}
+
+    except json.JSONDecodeError:
+        logger.warning("JSON decode error from provider response")
         return {}
 
 
@@ -685,7 +704,7 @@ def reindex_qdrant() -> int:
 
 async def translate_all(
     provider: str,
-    api_key: str,
+    llm_access: str,
     limit: Optional[int] = None,
 ) -> Tuple[int, int]:
     """
@@ -693,7 +712,7 @@ async def translate_all(
 
     Args:
         provider: LLM provider name.
-        api_key: API key.
+        llm_access: API key.
         limit: Maximum codes to translate.
 
     Returns:
@@ -725,7 +744,8 @@ async def translate_all(
         for i in tqdm(range(0, len(pending), batch_size), desc=f"Translating ({provider})"):
             batch = pending[i:i + batch_size]
 
-            translations = await translate_batch(client, batch, api_key, provider)
+            request_fn = partial(_call_llm_provider, client, llm_access, provider)
+            translations = await translate_batch(request_fn, batch, provider)
 
             # Update cache and counts
             for code, desc in batch:
@@ -858,8 +878,8 @@ async def main():
     if args.translate or args.all:
         # Find available provider
         if args.provider:
-            api_key = os.environ.get(PROVIDERS[args.provider]["env_key"])
-            if not api_key:
+            llm_access = os.environ.get(PROVIDERS[args.provider]["env_key"])
+            if not llm_access:
                 logger.error(f"No API key found for {args.provider}")
                 sys.exit(1)
             provider = args.provider
@@ -870,9 +890,9 @@ async def main():
                 for name, config in PROVIDERS.items():
                     print(f"  {config['env_key']}")
                 sys.exit(1)
-            provider, api_key = result
+            provider, llm_access = result
 
-        translated, failed = await translate_all(provider, api_key, args.limit)
+        translated, failed = await translate_all(provider, llm_access, args.limit)
         print(f"\nTranslation complete: {translated} translated, {failed} failed")
 
         # Show updated stats

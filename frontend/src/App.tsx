@@ -68,7 +68,14 @@ function App() {
               <Route path="/" element={<Layout />}>
                 <Route index element={<HomePage />} />
                 <Route path="diagnosis" element={<DiagnosisPage />} />
-                <Route path="diagnosis/:id" element={<ResultPage />} />
+                <Route
+                  path="diagnosis/:id"
+                  element={
+                    <ProtectedRoute>
+                      <ResultPage />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="history"
                   element={

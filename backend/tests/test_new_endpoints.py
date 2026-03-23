@@ -11,7 +11,6 @@ All tests are unit tests that require no database or external services.
 """
 
 import pytest
-from datetime import datetime, timezone
 from pydantic import ValidationError
 
 

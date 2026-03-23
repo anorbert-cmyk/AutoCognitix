@@ -5,6 +5,7 @@ Handles subscribe, confirm, and unsubscribe for the landing page.
 No authentication required - public endpoints.
 """
 
+import ipaddress
 import secrets
 from datetime import datetime, timezone
 
@@ -86,7 +87,9 @@ async def subscribe(
     if existing:
         if existing.status == "confirmed":
             # Already confirmed - send confirmation email silently without revealing status
-            await _send_confirm_email(email, existing.confirm_token or secrets.token_urlsafe(32), payload.language)
+            await _send_confirm_email(
+                email, existing.confirm_token or secrets.token_urlsafe(32), payload.language
+            )
         elif existing.status == "unsubscribed":
             # Re-subscribe
             existing.status = "pending"
@@ -113,6 +116,13 @@ async def subscribe(
     ip = request.headers.get("x-forwarded-for", request.client.host if request.client else None)
     if ip and "," in ip:
         ip = ip.split(",")[0].strip()
+
+    # Validate IP address to prevent header injection
+    if ip:
+        try:
+            ipaddress.ip_address(ip.strip())
+        except (ValueError, TypeError):
+            ip = request.client.host if request.client else None
 
     subscriber = NewsletterSubscriber(
         email=email,
@@ -224,7 +234,9 @@ async def _send_confirm_email(email: str, token: str, language: str = "hu") -> N
     # Build confirm URL (uses the backend API which will redirect or show success)
     from app.core.config import settings
 
-    base_url = getattr(settings, "LANDING_PAGE_URL", "https://autocognitix-landing-production.up.railway.app")
+    base_url = getattr(
+        settings, "LANDING_PAGE_URL", "https://autocognitix-landing-production.up.railway.app"
+    )
     confirm_url = f"{base_url}/{language}/confirm.html?token={token}"
 
     if language == "hu":

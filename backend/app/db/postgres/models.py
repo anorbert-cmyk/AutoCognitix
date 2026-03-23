@@ -20,7 +20,7 @@ from sqlalchemy import (
     Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -251,7 +251,9 @@ class DiagnosisArchive(Base):
 
     id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
     original_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(Uuid, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     archived_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -369,10 +371,10 @@ class VehicleModelEngine(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     model_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("vehicle_models.id", ondelete="CASCADE"), nullable=False
+        String(50), ForeignKey("vehicle_models.id", ondelete="CASCADE"), nullable=False, index=True
     )
     engine_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("vehicle_engines.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("vehicle_engines.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Production years for this combination

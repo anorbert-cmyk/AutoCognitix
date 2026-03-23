@@ -4,7 +4,6 @@ Verifies fixes applied during Sprint 11 by inspecting source code.
 All tests are synchronous and use no external dependencies beyond pytest.
 """
 
-import os
 from pathlib import Path
 
 import pytest

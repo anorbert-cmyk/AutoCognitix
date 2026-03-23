@@ -11,7 +11,7 @@ Tests complete user journeys:
 
 import pytest
 from httpx import AsyncClient
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch, AsyncMock
 from uuid import uuid4
 
 

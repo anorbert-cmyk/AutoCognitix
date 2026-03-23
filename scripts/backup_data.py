@@ -1044,6 +1044,18 @@ def restore_qdrant(backup_path: Path, dry_run: bool = False) -> bool:
         return False
 
 
+def _safe_tar_extract(tar, dest_dir):
+    """Safely extract tar members, rejecting path traversal (CVE-2007-4559)."""
+    dest = os.path.realpath(str(dest_dir))
+    safe_members = []
+    for member in tar.getmembers():
+        member_path = os.path.realpath(os.path.join(dest_dir, member.name))
+        if not member_path.startswith(dest + os.sep) and member_path != dest:
+            raise ValueError(f"Attempted path traversal in tar member: {member.name}")
+        safe_members.append(member)
+    tar.extractall(path=dest_dir, members=safe_members)
+
+
 def restore_json_files(backup_path: Path, dry_run: bool = False) -> bool:
     """Restore JSON files from backup."""
     logger.info("  Restoring JSON files...")
@@ -1060,7 +1072,7 @@ def restore_json_files(backup_path: Path, dry_run: bool = False) -> bool:
     try:
         with tarfile.open(tar_file, "r:gz") as tar:
             # Extract to data directory
-            tar.extractall(path=DATA_DIR)
+            _safe_tar_extract(tar, DATA_DIR)
 
         logger.info("    JSON files restored")
         return True

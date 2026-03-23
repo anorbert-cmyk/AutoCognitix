@@ -15,7 +15,7 @@ Tests cover:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.calculator_service import (
     CONDITION_MULTIPLIERS,

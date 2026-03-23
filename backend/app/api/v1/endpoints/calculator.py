@@ -17,6 +17,7 @@ from app.api.v1.schemas.calculator import (
     CalculatorRequest,
     CalculatorResponse,
 )
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import User
 from app.services.calculator_service import get_calculator_service
@@ -111,8 +112,8 @@ async def evaluate_repair_worthiness(
         "Kalkulátor kérés érkezett",
         extra={
             "user": user_info,
-            "vehicle_make": request.vehicle_make,
-            "vehicle_model": request.vehicle_model,
+            "vehicle_make": sanitize_log(request.vehicle_make),
+            "vehicle_model": sanitize_log(request.vehicle_model),
             "vehicle_year": request.vehicle_year,
             "mileage_km": request.mileage_km,
             "condition": request.condition.value,

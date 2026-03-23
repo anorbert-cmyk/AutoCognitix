@@ -40,6 +40,7 @@ from app.core.exceptions import (
     NotFoundException,
     VINValidationException,
 )
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import User
 from app.db.postgres.repositories import DiagnosisSessionRepository
@@ -245,7 +246,11 @@ async def analyze_vehicle(
 
     except DTCValidationError as e:
         logger.warning(
-            "DTC validation error", extra={"error_message": str(e), "dtc_codes": request.dtc_codes}
+            "DTC validation error",
+            extra={
+                "error_message": sanitize_exception(e),
+                "dtc_codes": sanitize_log(request.dtc_codes),
+            },
         )
         raise DTCValidationException(
             message=str(e),
@@ -253,7 +258,10 @@ async def analyze_vehicle(
         )
 
     except VINDecodeError as e:
-        logger.warning("VIN decode error", extra={"error_message": str(e), "vin": request.vin})
+        logger.warning(
+            "VIN decode error",
+            extra={"error_message": sanitize_exception(e), "vin": sanitize_log(request.vin)},
+        )
         raise VINValidationException(
             message=str(e),
             vin=request.vin,
@@ -335,7 +343,10 @@ async def get_diagnosis(
     except Exception as e:
         logger.exception(
             "Error retrieving diagnosis",
-            extra={"diagnosis_id": str(diagnosis_id), "error_message": str(e)},
+            extra={
+                "diagnosis_id": sanitize_log(str(diagnosis_id)),
+                "error_message": sanitize_exception(e),
+            },
         )
         raise DiagnosisException(
             message="Hiba tortent a diagnozis lekeresekor.",
@@ -518,7 +529,8 @@ async def delete_diagnosis(
 
     except Exception as e:
         logger.exception(
-            "Error deleting diagnosis", extra={"diagnosis_id": str(diagnosis_id), "error": str(e)}
+            "Error deleting diagnosis",
+            extra={"diagnosis_id": sanitize_log(str(diagnosis_id)), "error": sanitize_exception(e)},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -819,7 +831,7 @@ eventSource.onmessage = (event) => {
 **Recommended for:** Long-running diagnoses where real-time feedback improves UX.
     """,
 )
-async def analyze_vehicle_stream(  # noqa: PLR0915
+async def analyze_vehicle_stream(
     request: DiagnosisStreamRequest,
     http_request: Request,
     db: AsyncSession = Depends(get_db),

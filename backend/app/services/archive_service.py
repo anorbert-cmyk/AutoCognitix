@@ -7,7 +7,7 @@ space efficiency while preserving data for compliance (GDPR).
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, select
@@ -89,12 +89,15 @@ class ArchiveService:
                     },
                 )
                 self.db.add(archive)
+                await savepoint.commit()
 
-                # Soft delete the original
+                # Only mark deleted AFTER archive savepoint succeeds.
+                # If set before commit and the savepoint rolls back,
+                # the session object stays dirty (is_deleted=True) in
+                # the identity map, causing silent data loss.
                 session.is_deleted = True
                 session.deleted_at = datetime.now(timezone.utc)
-
-                await savepoint.commit()
+                await self.db.flush()
                 archived_count += 1
             except Exception:
                 await savepoint.rollback()
@@ -113,5 +116,5 @@ class ArchiveService:
         )
         archive = result.scalar_one_or_none()
         if archive:
-            return archive.session_data
+            return cast("dict", archive.session_data)
         return None

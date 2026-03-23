@@ -1349,8 +1349,8 @@ Environment Variables:
         return
 
     # Load or reset checkpoint
+    checkpoint = ImportCheckpoint()
     if args.reset:
-        checkpoint = ImportCheckpoint()
         logger.info("Checkpoint reset. Starting fresh.")
     else:
         checkpoint = load_checkpoint()

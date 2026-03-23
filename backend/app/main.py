@@ -4,6 +4,7 @@ Main FastAPI Application Entry Point
 """
 
 from collections.abc import AsyncGenerator
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -120,6 +121,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     except Exception as e:
         logger.warning(f"Qdrant initialization skipped: {e}")
 
+    # Qdrant health check - verify connectivity and report collection count
+    try:
+        collections = await asyncio.to_thread(qdrant_client.client.get_collections)
+        logger.info(f"Qdrant connected: {len(collections.collections)} collections")
+    except Exception as e:
+        logger.warning(f"Qdrant health check failed (non-fatal): {e}")
+
     # Initialize Redis cache
     try:
         from app.db.redis_cache import get_cache_service
@@ -142,6 +150,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Shutdown
     logger.info("Shutting down AutoCognitix backend service")
+
+    # Close Neo4j driver
+    try:
+        from neomodel import db as neo4j_db
+
+        if neo4j_db.driver:
+            neo4j_db.driver.close()
+            logger.info("Neo4j driver closed")
+    except Exception as e:
+        logger.warning(f"Neo4j driver close error: {e}")
 
     # Shut down embedding service thread pool
     try:

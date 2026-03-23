@@ -63,7 +63,7 @@ export class ApiError extends Error {
 
     const { status, data } = error.response
     const detail = data?.detail || error.message
-    let message = detail
+    let message: string
 
     // Hungarian error messages based on status
     switch (status) {

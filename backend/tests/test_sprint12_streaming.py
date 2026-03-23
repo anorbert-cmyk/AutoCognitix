@@ -4,7 +4,6 @@ Verifies streaming endpoint structure and email integration in auth endpoints
 by inspecting source code. All tests are synchronous and use no app imports.
 """
 
-import os
 from pathlib import Path
 
 import pytest
@@ -494,8 +493,13 @@ class TestJWTClaimProtection:
 
         assert '"jti"' in fn_body, "create_access_token must include JTI claim for blacklisting"
 
-    def test_token_blacklist_fail_closed(self):
-        """is_token_blacklisted must fail closed (return True) when Redis is unavailable."""
+    def test_token_blacklist_fail_open(self):
+        """is_token_blacklisted must fail open (return False) when Redis is unavailable.
+
+        Rationale: fail-closed would lock out ALL users during Redis outage.
+        Token blacklisting is a secondary defence; JWTs still have expiry.
+        Rate limiting remains fail-closed (that protects against abuse).
+        """
         fn_start = self.source.find("async def is_token_blacklisted")
         assert fn_start > 0
         next_fn = self.source.find("\ndef ", fn_start + 1)
@@ -505,6 +509,6 @@ class TestJWTClaimProtection:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "return True" in fn_body, (
-            "is_token_blacklisted must fail closed (return True) when Redis is unavailable"
+        assert "return False" in fn_body, (
+            "is_token_blacklisted must fail open (return False) when Redis is unavailable"
         )
