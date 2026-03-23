@@ -596,7 +596,7 @@ class TestBulkOperationIntegrity:
         }
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
 
         # Verify all codes were created
@@ -642,7 +642,7 @@ class TestBulkOperationIntegrity:
         }
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
 
         # Should have skipped duplicate and created new

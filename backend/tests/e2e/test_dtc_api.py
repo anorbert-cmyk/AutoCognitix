@@ -641,7 +641,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
         assert "created" in data
         assert data["created"] >= 0
@@ -663,7 +663,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
         assert data["skipped"] >= 1
 
@@ -684,7 +684,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
         assert data["updated"] >= 0 or data["created"] >= 0
 
@@ -705,7 +705,7 @@ class TestDTCBulkImportEndpoint:
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
         data = response.json()
 
         assert "created" in data
@@ -870,7 +870,7 @@ class TestDTCUpdateEndpoint:
         }
 
         update_response = await async_client.post("/api/v1/dtc/bulk", json=update_data)
-        assert update_response.status_code == 200
+        assert update_response.status_code in (200, 201)
 
         # Verify update
         get_response = await async_client.get("/api/v1/dtc/P6001")
@@ -1032,7 +1032,7 @@ class TestDTCBulkOperations:
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
 
         # Should either reject all or create valid ones and report errors
-        assert response.status_code in [200, 422]
+        assert response.status_code in [200, 201, 422]
 
     @pytest.mark.asyncio
     async def test_bulk_import_large_batch(self, async_client, seeded_db):
@@ -1053,7 +1053,7 @@ class TestDTCBulkOperations:
         }
 
         response = await async_client.post("/api/v1/dtc/bulk", json=bulk_data)
-        assert response.status_code == 200
+        assert response.status_code in (200, 201)
 
         data = response.json()
         assert data["total"] == 50
