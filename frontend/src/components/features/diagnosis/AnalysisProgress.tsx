@@ -11,7 +11,7 @@
  * Primary: #137fec, Background: #f6f7f8
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Check,
@@ -210,9 +210,10 @@ export function AnalysisProgress({
   // Bug 2: Ref for the 600ms completion timeout so it can be cleared on unmount
   const completionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Bug 3: Refs for callbacks to avoid stale closures in mock mode
+  // Refs for callbacks to avoid stale closures
   const onCompleteRef = useRef(onComplete);
   const onCancelRef = useRef(onCancel);
+  const onErrorRef = useRef(onError);
 
   // Bug 4: Ref for streaming timeout (2 min max)
   const streamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -220,13 +221,16 @@ export function AnalysisProgress({
   // Bug 3: Ref for mock mode completion setTimeout
   const mockCompletionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Bug 3: Keep callback refs in sync with latest props
+  // Keep callback refs in sync with latest props
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
   useEffect(() => {
     onCancelRef.current = onCancel;
   }, [onCancel]);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   // ---- Derived state ----
   const completedSteps = steps.filter((s) => s.status === 'completed').length;
@@ -294,11 +298,11 @@ export function AnalysisProgress({
             clearTimeout(streamTimeoutRef.current);
             streamTimeoutRef.current = null;
           }
-          // Bug 2: Store the timeout so it can be cleared on unmount
+          // Store the timeout so it can be cleared on unmount
           completionTimeoutRef.current = setTimeout(() => {
             if (!mountedRef.current) return;
-            if (onComplete) {
-              onComplete(data);
+            if (onCompleteRef.current) {
+              onCompleteRef.current(data);
             } else if (diagnosisId) {
               navigate(`/diagnosis/${diagnosisId}`);
             }
@@ -314,13 +318,13 @@ export function AnalysisProgress({
           );
           // Bug 5: Clear stale abort controller reference
           abortRef.current = null;
-          // Bug 4: Clear stream timeout on error
+          // Clear stream timeout on error
           if (streamTimeoutRef.current) {
             clearTimeout(streamTimeoutRef.current);
             streamTimeoutRef.current = null;
           }
-          if (onError) {
-            onError(msg);
+          if (onErrorRef.current) {
+            onErrorRef.current(msg);
           }
         },
         onProgress: (prog, stepName) => {
@@ -356,7 +360,7 @@ export function AnalysisProgress({
         );
       }
     }, 120000);
-  }, [diagnosisRequest, diagnosisId, navigate, onComplete, onError]);
+  }, [diagnosisRequest, diagnosisId, navigate]);
 
   // Start streaming on mount (once)
   useEffect(() => {
@@ -405,7 +409,10 @@ export function AnalysisProgress({
   // Mock mode logic (fallback)
   // =========================================================================
 
-  const isMockMode = !streamingEnabled || !getStreamDiagnosisFn() || !diagnosisRequest;
+  const isMockMode = useMemo(
+    () => !streamingEnabled || !getStreamDiagnosisFn() || !diagnosisRequest,
+    [streamingEnabled, diagnosisRequest]
+  );
 
   useEffect(() => {
     if (!isMockMode) return;
@@ -488,10 +495,15 @@ export function AnalysisProgress({
     setIsRetrying(true);
     streamStartedRef.current = false;
 
-    // Abort previous if any
+    // Abort previous stream if any
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+    }
+    // Clear orphaned stream timeout before restarting
+    if (streamTimeoutRef.current) {
+      clearTimeout(streamTimeoutRef.current);
+      streamTimeoutRef.current = null;
     }
 
     mountedRef.current = true;
