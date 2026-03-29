@@ -482,12 +482,14 @@ class TestGetStorageStats:
         with patch.object(
             service,
             "get_collection_info",
-            return_value={
-                "name": "col",
-                "points_count": 500,
-                "vectors_count": 500,
-                "status": "green",
-            },
+            new=AsyncMock(
+                return_value={
+                    "name": "col",
+                    "points_count": 500,
+                    "vectors_count": 500,
+                    "status": "green",
+                }
+            ),
         ):
             stats = await service.get_storage_stats()
             assert len(stats) == 5
@@ -499,7 +501,7 @@ class TestGetStorageStats:
         with patch.object(
             service,
             "get_collection_info",
-            side_effect=Exception("unavailable"),
+            new=AsyncMock(side_effect=Exception("unavailable")),
         ):
             stats = await service.get_storage_stats()
             assert len(stats) == 5
@@ -518,9 +520,7 @@ class TestCheckStorageAlerts:
         with patch.object(
             service,
             "get_storage_stats",
-            return_value={
-                "dtc_embeddings_hu": {"points_count": 1000},
-            },
+            new=AsyncMock(return_value={"dtc_embeddings_hu": {"points_count": 1000}}),
         ):
             alerts = await service.check_storage_alerts()
             assert alerts == []
@@ -530,9 +530,7 @@ class TestCheckStorageAlerts:
         with patch.object(
             service,
             "get_storage_stats",
-            return_value={
-                "dtc_embeddings_hu": {"points_count": 60000},
-            },
+            new=AsyncMock(return_value={"dtc_embeddings_hu": {"points_count": 60000}}),
         ):
             alerts = await service.check_storage_alerts()
             assert len(alerts) == 1
@@ -545,9 +543,7 @@ class TestCheckStorageAlerts:
         with patch.object(
             service,
             "get_storage_stats",
-            return_value={
-                "dtc_embeddings_hu": {"error": "unavailable"},
-            },
+            new=AsyncMock(return_value={"dtc_embeddings_hu": {"error": "unavailable"}}),
         ):
             alerts = await service.check_storage_alerts()
             assert alerts == []
