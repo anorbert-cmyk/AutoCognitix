@@ -152,7 +152,7 @@ class VehicleGarageService:
         vehicle.is_active = False
         vehicle.updated_at = datetime.now(timezone.utc)
         await db.flush()
-        logger.info("Jármű törölve (soft)", extra={"vehicle_id": vehicle_id})
+        logger.info("Jármű törölve (soft)", extra={"vehicle_id": sanitize_log(vehicle_id)})
         return True
 
     # ─── Health Score ──────────────────────────────────────────────────────────

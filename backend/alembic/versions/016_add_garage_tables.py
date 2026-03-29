@@ -5,16 +5,14 @@ Revises: 015_merge_heads
 Create Date: 2026-03-29
 """
 
-from typing import Sequence, Union
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
-revision: str = "016_add_garage_tables"
-down_revision: Union[str, None] = "015_merge_heads"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "016_add_garage_tables"  # lgtm[py/unused-global-variable]
+down_revision: Union[str, None] = "015_merge_heads"  # lgtm[py/unused-global-variable]
 
 
 def upgrade() -> None:

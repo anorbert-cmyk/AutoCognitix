@@ -324,7 +324,9 @@ async def get_vehicle_health(
             extra={
                 "user_id": sanitize_log(str(current_user.id)),
                 "vehicle_id": sanitize_log(vehicle_id),
-                "score": result.get("score"),
+                "score": sanitize_log(
+                    str(result.get("score")) if result.get("score") is not None else ""
+                ),
             },
         )
 
@@ -371,7 +373,7 @@ async def get_upcoming_reminders(
             "Közelgő emlékeztetők lekérdezve",
             extra={
                 "user_id": sanitize_log(str(current_user.id)),
-                "days_ahead": days_ahead,
+                "days_ahead": sanitize_log(str(days_ahead)),
                 "count": len(reminders),
             },
         )
@@ -662,7 +664,7 @@ async def create_cost(
             extra={
                 "user_id": sanitize_log(str(current_user.id)),
                 "cost_id": sanitize_log(str(cost.id)),
-                "cost_huf": data.cost_huf,
+                "cost_huf": sanitize_log(str(data.cost_huf)),
             },
         )
 
