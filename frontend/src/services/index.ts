@@ -147,5 +147,46 @@ export type {
   ServiceShop,
 } from './serviceShopService'
 
+// Garage Service
+export {
+  createCost,
+  createReminder,
+  createVehicle,
+  completeReminder,
+  deleteReminder,
+  deleteVehicle,
+  formatCostHuf,
+  formatHealthScore,
+  getCosts,
+  getHealthScoreColorClass,
+  getReminders,
+  getUpcomingReminders,
+  getUrgencyColorClass,
+  getVehicle,
+  getVehicleHealth,
+  getVehicles,
+  FUEL_TYPE_LABELS,
+  REMINDER_TYPE_LABELS,
+  updateVehicle,
+} from './garageService'
+
+export type {
+  FuelType,
+  GetRemindersParams,
+  MaintenanceCost,
+  MaintenanceCostCreate,
+  MaintenanceCostListResponse,
+  MaintenanceReminder,
+  MaintenanceReminderCreate,
+  MaintenanceReminderListResponse,
+  ReminderType,
+  ReminderUrgency,
+  UserVehicle,
+  UserVehicleCreate,
+  UserVehicleListResponse,
+  UserVehicleUpdate,
+  VehicleHealthScore,
+} from './garageService'
+
 // Hooks
 export * from './hooks'

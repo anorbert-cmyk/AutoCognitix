@@ -1552,3 +1552,157 @@ import { DiagnosisResponse } from '../services/api'
 ### `from __future__ import annotations` - Ismetelt Megerosites
 
 Sprint 7.5-ben is felmerult: **TILOS** Pydantic V2 schemakban. Ez mar a harmadik sprint ahol ez problemahoz vezetett. A szabaly valtozatlan: Pydantic V2 nativankezeli a forward reference-eket, PEP 563 postponed annotations inkompatibilis.
+---
+
+## 2026-03-29 - Sprint 9/10 CI Hibák és Biztonsági Javítások
+
+### SQLAlchemy + MyPy: `no-any-return` Pattern
+
+**Probléma:** `scalar_one_or_none()` és Pydantic `model_validate()` `Any` típust ad vissza MyPy szerint, míg a deklarált visszatérési típus konkrét (`UserVehicle | None`, `UserVehicleResponse`).
+
+**Fix:**
+```python
+# SQLAlchemy scalar
+return result.scalar_one_or_none()  # type: ignore[no-any-return]
+
+# Pydantic model_validate
+return UserVehicleResponse.model_validate(vehicle)  # type: ignore[no-any-return]
+```
+
+**Szabály:** `scalar_one_or_none()` és `model_validate()` mindig kapjon `# type: ignore[no-any-return]` kommentet. Ez nem kódhiba — SQLAlchemy 2.0 és Pydantic V2 stubs limitációja.
+
+---
+
+### CodeQL Log Injection: Minden User-Controlled Value Sanitizálandó
+
+**Probléma:** `days_ahead: int`, `cost_huf: float`, `score: Any` közvetlenül logba kerültek, anélkül hogy `sanitize_log()`-on mentek volna át.
+
+**Fix:**
+```python
+# HELYTELEN
+"days_ahead": days_ahead,
+"cost_huf": data.cost_huf,
+"score": result.get("score"),
+
+# HELYES
+"days_ahead": sanitize_log(str(days_ahead)),
+"cost_huf": sanitize_log(str(data.cost_huf)),
+"score": sanitize_log(str(result.get("score")) if result.get("score") is not None else ""),
+```
+
+**Szabály:** Log `extra={}` dict-ben MINDEN érték `sanitize_log()`-on kell átmenjen, típustól függetlenül. Numeric értékeket `str()` konverzió után sanitizálj.
+
+---
+
+### Ruff Format vs. Check — Mindkettő Kötelező Lokálisan
+
+**Probléma:** Lokálisan csak `ruff check` futott → CI `ruff format --check` failt adott.
+
+**Fix:**
+```bash
+# MINDIG mindkettőt futasd:
+python3 -m ruff check app tests
+python3 -m ruff format --check app tests
+
+# Ha format hiba van:
+python3 -m ruff format app tests
+```
+
+**Szabály:** A CI mindkét ellenőrzést futtatja. Commit előtt mindkettő kötelező.
+
+---
+
+### ESLint `react-hooks/exhaustive-deps` — Array Reference Stabilitás
+
+**Probléma:** `const shops = data?.shops || []` — `|| []` fallback minden rendernél **új tömb referenciát** hoz létre. `useMemo([shops])` így sosem stale, hanem minden rendernél újraszámol.
+
+**Fix:**
+```typescript
+// HELYTELEN - új ref minden rendernél
+const shops = data?.shops || []
+const markers = useMemo(() => shops.map(...), [shops])
+
+// HELYES - stabil referencia
+const markers = useMemo(
+  () => (data?.shops ?? []).map(...),
+  [data?.shops]  // undefined → undefined, nem [] → []
+)
+```
+
+**Szabály:** Soha ne hozz létre fallback tömböt (`|| []`) hook dependency előtt. A `?? []` fallback a memo belsejébe kerüljön.
+
+---
+
+### Alembic Migration Variables — CodeQL Unused Global
+
+**Probléma:** CodeQL `py/unused-global-variable` warningot ad az Alembic `revision`, `down_revision`, `branch_labels`, `depends_on` változókra (ezeket Alembic runtime-ban olvassa, statikus analízis nem látja).
+
+**Fix:**
+```python
+# revision és down_revision: lgtm suppress (nem távolítható el!)
+revision: str = "016_add_garage_tables"  # lgtm[py/unused-global-variable]
+down_revision: Union[str, None] = "015_merge_heads"  # lgtm[py/unused-global-variable]
+
+# branch_labels és depends_on: biztonságosan eltávolítható (Alembic None-ként kezeli)
+# branch_labels: Union[str, Sequence[str], None] = None  ← TÖRÖLD
+# depends_on: Union[str, Sequence[str], None] = None     ← TÖRÖLD
+```
+
+**Szabály:** Alembic fájlokban `revision`/`down_revision` soha nem törölhető. `branch_labels`/`depends_on = None` felesleges, töröld.
+
+---
+
+### Vitest + AuthProvider — Per-File Mock Szükséges
+
+**Probléma:** `test-utils.tsx`-hez `AuthProvider` hozzáadása törte a `RegisterPage.test.tsx` teszteket, mert az egész `AuthContext` modult mockolja (`vi.mock('...AuthContext', ...)`), de a mock-ban nincs `AuthProvider` export.
+
+**Megoldás:** `test-utils.tsx` VÁLTOZATLAN marad. A komponens-specifikus auth mock a tesztfájlba kerül:
+
+```typescript
+// HomePage.test.tsx - per-file mock
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: null, isAuthenticated: false, isLoading: false }),
+}))
+vi.mock('../../services/hooks/useGarage', () => ({
+  useUpcomingReminders: () => ({ data: undefined, isLoading: false }),
+}))
+```
+
+**Szabály:** `test-utils.tsx`-hez soha ne adj `AuthProvider`-t. Mindig per-file mocking.
+
+---
+
+### react-leaflet Vite Marker Icon Fix
+
+**Probléma:** Vite asset hashing törli a Leaflet default marker ikonokat → üres markerek a térképen.
+
+**Fix:**
+```typescript
+import L from 'leaflet'
+
+delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+})
+```
+
+**Szabály:** Leaflet CDN icon fix minden Vite projektbe kerüljön ahol react-leaflet van.
+
+---
+
+### Vitest — Leaflet jsdom Mock
+
+**Probléma:** Leaflet nem tud jsdom-ban renderelni (window.requestAnimationFrame, canvas issues).
+
+**Fix:** Mock a tesztfájlban:
+```typescript
+vi.mock('../../components/features/services/ServiceMap', () => ({
+  default: ({ markers }: { markers: unknown[] }) => (
+    <div data-testid="service-map">{markers.length} marker</div>
+  ),
+}))
+```
+
+**Szabály:** Minden Leaflet/Canvas-t igénylő komponenst mockolni kell Vitest-ben.

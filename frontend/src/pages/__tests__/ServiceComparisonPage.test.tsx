@@ -78,6 +78,12 @@ vi.mock('../../components/features/services/ShopCard', () => ({
   ),
 }));
 
+vi.mock('../../components/features/services/ServiceMap', () => ({
+  default: ({ markers }: { markers: unknown[] }) => (
+    <div data-testid="service-map">{markers.length} marker</div>
+  ),
+}));
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -137,11 +143,9 @@ describe('ServiceComparisonPage', () => {
   // Map Placeholder
   // ---------------------------------------------------------------------------
 
-  it('should render the map placeholder', () => {
+  it('should render the map', () => {
     render(<ServiceComparisonPage />);
-    expect(
-      screen.getByText(/rk.*p bet.*lt/),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('service-map')).toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------

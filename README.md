@@ -23,6 +23,9 @@ AutoCognitix is an intelligent vehicle diagnostic platform that combines AI-powe
 - **Vector Search** - Semantic similarity search using Qdrant for finding related issues
 - **VIN Decoding** - Decode Vehicle Identification Numbers using NHTSA API
 - **Recall Information** - Access to NHTSA recall database and historical complaint data
+- **Vehicle Garage** - Personal vehicle management with maintenance reminders, health scoring, and cost tracking
+- **Interactive Service Map** - Leaflet-powered map to find and compare nearby repair shops
+- **NHTSA Recall Alerts** - Real-time recall badge on diagnosis results, linked to specific vehicles in garage
 
 ## Tech Stack
 
@@ -94,7 +97,7 @@ AutoCognitix/
 Runs on every push and PR to `main` and `develop`:
 - **Backend**: Ruff linting, MyPy type checking, pytest with coverage
 - **Frontend**: ESLint, TypeScript, Vite build, Vitest
-- **Security**: Bandit (Python), npm audit
+- **Security**: Bandit (Python), npm audit, CodeQL SAST (all user-controlled log values sanitized via sanitize_log)
 - **Docker**: Build verification for both services
 
 ### Continuous Deployment (CD)
@@ -127,11 +130,18 @@ Automatic dependency updates:
 |----------|--------|-------------|
 | `/api/v1/auth/register` | POST | Register new user |
 | `/api/v1/auth/login` | POST | User login |
-| `/api/v1/diagnosis/analyze` | POST | Main diagnostic analysis |
+| `/api/v1/diagnosis/analyze` | POST | Main diagnostic analysis (LLM + RAG + Parts Prices) |
 | `/api/v1/dtc/search` | GET | Search DTC codes |
 | `/api/v1/dtc/{code}` | GET | Get DTC details |
-| `/api/v1/vehicles/decode-vin` | POST | Decode VIN |
+| `/api/v1/vehicles/decode-vin` | POST | Decode VIN via NHTSA |
+| `/api/v1/garage/vehicles` | GET / POST | List or add vehicles to garage |
+| `/api/v1/garage/vehicles/{id}` | GET / PUT / DELETE | Vehicle CRUD |
+| `/api/v1/garage/vehicles/{id}/health` | GET | Vehicle health score |
+| `/api/v1/garage/vehicles/{id}/recalls` | GET | NHTSA recalls for vehicle |
+| `/api/v1/garage/reminders` | GET / POST | Maintenance reminders |
+| `/api/v1/garage/costs` | GET / POST | Maintenance cost tracking |
 | `/health` | GET | Health check |
+| `/demo` | GET | Demo page (P0300 simulation) |
 
 ## Documentation
 

@@ -1,56 +1,98 @@
-import { MapPin } from 'lucide-react'
+/**
+ * ServiceMap — Leaflet térkép szerviz helyekkel.
+ */
+import { useEffect } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
-interface MapMarker {
+// Fix Leaflet default marker icons broken by Vite asset hashing
+delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+})
+
+export interface MapMarker {
   id: string
   name: string
   lat: number
   lng: number
   rating: number
+  address?: string
+  city?: string
 }
 
 interface ServiceMapProps {
   markers: MapMarker[]
   center: { lat: number; lng: number }
+  selectedId?: string | null
   onMarkerClick?: (id: string) => void
 }
 
-export default function ServiceMap({ markers, center, onMarkerClick }: ServiceMapProps) {
+/** Flies the map to the selected marker when selectedId changes. */
+function FlyToSelected({
+  selectedId,
+  markers,
+}: {
+  selectedId: string | null | undefined
+  markers: MapMarker[]
+}) {
+  const map = useMap()
+  useEffect(() => {
+    if (!selectedId) return
+    const found = markers.find((m) => m.id === selectedId)
+    if (found) {
+      map.flyTo([found.lat, found.lng], 14, { duration: 0.8 })
+    }
+  }, [selectedId, markers, map])
+  return null
+}
+
+export default function ServiceMap({
+  markers,
+  center,
+  selectedId,
+  onMarkerClick,
+}: ServiceMapProps) {
   return (
-    <div className="relative min-h-[400px] overflow-hidden rounded-lg bg-gray-100">
-      {/* Map placeholder background */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-2 text-gray-400">
-          <MapPin className="h-12 w-12" />
-          <span className="text-sm">Térkép betöltése...</span>
-          <span className="text-xs text-gray-300">
-            Középpont: {center.lat.toFixed(4)}, {center.lng.toFixed(4)}
-          </span>
-        </div>
-      </div>
-
-      {/* Marker list overlay */}
-      <div className="relative z-10 flex flex-col gap-2 p-4">
-        <div className="mb-2 rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm backdrop-blur-sm w-fit">
-          {markers.length} szerviz a térképen
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {markers.map((marker) => (
-            <button
-              key={marker.id}
-              type="button"
-              onClick={() => onMarkerClick?.(marker.id)}
-              className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-sm shadow-sm backdrop-blur-sm transition-all hover:bg-white hover:shadow-md"
-            >
-              <MapPin className="h-4 w-4 text-red-500" />
-              <span className="font-medium text-gray-800">{marker.name}</span>
-              <span className="text-xs text-yellow-600">
-                {'★'.repeat(Math.round(marker.rating))}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
+    <MapContainer
+      center={[center.lat, center.lng]}
+      zoom={7}
+      className="w-full h-full"
+      style={{ minHeight: '400px' }}
+    >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      <FlyToSelected selectedId={selectedId} markers={markers} />
+      {markers.map((marker) => (
+        <Marker
+          key={marker.id}
+          position={[marker.lat, marker.lng]}
+          eventHandlers={{ click: () => onMarkerClick?.(marker.id) }}
+        >
+          <Popup>
+            <div className="text-sm min-w-[140px]">
+              <div className="font-bold text-slate-900">{marker.name}</div>
+              {marker.address && (
+                <div className="text-xs text-slate-500 mt-0.5">{marker.address}</div>
+              )}
+              {marker.city && (
+                <div className="text-xs text-slate-500">{marker.city}</div>
+              )}
+              <div className="text-yellow-600 text-xs mt-1.5 font-medium">
+                {'★'.repeat(Math.round(marker.rating))} {marker.rating.toFixed(1)}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </MapContainer>
   )
 }

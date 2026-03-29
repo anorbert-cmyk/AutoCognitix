@@ -723,3 +723,101 @@ class EPAVehicle(Base):
     has_supercharger: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# =============================================================================
+# Garage Models (Sprint 9)
+# =============================================================================
+
+
+class UserVehicle(Base):
+    """User's registered vehicle in their garage."""
+
+    __tablename__ = "user_vehicles"
+
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    nickname: Mapped[Optional[str]] = mapped_column(String(100))
+    make: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    vin: Mapped[Optional[str]] = mapped_column(String(17), index=True)
+    license_plate: Mapped[Optional[str]] = mapped_column(String(20), index=True)
+    mileage_km: Mapped[Optional[int]] = mapped_column(Integer)
+    fuel_type: Mapped[Optional[str]] = mapped_column(
+        String(30)
+    )  # petrol/diesel/electric/hybrid/lpg
+    color: Mapped[Optional[str]] = mapped_column(String(50))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    reminders = relationship(
+        "MaintenanceReminder", back_populates="vehicle", cascade="all, delete-orphan"
+    )
+    maintenance_costs = relationship(
+        "MaintenanceCost", back_populates="vehicle", cascade="all, delete-orphan"
+    )
+
+
+class MaintenanceReminder(Base):
+    """Maintenance and service reminder for a vehicle."""
+
+    __tablename__ = "maintenance_reminders"
+
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    vehicle_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("user_vehicles.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    reminder_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # oil_change/tire_rotation/mueszaki_vizsga/kotelezo_biztositas/coolant/brake_fluid/timing_belt/custom
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
+    due_mileage_km: Mapped[Optional[int]] = mapped_column(Integer)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    vehicle = relationship("UserVehicle", back_populates="reminders")
+
+
+class MaintenanceCost(Base):
+    """Recorded maintenance cost entry for a vehicle."""
+
+    __tablename__ = "maintenance_costs"
+
+    id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    vehicle_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("user_vehicles.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    diagnosis_session_id: Mapped[Optional[str]] = mapped_column(
+        Uuid, ForeignKey("diagnosis_sessions.id", ondelete="SET NULL"), index=True
+    )
+    service_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    cost_huf: Mapped[int] = mapped_column(Integer, nullable=False)
+    service_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    mileage_km: Mapped[Optional[int]] = mapped_column(Integer)
+    workshop_name: Mapped[Optional[str]] = mapped_column(String(200))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    vehicle = relationship("UserVehicle", back_populates="maintenance_costs")

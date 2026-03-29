@@ -1,6 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '../../test/test-utils';
 import HomePage from '../HomePage';
+
+vi.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: null, isAuthenticated: false, isLoading: false }),
+}));
+
+vi.mock('../../services/hooks/useGarage', () => ({
+  useUpcomingReminders: () => ({ data: undefined, isLoading: false }),
+}));
 
 describe('HomePage', () => {
   it('should render the hero section with title', () => {

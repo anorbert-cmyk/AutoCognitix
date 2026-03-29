@@ -411,6 +411,66 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               </section>
             )}
             </SectionErrorBoundary>
+
+            {/* NHTSA Recalls Section */}
+            {result.related_recalls && result.related_recalls.length > 0 && (
+              <SectionErrorBoundary sectionName="NHTSA visszahívások">
+              <section>
+                <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-100">
+                      <MaterialIcon name="warning" className="text-xl text-red-600" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-bold text-red-900">NHTSA Visszahívások</h3>
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
+                          {result.related_recalls.length} aktív
+                        </span>
+                      </div>
+                      <p className="text-sm text-red-700 mt-0.5">
+                        A jármű gyártója visszahívást indított az alábbi problémák miatt
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    {result.related_recalls.map((recall, idx) => (
+                      <div
+                        key={recall.campaign_number || idx}
+                        className="bg-white rounded-xl p-4 border border-red-100"
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs font-bold uppercase text-red-600 tracking-wide">
+                            {recall.component}
+                          </span>
+                          {recall.campaign_number && (
+                            <span className="text-xs text-slate-400 font-mono">
+                              #{recall.campaign_number}
+                            </span>
+                          )}
+                          {recall.recall_date && (
+                            <span className="text-xs text-slate-400">{recall.recall_date}</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">{recall.summary}</p>
+                        {recall.consequence && (
+                          <p className="text-xs text-red-700 mt-2">
+                            <span className="font-semibold">Következmény:</span> {recall.consequence}
+                          </p>
+                        )}
+                        {recall.remedy && (
+                          <p className="text-xs text-green-700 mt-1.5 flex items-center gap-1">
+                            <MaterialIcon name="build" className="text-sm" />
+                            <span className="font-semibold">Javítás:</span> {recall.remedy}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              </SectionErrorBoundary>
+            )}
           </div>
         </div>
 

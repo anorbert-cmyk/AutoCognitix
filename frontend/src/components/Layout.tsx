@@ -10,6 +10,7 @@ import {
   LogOut,
   LogIn,
   UserPlus,
+  Car,
   ClipboardCheck,
   Calculator,
   MessageSquare,
@@ -33,6 +34,7 @@ interface NavItem {
 const navigationItems: NavItem[] = [
   { label: 'Új diagnosztika', href: '/diagnosis', icon: <Plus className="h-4 w-4" /> },
   { label: 'Előzmények', href: '/history', icon: <History className="h-4 w-4" />, requiresAuth: true },
+  { label: 'Garázs', href: '/garage', icon: <Car className="h-4 w-4" />, requiresAuth: true },
   { label: 'Beállítások', href: '/settings', icon: <Settings className="h-4 w-4" /> },
   { label: 'Műszaki Vizsga', href: '/inspection', icon: <ClipboardCheck className="h-4 w-4" /> },
   { label: 'Kalkulátor', href: '/calculator', icon: <Calculator className="h-4 w-4" /> },
