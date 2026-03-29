@@ -23,6 +23,8 @@ const ServiceComparisonPage = lazy(() => import('./pages/ServiceComparisonPage')
 const ChangelogPage = lazy(() => import('./pages/ChangelogPage'))
 const PricingPage = lazy(() => import('./pages/PricingPage'))
 const BlogPage = lazy(() => import('./pages/BlogPage'))
+const GaragePage = lazy(() => import('./pages/GaragePage'))
+const VehicleDetailPage = lazy(() => import('./pages/VehicleDetailPage'))
 
 // Auth pages
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -93,6 +95,22 @@ function App() {
                 <Route path="pricing" element={<PricingPage />} />
                 <Route path="blog" element={<BlogPage />} />
                 <Route path="dtc/:code" element={<DTCDetailPage />} />
+                <Route
+                  path="garage"
+                  element={
+                    <ProtectedRoute>
+                      <GaragePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="garage/:vehicleId"
+                  element={
+                    <ProtectedRoute>
+                      <VehicleDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
             </Routes>

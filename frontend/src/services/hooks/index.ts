@@ -53,6 +53,24 @@ export {
 // Chat hooks
 export { useChat } from './useChat'
 
+// Garage hooks
+export {
+  garageKeys,
+  useVehicles,
+  useVehicle,
+  useVehicleHealth,
+  useCreateVehicle,
+  useUpdateVehicle,
+  useDeleteVehicle,
+  useReminders,
+  useUpcomingReminders,
+  useCreateReminder,
+  useCompleteReminder,
+  useDeleteReminder,
+  useCosts,
+  useCreateCost,
+} from './useGarage'
+
 // Service Shop hooks
 export {
   serviceShopKeys,

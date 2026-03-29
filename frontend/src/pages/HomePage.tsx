@@ -1,7 +1,12 @@
 import { Link } from 'react-router-dom'
-import { Wrench, Zap, Shield, ArrowRight, Eye, ClipboardCheck, Calculator, MessageSquare, MapPin } from 'lucide-react'
+import { Wrench, Zap, Shield, ArrowRight, Eye, Bell, ClipboardCheck, Calculator, MessageSquare, MapPin } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
+import { useUpcomingReminders } from '@/services/hooks'
 
 export default function HomePage() {
+  const { isAuthenticated } = useAuth()
+  const { data: upcomingReminders } = useUpcomingReminders(14)
+
   return (
     <div>
       {/* Hero Section */}
@@ -157,6 +162,59 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Közelgő emlékeztetők widget — csak bejelentkezett felhasználóknak */}
+      {isAuthenticated && upcomingReminders && upcomingReminders.length > 0 && (
+        <section className="max-w-4xl mx-auto px-4 pb-12">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Bell className="h-5 w-5 text-[#2563eb]" />
+                Közelgő teendők
+              </h3>
+              <Link
+                to="/garage"
+                className="text-sm font-medium text-[#2563eb] hover:underline"
+              >
+                Összes megtekintése →
+              </Link>
+            </div>
+            <div className="space-y-3">
+              {upcomingReminders.slice(0, 3).map((reminder) => (
+                <div
+                  key={reminder.id}
+                  className={`flex items-center justify-between p-3 rounded-xl border ${
+                    reminder.urgency === 'overdue'
+                      ? 'bg-red-50 border-red-200'
+                      : reminder.urgency === 'urgent'
+                      ? 'bg-orange-50 border-orange-200'
+                      : 'bg-yellow-50 border-yellow-200'
+                  }`}
+                >
+                  <div>
+                    <p className="font-medium text-slate-900 text-sm">{reminder.title}</p>
+                    <p className="text-xs text-slate-500">
+                      {reminder.days_until_due !== null && reminder.days_until_due !== undefined
+                        ? reminder.days_until_due < 0
+                          ? `${Math.abs(reminder.days_until_due)} napja lejárt`
+                          : reminder.days_until_due === 0
+                          ? 'Ma esedékes'
+                          : `${reminder.days_until_due} nap múlva`
+                        : reminder.due_date ?? 'Határidő nincs megadva'}
+                    </p>
+                  </div>
+                  <Link
+                    to={`/garage/${reminder.vehicle_id}`}
+                    className="text-xs font-semibold text-[#2563eb] hover:underline"
+                  >
+                    Megtekint →
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* CTA Section */}
       <section className="bg-gray-100 py-24">

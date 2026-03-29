@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     chat,
     diagnosis,
     dtc_codes,
+    garage,
     health,
     inspection,
     metrics,
@@ -85,4 +86,10 @@ api_router.include_router(
     services.router,
     prefix="/services",
     tags=["Services"],
+)
+
+api_router.include_router(
+    garage.router,
+    prefix="/garage",
+    tags=["Garage"],
 )
