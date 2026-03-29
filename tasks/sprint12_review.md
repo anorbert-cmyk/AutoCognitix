@@ -1220,3 +1220,86 @@ Recommend adding a `TestRateLimitRedisFallback` class (6 cases above) to cover t
 | 9 RateLimit | rate_limit.py | 0 | 0 | 0 | 1 (per-process fallback) |
 
 **Overall:** No CRITICAL or HIGH issues. One MEDIUM in agent 4 (dual token decode path in `reset_password`). Five LOW issues, none blocking.
+
+---
+
+## CI-Verify Lead Summary
+
+**CI-Verify Lead** — 2026-03-29
+
+### CI Eredmények
+
+| Check | Eredmény | Részlet |
+|-------|----------|---------|
+| Backend ruff check | PASS | 0 error (1 fixable `noqa` directive removed) |
+| Backend ruff format | PASS | 125 files formatted/clean |
+| Backend pytest | PASS | 645 passed, 0 failed, 9 warnings |
+| Frontend ESLint | PASS | 0 errors (8 `no-extra-semi` fixed in test file) |
+| Frontend TypeScript | PASS | `tsc --noEmit` clean |
+| Frontend Vitest | PASS | 327 passed, 19 test files |
+
+### Javított Hibák
+
+#### 1. `backend/tests/unit/test_qdrant_client.py` — QdrantClient → AsyncQdrantClient
+
+**Probléma:** Az összes `patch("app.db.qdrant_client.QdrantClient")` hívás az eltávolított szinkron `QdrantClient`-et patchelte. A modul Sprint 12-ben átállt az `AsyncQdrantClient`-re, a tesztek nem követték.
+
+**Javítás:**
+- Minden `patch("...QdrantClient")` → `patch("...AsyncQdrantClient")`
+- `service` fixture: `MagicMock()` → `AsyncMock()` (az async kliensmetódusok awaitálhatók legyenek)
+- Összes `service.client.get_collections = MagicMock(...)` → `AsyncMock(...)` 
+- Összes `service.client.search = MagicMock(...)` → `AsyncMock(...)`
+- `patch.object(..., return_value=...)` → `patch.object(..., new=AsyncMock(return_value=...))`
+- **37 FAIL/ERROR → 37 PASS**
+
+#### 2. `backend/tests/unit/test_rate_limiter.py` — `TestCheckRateLimitDependency`
+
+**Probléma:** A tesztek a régi `_rate_limiter.check_rate_limit()` / `_rate_limiter.record_request()` API-t mockolták. A Sprint 12-es `check_rate_limit()` függvény átállt a `check_rate_limit_with_redis_fallback()` Redis-first implementációra. A tesztek ezért soha nem hozták létre a várható állapotot.
+
+**Javítás:**
+- `patch("app.core.rate_limit._rate_limiter")` → `patch("app.core.rate_limit.check_rate_limit_with_redis_fallback", new_callable=AsyncMock)`
+- Mock return value: `(True, 59)` / `(False, 0)` tuple (allowed, remaining)
+- `record_request.assert_called_once()` → eltávolítva (nem hívja az új impl)
+- `remaining == 58` → `remaining == 59` (az új impl nem von le 1-et a maradékból)
+- **4 FAIL → 4 PASS**
+
+#### 3. `backend/app/core/rate_limit.py` — `RUF100` noqa directive
+
+**Probléma:** `# noqa: PLC0415` egy olyan sorban, ahol a `PLC0415` rule nincs engedélyezve.
+
+**Javítás:** Automatikus `ruff check --fix` eltávolította a felesleges direktívát.
+
+#### 4. `frontend/src/hooks/__tests__/useStreamingDiagnosis.test.ts` — ESLint `no-extra-semi`
+
+**Probléma:** 8 felesleges pontosvessző a tesztfájlban (ESLint `no-extra-semi` rule).
+
+**Javítás:** `eslint --fix` automatikusan eltávolította.
+
+### Ellenőrzött Sprint 12 Implementációk
+
+| Fájl | Státusz | Megjegyzés |
+|------|---------|------------|
+| `backend/app/services/streaming_service.py` | PASS | SSE chunking helyes, `stream_result_as_chunks()` + `stream_diagnosis_chunks()` |
+| `backend/app/api/v1/endpoints/diagnosis.py` | PASS | `/analyze/stream` route létezik, `StreamingResponse + text/event-stream` |
+| `frontend/src/hooks/useStreamingDiagnosis.ts` | PASS | TypeScript clean, ESLint clean |
+| `backend/app/services/email_service.py` | PASS | `html.escape()` XSS védelem megvan (`safe_username`, `safe_reset_url`) |
+| `backend/app/api/v1/endpoints/auth.py` | PASS | `forgot-password` + `reset-password` endpoint implementálva |
+| `backend/app/db/postgres/models.py` | PASS | `PasswordResetToken` model cascade delete-orphan-nal |
+| `backend/app/core/security.py` | PASS | `validate_password_strength()` min 8 char, uppercase, lowercase, digit, special |
+| `backend/app/db/qdrant_client.py` | PASS | `AsyncQdrantClient` import, teljes async implementáció |
+| `backend/app/services/rag_service.py` | PASS | thread-safe singleton, `contextvars.ContextVar`, Neo4j `asyncio.to_thread()` |
+| `backend/app/core/rate_limit.py` | PASS | Redis-first fallback, fail-closed policy |
+
+### Maradék Issues (nem blokkoló)
+
+| Prioritás | Fájl | Leírás |
+|-----------|------|--------|
+| LOW | `rag_service.py:95` | `asyncio.get_event_loop()` → `asyncio.get_running_loop()` (deprecated Python 3.10+) |
+| LOW | `qdrant_client.py:57` | URL logging potenciálisan tartalmaz API key-t |
+| LOW | `rate_limit.py` | In-memory fallback per-process, dokumentálandó deployment note-ban |
+| MEDIUM | `auth.py reset_password` | Dual token decode path dokumentálandó |
+| NOTE | `useStreamingDiagnosis.ts` | `fullText` akkumuláció üres marad (backend `analysis` events nem tartalmaznak `text` mezőt) |
+
+### Sprint 12 Státusz
+
+**KÉSZ** — Minden CI check zöld. 645 backend + 327 frontend teszt átment. Nincs CRITICAL vagy HIGH blocker.

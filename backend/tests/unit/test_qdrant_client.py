@@ -316,7 +316,7 @@ class TestSearch:
 class TestSearchDTC:
     @pytest.mark.asyncio
     async def test_search_dtc_no_filters(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             results = await service.search_dtc([0.1] * 768, limit=5)
             assert results == []
             mock_search.assert_awaited_once_with(
@@ -329,7 +329,7 @@ class TestSearchDTC:
 
     @pytest.mark.asyncio
     async def test_search_dtc_with_category_and_severity(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_dtc(
                 [0.1] * 768,
                 limit=3,
@@ -348,7 +348,7 @@ class TestSearchDTC:
 class TestSearchSimilarSymptoms:
     @pytest.mark.asyncio
     async def test_search_symptoms_no_filters(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_similar_symptoms([0.2] * 768, limit=10)
             mock_search.assert_awaited_once_with(
                 collection_name="symptom_embeddings_hu",
@@ -360,7 +360,7 @@ class TestSearchSimilarSymptoms:
 
     @pytest.mark.asyncio
     async def test_search_symptoms_with_make(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_similar_symptoms([0.2] * 768, limit=5, vehicle_make="VW")
             mock_search.assert_awaited_once_with(
                 collection_name="symptom_embeddings_hu",
@@ -374,7 +374,7 @@ class TestSearchSimilarSymptoms:
 class TestSearchComponents:
     @pytest.mark.asyncio
     async def test_search_components_no_filters(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_components([0.3] * 768, limit=5)
             mock_search.assert_awaited_once_with(
                 collection_name="component_embeddings_hu",
@@ -386,7 +386,7 @@ class TestSearchComponents:
 
     @pytest.mark.asyncio
     async def test_search_components_with_system(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_components([0.3] * 768, system="engine")
             mock_search.assert_awaited_once_with(
                 collection_name="component_embeddings_hu",
@@ -400,7 +400,7 @@ class TestSearchComponents:
 class TestSearchRepairs:
     @pytest.mark.asyncio
     async def test_search_repairs_no_filters(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_repairs([0.4] * 768, limit=3)
             mock_search.assert_awaited_once_with(
                 collection_name="repair_embeddings_hu",
@@ -412,7 +412,7 @@ class TestSearchRepairs:
 
     @pytest.mark.asyncio
     async def test_search_repairs_with_difficulty(self, service):
-        with patch.object(service, "search", return_value=[]) as mock_search:
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_repairs([0.4] * 768, difficulty="professional")
             mock_search.assert_awaited_once_with(
                 collection_name="repair_embeddings_hu",
@@ -445,9 +445,7 @@ class TestDeleteOperations:
     @pytest.mark.asyncio
     async def test_delete_by_user_continues_on_error(self, service):
         # First call fails, rest succeed
-        service.client.delete = AsyncMock(
-            side_effect=[Exception("fail"), None, None, None, None]
-        )
+        service.client.delete = AsyncMock(side_effect=[Exception("fail"), None, None, None, None])
         result = await service.delete_by_user("user-123")
         assert result == 4  # 4 successful out of 5
 
