@@ -30,6 +30,21 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# Lua Scripts
+# =============================================================================
+
+# Atomic INCR + conditional EXPIRE to avoid race conditions in rate limiting.
+# If the key is new (current == 1), set the expiry immediately in the same
+# atomic operation so no window can slip between INCR and EXPIRE.
+LUA_INCR_EXPIRE = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
+
+# =============================================================================
 # Cache TTL Configuration (in seconds)
 # =============================================================================
 
@@ -130,6 +145,7 @@ class RedisCacheService:
         self._failure_count = 0
         self._max_failures = 5
         self._reset_task: Optional[asyncio.Task] = None
+        self._incr_expire_script: Any = None
 
         logger.info("RedisCacheService initialized")
 
@@ -165,6 +181,9 @@ class RedisCacheService:
             self._connected = True
             self._circuit_open = False
             self._failure_count = 0
+
+            # Register Lua script for atomic INCR + EXPIRE (rate limiting)
+            self._incr_expire_script = self._client.register_script(LUA_INCR_EXPIRE)
 
             logger.info(f"Connected to Redis: {settings.REDIS_URL}")
 
@@ -470,7 +489,7 @@ class RedisCacheService:
     ) -> str:
         """Generate a consistent cache key for search queries."""
         params = f"{query.lower()}:{category or 'all'}:{limit}"
-        hash_val = hashlib.md5(params.encode(), usedforsecurity=False).hexdigest()[:12]
+        hash_val = hashlib.sha256(params.encode()).hexdigest()[:12]
         return f"{CachePrefix.DTC_SEARCH}{hash_val}"
 
     async def get_related_codes(self, code: str) -> Optional[List[dict]]:
@@ -545,13 +564,13 @@ class RedisCacheService:
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Get cached embedding vector."""
-        text_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
         return await self.get(key)
 
     async def set_embedding(self, text: str, embedding: List[float]) -> bool:
         """Cache embedding vector."""
-        text_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
         key = f"{CachePrefix.EMBEDDING}{text_hash}"
         return await self.set(key, embedding, CacheTTL.EMBEDDINGS)
 
@@ -560,10 +579,7 @@ class RedisCacheService:
         texts: List[str],
     ) -> List[Optional[List[float]]]:
         """Get multiple cached embeddings."""
-        keys = [
-            f"{CachePrefix.EMBEDDING}{hashlib.md5(t.encode(), usedforsecurity=False).hexdigest()}"
-            for t in texts
-        ]
+        keys = [f"{CachePrefix.EMBEDDING}{hashlib.sha256(t.encode()).hexdigest()}" for t in texts]
         return await self.mget(keys)
 
     # =========================================================================
@@ -595,13 +611,13 @@ class RedisCacheService:
         key = f"{CachePrefix.RATE_LIMIT}{identifier}"
 
         assert self._client is not None
+        assert self._incr_expire_script is not None
         try:
-            async with self._client.pipeline() as pipe:
-                pipe.incr(key)
-                pipe.expire(key, window_seconds)
-                results = await pipe.execute()
+            current = await self._incr_expire_script(
+                keys=[key],
+                args=[window_seconds],
+            )
 
-            current = results[0]
             remaining = max(0, limit - current)
             allowed = current <= limit
 
@@ -699,7 +715,7 @@ def cached(
             else:
                 # Default: hash all arguments
                 arg_str = f"{args}:{kwargs}"
-                key = f"{prefix}{hashlib.md5(arg_str.encode(), usedforsecurity=False).hexdigest()[:16]}"
+                key = f"{prefix}{hashlib.sha256(arg_str.encode()).hexdigest()[:16]}"
 
             # Try to get from cache
             try:
