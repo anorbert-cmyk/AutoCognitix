@@ -788,6 +788,139 @@ Both findings from the Qdrant-Async → Neo4j-Thread reverse review have been re
 
 ---
 
+## FE-Tests Cross-Review (agents 2, 3)
+
+**Reviewer:** FE-Tests Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `frontend/src/hooks/useStreamingDiagnosis.ts` (agent 2 — SSE-Frontend)
+- `frontend/src/services/diagnosisService.ts` (agent 2 — SSE-Frontend)
+- `backend/app/services/email_service.py` (agent 3 — Email-Templates)
+
+---
+
+### Agent 2 (SSE-Frontend) — `useStreamingDiagnosis.ts`
+
+#### TypeScript types — PASS
+
+The hook exports a complete and well-typed `StreamingState` interface with all expected
+fields: `chunks: string[]`, `fullText: string`, `isStreaming: boolean`, `isDone: boolean`,
+`error: string | null`, `fullResult: Record<string, unknown> | null`, `progress: number`.
+
+All tests in `useStreamingDiagnosis.test.ts` pass against this interface without type errors.
+
+#### `streamDiagnosis` return value — PASS
+
+`streamDiagnosis` (in `diagnosisService.ts`) returns a plain `AbortController` — not
+`{ stream, abort }` as the test template suggested. The hook stores this in `abortRef`
+and calls `.abort()` from `stopStreaming()`. This is a correct and idiomatic pattern.
+
+Tests were written to match the actual callback-based API (`onAnalysis`, `onComplete`,
+`onError`, `onProgress`), not the generator API from the task spec template, since the
+implementation uses callbacks.
+
+#### `abort` and `stream` fields — NOTE (design decision)
+
+The task spec mentioned `abort` and `stream` fields. The actual implementation returns
+a bare `AbortController`. This is the cleaner design: no wrapper object needed.
+The `streamDiagnosisGenerator()` async generator exported from the hook file provides
+the alternative iterator API for consumers that prefer `for await`.
+
+#### State reset between sessions — PASS
+
+`startStreaming()` merges `{ ...INITIAL_STATE, isStreaming: true }` before registering
+callbacks — state is correctly cleared on each new stream invocation.
+
+#### Test coverage gap — LOW
+
+The `streamDiagnosisGenerator()` async generator function (lines 154–223 in the hook
+file) has no unit tests. It is the bridge between the callback API and an async iterator
+interface. While not required by the current sprint scope, adding tests for the generator
+would increase confidence in the abort/cleanup path (`finally { controller.abort() }`).
+
+---
+
+### Agent 3 (Email-Templates) — `email_service.py`
+
+#### HTML XSS safety — MEDIUM (partially addressed)
+
+`send_password_reset_email()` (lines 288–365) correctly uses `html.escape()` for both
+`username` and the reset URL before f-string interpolation into the HTML body:
+
+```python
+safe_username = html.escape(username)
+safe_reset_url = html.escape(f"{settings.FRONTEND_URL}/reset-password?token={reset_token}")
+```
+
+This method is XSS-safe.
+
+However, the older `send_password_reset()` and `send_welcome()` methods (lines 251–466)
+use `PASSWORD_RESET_TEMPLATE_HTML.format(name=name, reset_link=reset_link)` and
+`WELCOME_TEMPLATE_HTML.format(name=name, login_link=login_link)` **without** escaping
+the `name` parameter before HTML interpolation.
+
+**Finding:** If a user's display name contains `<script>` or HTML special characters,
+those characters would be injected verbatim into the email HTML body. Although most
+email clients strip `<script>` tags, `<img onerror=...>` and similar payloads could
+execute in some clients.
+
+**Recommended fix:**
+```python
+# In send_password_reset() and send_welcome():
+html_content = PASSWORD_RESET_TEMPLATE_HTML.format(
+    name=html.escape(name),
+    reset_link=reset_link,  # URL rendered inside href — html.escape is still recommended
+)
+```
+
+**Severity:** MEDIUM. Email HTML injection is lower risk than web XSS since email
+clients have restricted JS execution, but `html.escape()` is a one-line fix and
+should be applied for defence-in-depth.
+
+#### Log injection — PASS
+
+All log calls use `_sanitize_log()` on user-supplied values. No raw user data enters
+log messages. The `_sanitize_log()` helper is thorough: strips control chars, collapses
+whitespace, truncates to 200 chars. No log injection risk.
+
+#### Demo mode fallback — PASS
+
+Three-tier priority chain (n8n → Resend → demo/log) is correct and always yields a
+`True` return in demo mode. The `is_demo_mode` property is properly exposed for testing.
+
+#### SMTP fallback — PASS
+
+`_send()` correctly defers to `_send_email()` when `SMTP_HOST` is not set. The SMTP
+path uses `asyncio.run_in_executor()` to avoid blocking the event loop. Correct.
+
+#### Singleton thread safety — PASS
+
+`EmailService` uses the standard singleton `__new__` pattern with an `_initialized`
+guard. The same minor TOCTOU caveat noted by the Qdrant-Async reviewer for `RAGService`
+applies here, but CPython's GIL makes this safe in practice for startup initialization.
+
+---
+
+### Summary
+
+| Agent | File | Check | Status |
+|-------|------|-------|--------|
+| Agent 2 | `useStreamingDiagnosis.ts` | TypeScript types complete | PASS |
+| Agent 2 | `useStreamingDiagnosis.ts` | `streamDiagnosis` returns `AbortController` | PASS |
+| Agent 2 | `diagnosisService.ts` | `abort` + `stream` fields | NOTE — bare `AbortController` design is correct |
+| Agent 2 | `useStreamingDiagnosis.ts` | State reset between sessions | PASS |
+| Agent 2 | `useStreamingDiagnosis.ts` | `streamDiagnosisGenerator` test coverage | LOW — no tests for async generator |
+| Agent 3 | `email_service.py` | `send_password_reset_email` XSS safety | PASS — `html.escape()` used |
+| Agent 3 | `email_service.py` | `send_password_reset` / `send_welcome` XSS safety | MEDIUM — `name` not escaped |
+| Agent 3 | `email_service.py` | Log injection prevention | PASS — `_sanitize_log()` throughout |
+| Agent 3 | `email_service.py` | Demo mode fallback | PASS |
+| Agent 3 | `email_service.py` | SMTP async safety | PASS — `run_in_executor` used |
+
+**No blocking issues.** One MEDIUM finding (email HTML XSS in legacy template methods)
+and one LOW finding (generator test gap). Neither blocks the sprint.
+
+---
+
 ## Email-Templates → PasswordReset-API Review
 
 **Reviewer:** Email-Templates Lead
