@@ -491,7 +491,14 @@ class RAGService:
             return cast("List[RetrievedItem]", cached)
 
         # Generate embedding for query (async to avoid blocking event loop)
-        query_embedding = await embed_text_async(query, preprocess=True)
+        try:
+            query_embedding = await embed_text_async(query, preprocess=True)
+        except (RuntimeError, Exception) as e:
+            logger.warning(f"Embedding failed, falling back to keyword search: {e}")
+            query_embedding = None
+
+        if query_embedding is None:
+            return []
 
         try:
             results = await self._qdrant.search(
@@ -1049,6 +1056,8 @@ class RAGService:
             )
 
         # Get LLM provider and generate
+        LLM_TIMEOUT_SECONDS = 30
+
         try:
             provider = get_llm_provider()
             llm_config = LLMConfig(
@@ -1056,10 +1065,13 @@ class RAGService:
                 max_tokens=4096,
             )
 
-            response = await provider.generate_with_system(
-                system_prompt=SYSTEM_PROMPT_HU,
-                user_prompt=user_prompt,
-                config=llm_config,
+            response = await asyncio.wait_for(
+                provider.generate_with_system(
+                    system_prompt=SYSTEM_PROMPT_HU,
+                    user_prompt=user_prompt,
+                    config=llm_config,
+                ),
+                timeout=LLM_TIMEOUT_SECONDS,
             )
 
             # Parse the response
@@ -1069,6 +1081,10 @@ class RAGService:
             parsed.raw_response = response.content
 
             return parsed
+
+        except asyncio.TimeoutError:
+            logger.warning(f"LLM call timed out after {LLM_TIMEOUT_SECONDS}s")
+            raise TimeoutError("Az AI elemzés túllépte az időkorlátot. Kérjük próbálja újra.")
 
         except Exception as e:
             logger.error(f"LLM generation error: {e}, falling back to rule-based")
