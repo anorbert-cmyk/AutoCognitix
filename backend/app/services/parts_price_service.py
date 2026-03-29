@@ -16,6 +16,7 @@ Author: AutoCognitix Team
 import hashlib
 import json
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -317,7 +318,11 @@ class PartsPriceCache:
         if redis:
             try:
                 result = await redis.get(key)
-                return str(result) if result is not None else None
+                if result is not None:
+                    if isinstance(result, bytes):
+                        return result.decode("utf-8")
+                    return str(result)
+                return None
             except Exception as e:
                 logger.warning(f"Redis get hiba: {e}")
 
@@ -369,6 +374,8 @@ class PartsPriceCache:
 # Parts Price Service
 # =============================================================================
 
+_parts_price_lock = threading.Lock()
+
 
 class PartsPriceService:
     """
@@ -386,10 +393,12 @@ class PartsPriceService:
     _initialized: bool = False
 
     def __new__(cls) -> "PartsPriceService":
-        """Singleton pattern."""
+        """Singleton pattern with double-check locking."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with _parts_price_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
@@ -711,6 +720,7 @@ class PartsPriceService:
 # =============================================================================
 
 _service_instance: Optional[PartsPriceService] = None
+_service_lock = threading.Lock()
 
 
 def get_parts_price_service() -> PartsPriceService:
@@ -722,7 +732,9 @@ def get_parts_price_service() -> PartsPriceService:
     """
     global _service_instance
     if _service_instance is None:
-        _service_instance = PartsPriceService()
+        with _service_lock:
+            if _service_instance is None:
+                _service_instance = PartsPriceService()
     return _service_instance
 
 
