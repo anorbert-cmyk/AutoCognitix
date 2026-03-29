@@ -281,3 +281,104 @@ All checklist items pass. The PasswordReset-DB pair's implementation is complete
 - `token_hash` uniqueness prevents token reuse/collision attacks
 - CASCADE delete on `user_id` ensures no orphaned tokens on user deletion
 - No blocking issues found.
+
+---
+
+## PasswordReset-API → Email-Templates Review
+
+**Reviewer:** PasswordReset-API Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/services/email_service.py`
+
+---
+
+### `send_password_reset_email()` exists — OK
+
+The module-level convenience function is present at line 492:
+
+```python
+async def send_password_reset_email(to_email: str, name: str, reset_link: str) -> bool:
+```
+
+Delegates to `EmailService.send_password_reset()`, which formats the HTML/text template
+and calls `_send_email()`. The function is async and importable — compatible with the
+endpoint.
+
+**Note on signature:** The task spec assumed
+`send_password_reset_email(to_email, reset_token, username)`, but the actual signature is
+`(to_email, name, reset_link)`. The endpoint implementation uses the actual signature:
+constructs `reset_link` as `{FRONTEND_URL}/reset-password?token={plain_token}` and passes
+`user.full_name or user.email` as `name`. This is correct.
+
+---
+
+### Reset URL path — OK
+
+The endpoint builds:
+```python
+reset_link = f"{frontend_url}/reset-password?token={plain_token}"
+```
+
+The email template embeds `reset_link` as the button href and plain text link.
+The expected frontend route `/reset-password?token=...` matches exactly.
+
+---
+
+### XSS Safety in HTML template — MEDIUM ISSUE
+
+**File:** `email_service.py` lines 74–111 (`PASSWORD_RESET_TEMPLATE_HTML`)
+
+```python
+html_content = PASSWORD_RESET_TEMPLATE_HTML.format(
+    name=name,
+    reset_link=reset_link,
+)
+```
+
+Neither `name` (user's `full_name`) nor `reset_link` is passed through `html.escape()`
+before being interpolated into the HTML template. A malicious `full_name` containing
+`<script>` tags or HTML entities would be injected verbatim into the email body.
+
+`reset_link` is constructed internally from `settings.FRONTEND_URL` + a
+`secrets.token_urlsafe(32)` value — low risk. But `name` comes directly from the
+database `full_name` field, which is user-supplied at registration time.
+
+**Recommended fix (Email-Templates agent):**
+```python
+import html as html_lib
+
+html_content = PASSWORD_RESET_TEMPLATE_HTML.format(
+    name=html_lib.escape(name),
+    reset_link=reset_link,  # URL, not rendered as innerHTML — acceptable
+)
+```
+
+The same fix is needed in `WELCOME_TEMPLATE_HTML.format(name=name, ...)`.
+
+---
+
+### Log fallback — OK
+
+Three-tier fallback is correctly implemented:
+1. n8n webhook (if `N8N_WEBHOOK_URL` is configured)
+2. Resend API (if `RESEND_API_KEY` is configured)
+3. Demo mode: `logger.info("[DEMO] Email küldése: ...")` — always available as last resort
+
+`_sanitize_log()` is applied to all user-supplied values in log calls. No log injection risk.
+
+---
+
+### Találatok (Summary)
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| `send_password_reset_email()` exists | PASS | Correct async function, importable |
+| Signature compatible with endpoint | PASS | Adjusted to actual `(to_email, name, reset_link)` |
+| Reset URL path `/reset-password?token=...` | PASS | Matches endpoint construction |
+| HTML XSS safety (`html.escape`) | MEDIUM | `name` not escaped before HTML interpolation |
+| Log fallback (demo mode + sanitize) | PASS | Demo mode always available; `_sanitize_log()` used |
+
+One medium-severity finding: HTML template interpolation should use `html.escape()` for
+the `name` field to prevent potential XSS in email clients rendering HTML. Not a blocker
+for the password reset flow, but should be addressed before production.
