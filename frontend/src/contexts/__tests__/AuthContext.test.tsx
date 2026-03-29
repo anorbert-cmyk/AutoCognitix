@@ -228,4 +228,84 @@ describe('AuthContext', () => {
 
     consoleError.mockRestore();
   });
+
+  it('should register successfully and set user', async () => {
+    const mockUser = {
+      id: '2',
+      email: 'new@example.com',
+      full_name: 'New User',
+      is_active: true,
+      role: 'user' as const,
+    };
+
+    vi.mocked(authService.register).mockResolvedValue(mockUser);
+    vi.mocked(authService.login).mockResolvedValue({
+      access_token: 'token',
+      refresh_token: 'refresh',
+      token_type: 'bearer',
+    });
+    vi.mocked(authService.getCurrentUser).mockResolvedValue(mockUser);
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.register({
+        email: 'new@example.com',
+        password: 'Password1!',
+        role: 'user',
+      });
+    });
+
+    expect(authService.register).toHaveBeenCalledWith({
+      email: 'new@example.com',
+      password: 'Password1!',
+      role: 'user',
+    });
+    expect(result.current.user).toEqual(mockUser);
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
+  it('should expose refreshUser function', async () => {
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.refreshUser).toBeDefined();
+    expect(typeof result.current.refreshUser).toBe('function');
+  });
+
+  it('should not be authenticated after failed login', async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValue(new Error('Not authenticated'));
+    vi.mocked(authService.login).mockRejectedValue(new Error('Network error'));
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    try {
+      await act(async () => {
+        await result.current.login({ email: 'bad@example.com', password: 'wrong' });
+      });
+    } catch {
+      // expected to throw
+    }
+
+    // After failed login: user stays null, isAuthenticated stays false
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+  });
 });

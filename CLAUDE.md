@@ -220,7 +220,15 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 
 6. **Audit teszt fájl**: `tests/test_sprint_review_audit.py` - a review során talált és javított hibák tesztjei.
 
-7. **Dokumentáció**: Találatok és javítások rögzítése `tasks/lessons.md`-ben.
+7. **Dokumentáció kötelező frissítése** — MINDEN sprint után automatikusan:
+   ```
+   FRISSÍTENDŐ FÁJLOK (párhuzamosan):
+   - CLAUDE.md          → Státusz sor, API Végpontok tábla, Tanulságok szekció, TODO lista
+   - README.md          → Key Features, API Endpoints tábla
+   - tasks/todo.md      → Sprint státusz táblázat, új sprint blokk hozzáadása
+   - tasks/lessons.md   → Új tanulságok és javítások a sprint hibáiból
+   ```
+   **Ez NEM opcionális.** Minden sprint végén automatikusan végrehajtandó, kérés nélkül.
 
 ### Trigger: PARALLEL_REVIEW + bármely másik trigger → Agent Teams mód.
 

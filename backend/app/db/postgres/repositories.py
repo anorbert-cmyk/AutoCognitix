@@ -559,23 +559,29 @@ class DiagnosisSessionRepository(BaseRepository[DiagnosisSession]):
     async def soft_delete(
         self,
         diagnosis_id: UUID,
-        user_id: Optional[UUID] = None,
+        user_id: UUID,
     ) -> bool:
         """
         Soft delete a diagnosis session.
 
+        Ownership is always verified: only the owning user can delete their session.
+
         Args:
             diagnosis_id: UUID of the diagnosis to delete
-            user_id: Optional user ID to verify ownership
+            user_id: User ID — must match the session owner (required for ownership check)
 
         Returns:
-            True if deleted, False if not found
+            True if deleted, False if not found or not owned by user
         """
-        conditions = [DiagnosisSession.id == diagnosis_id]
-        if user_id:
-            conditions.append(DiagnosisSession.user_id == user_id)
-
-        result = await self.db.execute(select(DiagnosisSession).where(and_(*conditions)))
+        result = await self.db.execute(
+            select(DiagnosisSession).where(
+                and_(
+                    DiagnosisSession.id == diagnosis_id,
+                    DiagnosisSession.user_id == user_id,
+                    DiagnosisSession.is_deleted.is_(False),
+                )
+            )
+        )
         session = result.scalar_one_or_none()
 
         if not session:

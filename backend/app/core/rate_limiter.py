@@ -253,8 +253,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         forwarded_for = request.headers.get("X-Forwarded-For")
         if forwarded_for:
             ips = [ip.strip() for ip in forwarded_for.split(",")]
-            # First IP is the client IP when behind a single trusted proxy (Railway)
-            return str(ips[0]) if ips else "unknown"
+            # Select the IP added by the outermost trusted proxy.
+            # With TRUSTED_PROXY_COUNT=N, the real client IP sits at index
+            # len(ips) - N (clamped to 0 to avoid index errors).
+            # This prevents spoofing via client-controlled X-Forwarded-For prefixes.
+            trusted_count = getattr(settings, "TRUSTED_PROXY_COUNT", 1)
+            idx = max(0, len(ips) - trusted_count)
+            return str(ips[idx])
 
         # Check X-Real-IP header
         real_ip = request.headers.get("X-Real-IP")

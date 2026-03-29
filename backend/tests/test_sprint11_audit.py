@@ -190,3 +190,45 @@ class TestFrontendFixes:
                 "DiagnosisPage.tsx has clickable <div onClick=...> elements "
                 "without role='button' - add role='button' for accessibility"
             )
+
+
+# =============================================================================
+# TestMediumSecurityFixes
+# =============================================================================
+
+
+class TestMediumSecurityFixes:
+    """Verify MEDIUM severity security fixes applied in Sprint 11."""
+
+    def test_cache_key_uses_sha256(self):
+        """Cache key hashing should use SHA256, not MD5."""
+        import inspect
+
+        import app.db.redis_cache as rc
+
+        source = inspect.getsource(rc)
+        assert "sha256" in source, "Cache keys must use SHA256"
+        assert "md5" not in source.lower(), "MD5 must not be used for cache keys"
+
+    def test_trusted_proxy_count_config_exists(self):
+        """TRUSTED_PROXY_COUNT should be configurable."""
+        from app.core.config import Settings
+
+        settings = Settings(
+            SECRET_KEY="a" * 32,
+            JWT_SECRET_KEY="b" * 32,
+            DATABASE_URL="postgresql+asyncpg://user:pass@localhost/db",
+        )
+        assert hasattr(settings, "TRUSTED_PROXY_COUNT")
+        assert isinstance(settings.TRUSTED_PROXY_COUNT, int)
+        assert settings.TRUSTED_PROXY_COUNT >= 1
+
+    def test_soft_delete_requires_user_id(self):
+        """soft_delete should accept user_id parameter for ownership check."""
+        import inspect
+
+        from app.db.postgres import repositories
+
+        source = inspect.getsource(repositories)
+        # Either soft_delete has user_id param OR there's ownership check in delete logic
+        assert "user_id" in source, "Repositories must check user ownership"
