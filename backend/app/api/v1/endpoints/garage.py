@@ -161,7 +161,9 @@ async def create_vehicle(
     """Create a new vehicle for the current user."""
     try:
         service = get_vehicle_garage_service()
-        vehicle = await service.create_vehicle(db, str(current_user.id), data.model_dump(exclude_none=True))
+        vehicle = await service.create_vehicle(
+            db, str(current_user.id), data.model_dump(exclude_none=True)
+        )
 
         logger.info(
             "Jármű létrehozva",
@@ -232,7 +234,9 @@ async def update_vehicle(
 
     try:
         service = get_vehicle_garage_service()
-        updated = await service.update_vehicle(db, vehicle_id, str(current_user.id), data.model_dump(exclude_none=True))
+        updated = await service.update_vehicle(
+            db, vehicle_id, str(current_user.id), data.model_dump(exclude_none=True)
+        )
 
         logger.info(
             "Jármű frissítve",
@@ -469,7 +473,9 @@ async def create_reminder(
     """Create a new maintenance reminder."""
     try:
         service = get_vehicle_garage_service()
-        reminder = await service.create_reminder(db, str(current_user.id), data.model_dump(exclude_none=True))
+        reminder = await service.create_reminder(
+            db, str(current_user.id), data.model_dump(exclude_none=True)
+        )
 
         logger.info(
             "Emlékeztető létrehozva",

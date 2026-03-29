@@ -54,7 +54,7 @@ export function ServiceComparisonPage() {
 
   const mapMarkers = useMemo<MapMarker[]>(
     () =>
-      shops
+      (data?.shops ?? [])
         .filter((s) => s.lat && s.lng)
         .map((s) => ({
           id: s.id,
@@ -65,7 +65,7 @@ export function ServiceComparisonPage() {
           address: s.address,
           city: s.city,
         })),
-    [shops]
+    [data?.shops]
   )
 
   const mapCenter = useMemo(
