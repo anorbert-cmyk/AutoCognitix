@@ -9,6 +9,7 @@ Provides endpoints to:
 - Get recalls and complaints from NHTSA
 """
 
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -36,6 +37,17 @@ from app.services.vehicle_service import VehicleService, get_vehicle_service
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+_VEHICLE_PARAM_RE = re.compile(r"^[a-zA-Z0-9\s\-\.]+$")
+
+
+def _validate_vehicle_param(value: str, max_len: int = 50) -> str:
+    """Validate a vehicle make/model path parameter against SSRF and header injection."""
+    if len(value) > max_len:
+        raise HTTPException(status_code=400, detail="Paraméter túl hosszú.")
+    if not _VEHICLE_PARAM_RE.match(value):
+        raise HTTPException(status_code=400, detail="Érvénytelen paraméter.")
+    return value.strip()
 
 
 # =============================================================================
@@ -675,6 +687,9 @@ async def get_vehicle_recalls(
     Raises:
         HTTPException: If NHTSA API request fails
     """
+    make = _validate_vehicle_param(make)
+    model = _validate_vehicle_param(model)
+
     try:
         recalls = await nhtsa_service.get_recalls(make, model, year)
         return recalls
@@ -737,6 +752,9 @@ async def get_vehicle_complaints(
     Raises:
         HTTPException: If NHTSA API request fails
     """
+    make = _validate_vehicle_param(make)
+    model = _validate_vehicle_param(model)
+
     try:
         complaints = await nhtsa_service.get_complaints(make, model, year)
         return complaints
@@ -794,6 +812,9 @@ async def get_vehicle_common_issues(
     Returns:
         Common issues response with list of DTC codes and their frequency
     """
+    make = _validate_vehicle_param(make)
+    model = _validate_vehicle_param(model)
+
     try:
         issues_data = await vehicle_service.get_vehicle_common_issues(
             make=make,

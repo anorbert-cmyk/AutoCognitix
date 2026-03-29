@@ -29,7 +29,7 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.log_sanitizer import sanitize_log
-from app.api.v1.endpoints.auth import get_current_user_from_token
+from app.api.v1.endpoints.auth import require_role
 from app.db.postgres.models import DTCCode as DTCCodeModel
 from app.db.postgres.models import User
 from app.db.postgres.repositories import DTCCodeRepository
@@ -797,7 +797,7 @@ async def create_dtc_code(
     dtc_data: DTCCreate,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(require_role("admin")),
 ):
     """
     Create a new DTC code entry.
@@ -879,7 +879,7 @@ async def bulk_import_dtc_codes(
     import_data: DTCBulkImport,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user_from_token),
+    current_user: User = Depends(require_role("admin")),
 ):
     """
     Bulk import DTC codes.
