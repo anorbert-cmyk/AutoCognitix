@@ -418,12 +418,15 @@ class RAGService:
     """
 
     _instance: Optional["RAGService"] = None
+    _instance_lock: threading.Lock = threading.Lock()
 
     def __new__(cls) -> "RAGService":
-        """Singleton pattern to reuse connections."""
+        """Singleton pattern with double-checked locking (consistent with QdrantService)."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
