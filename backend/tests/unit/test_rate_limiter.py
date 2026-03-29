@@ -618,18 +618,15 @@ class TestCheckRateLimitDependency:
     async def test_allowed_request(self):
         req = _make_request(ip="7.7.7.7")
         resp = _make_response()
-        with patch("app.core.rate_limit._rate_limiter") as mock_rl:
-            mock_rl.check_rate_limit.return_value = RateLimitInfo(
-                allowed=True,
-                retry_after=None,
-                limit=60,
-                remaining=59,
-                reset_seconds=60,
-            )
-            mock_rl.record_request = MagicMock()
+        # The new implementation uses check_rate_limit_with_redis_fallback (Redis-first)
+        # rather than the in-memory _rate_limiter directly.
+        with patch(
+            "app.core.rate_limit.check_rate_limit_with_redis_fallback",
+            new_callable=AsyncMock,
+        ) as mock_fallback:
+            mock_fallback.return_value = (True, 59)
             await check_rate_limit(req, resp)
-        mock_rl.record_request.assert_called_once()
-        assert resp.headers["X-RateLimit-Remaining"] == "58"
+        assert resp.headers["X-RateLimit-Remaining"] == "59"
 
     @pytest.mark.asyncio
     async def test_denied_request_raises_429(self):
@@ -637,14 +634,12 @@ class TestCheckRateLimitDependency:
 
         req = _make_request(ip="7.7.7.7")
         resp = _make_response()
-        with patch("app.core.rate_limit._rate_limiter") as mock_rl:
-            mock_rl.check_rate_limit.return_value = RateLimitInfo(
-                allowed=False,
-                retry_after=30,
-                limit=60,
-                remaining=0,
-                reset_seconds=30,
-            )
+        with patch(
+            "app.core.rate_limit.check_rate_limit_with_redis_fallback",
+            new_callable=AsyncMock,
+        ) as mock_fallback:
+            # First call (per-minute) denied → 429 raised before per-hour call
+            mock_fallback.return_value = (False, 0)
             with pytest.raises(HTTPException) as exc_info:
                 await check_rate_limit(req, resp)
             assert exc_info.value.status_code == 429
@@ -655,17 +650,14 @@ class TestCheckRateLimitDependency:
 
         req = _make_request(ip="8.8.8.8")
         resp = _make_response()
-        with patch("app.core.rate_limit._rate_limiter") as mock_rl:
-            mock_rl.check_rate_limit.return_value = RateLimitInfo(
-                allowed=False,
-                retry_after=None,
-                limit=60,
-                remaining=0,
-                reset_seconds=30,
-            )
+        with patch(
+            "app.core.rate_limit.check_rate_limit_with_redis_fallback",
+            new_callable=AsyncMock,
+        ) as mock_fallback:
+            mock_fallback.return_value = (False, 0)
             with pytest.raises(HTTPException) as exc_info:
                 await check_rate_limit(req, resp)
-            # Retry-After header should NOT be present when retry_after is None
+            # New implementation does not add a Retry-After header
             headers = exc_info.value.headers or {}
             assert "Retry-After" not in headers
 
@@ -673,17 +665,13 @@ class TestCheckRateLimitDependency:
     async def test_stores_info_on_request_state(self):
         req = _make_request(ip="1.1.1.1")
         resp = _make_response()
-        with patch("app.core.rate_limit._rate_limiter") as mock_rl:
-            mock_rl.check_rate_limit.return_value = RateLimitInfo(
-                allowed=True,
-                retry_after=None,
-                limit=60,
-                remaining=59,
-                reset_seconds=60,
-            )
-            mock_rl.record_request = MagicMock()
+        with patch(
+            "app.core.rate_limit.check_rate_limit_with_redis_fallback",
+            new_callable=AsyncMock,
+        ) as mock_fallback:
+            mock_fallback.return_value = (True, 59)
             await check_rate_limit(req, resp)
-        assert req.state.rate_limit_info.remaining == 58
+        assert req.state.rate_limit_info.remaining == 59
 
 
 # ============================================================================
