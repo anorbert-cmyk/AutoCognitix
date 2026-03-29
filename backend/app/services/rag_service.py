@@ -70,6 +70,32 @@ _current_db_session: contextvars.ContextVar[Optional[AsyncSession]] = contextvar
 )
 
 
+async def _run_neomodel_sync(func, *args, **kwargs):  # type: ignore[no-untyped-def]
+    """Run synchronous Neomodel calls in a thread pool executor.
+
+    Neomodel ORM operations are blocking by design.  Calling them directly
+    inside an async context would stall the event loop.  This helper offloads
+    them to the default ``ThreadPoolExecutor`` so the event loop stays free.
+
+    All Neomodel calls in the codebase (``neo4j_models.py``) already use
+    ``asyncio.to_thread()`` directly.  This module-level function is provided
+    as the canonical wrapper for any *future* Neomodel calls that may be added
+    directly inside ``rag_service.py``.
+
+    Usage::
+
+        # BEFORE (blocks event loop):
+        results = DTCNode.nodes.filter(code=dtc_code)
+
+        # AFTER (non-blocking):
+        results = await _run_neomodel_sync(DTCNode.nodes.filter, code=dtc_code)
+    """
+    from functools import partial
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
+
+
 # =============================================================================
 # Enums and Data Classes
 # =============================================================================
