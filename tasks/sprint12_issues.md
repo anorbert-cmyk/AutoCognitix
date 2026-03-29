@@ -435,3 +435,209 @@ The merge-head pattern in 015 is correct. `down_revision` is a tuple pointing to
 | 14 | Downgrade symmetry | MEDIUM | DB-7: `diagnosis_archive` downgrade drops table without explicit index drop |
 | 15 | Composite uniqueness constraints | MEDIUM | DB-9: No unique VIN-per-user constraint in `user_vehicles` |
 | 16 | ORM metadata vs raw index sync | LOW | DB-10: Composite indexes on recall/complaint not reflected in `__table_args__` |
+
+---
+
+## Frontend Security Audit
+**Auditor:** Frontend-Security Specialist
+**Date:** 2026-03-29
+**Branch:** `claude/ralph-loop-global-memory-lFEhR`
+**Files Reviewed:**
+- `frontend/src/services/api.ts`
+- `frontend/src/services/authService.ts`
+- `frontend/src/contexts/AuthContext.tsx`
+- `frontend/src/services/diagnosisService.ts`
+- `frontend/src/hooks/useStreamingDiagnosis.ts`
+- `frontend/index.html`
+- `frontend/nginx.conf`
+- `frontend/nginx.prod.conf`
+- `frontend/vite.config.ts`
+- `frontend/src/config/sentry.ts`
+- `frontend/src/pages/LoginPage.tsx`
+- `frontend/src/pages/ResetPasswordPage.tsx`
+- `frontend/src/components/ui/ErrorState.tsx`
+- `frontend/src/components/ErrorBoundary.tsx`
+
+---
+
+### Summary
+
+8 issues found: 0 CRITICAL, 3 HIGH, 4 MEDIUM, 1 LOW.
+
+---
+
+### Issue #8 — HIGH: Open Redirect — login `from` not validated
+
+**File:** `frontend/src/pages/LoginPage.tsx`, line 21 + line 41
+
+**Description:**
+After successful login the app redirects to the path stored in `location.state.from`:
+
+```typescript
+const from = (location.state as { from?: string })?.from || '/'
+navigate(from, { replace: true })
+```
+
+`location.state` is React Router internal state and cannot carry an arbitrary external URL via a normal link — however, it **can** be set programmatically by any other code in the app (e.g. a compromised dependency, injected script, or a future bad PR). No validation is performed to ensure `from` is a relative path rather than an absolute URL such as `https://evil.example.com`. If `from` contains an external URL, `react-router-dom`'s `navigate()` will attempt to navigate there (depending on version behaviour). The safe fix is to strip any protocol/host and only allow paths that start with `/`.
+
+**Severity:** HIGH — enables phishing via post-login redirect if an attacker can set the location state.
+
+---
+
+### Issue #9 — HIGH: Unvalidated `error.detail` rendered as React child — potential XSS via server responses
+
+**Files:**
+- `frontend/src/contexts/AuthContext.tsx`, lines 97, 116, 144, 156
+- `frontend/src/pages/DiagnosisPage.tsx`, line 166 (`toast.error(err.detail)`)
+- `frontend/src/pages/ForgotPasswordPage.tsx`, line 33
+- `frontend/src/pages/ResetPasswordPage.tsx`, line 129
+- `frontend/src/pages/LoginPage.tsx`, line 77 (`{displayError}`)
+
+**Description:**
+The `ApiError.detail` field is populated directly from `data.detail` in the backend HTTP response body (`api.ts` line 65: `const detail = data?.detail || error.message`). This raw server-provided string is then:
+1. Stored in React state as `error` in `AuthContext`
+2. Rendered directly into JSX as a React text child (e.g. `{displayError}` in LoginPage, `{displayMessage}` in ErrorState)
+3. Passed to `toast.error(err.detail)` in DiagnosisPage
+
+React's default JSX rendering **does** HTML-escape string children, so a direct string-to-JSX path is not an XSS vector in the typical case. **However**, the `toast.error()` implementation in the custom ToastProvider must be verified — if it uses `innerHTML` or `dangerouslySetInnerHTML` internally, it would be a direct XSS vector. Additionally, the pattern of rendering server-controlled strings without sanitisation is fragile: if any future developer wraps `displayError` in `dangerouslySetInnerHTML` for formatting purposes, the XSS surface immediately opens up. A `sanitizeUserContent()` wrapper around all server-sourced strings before render is recommended.
+
+**Severity:** HIGH — currently protected by React's auto-escaping, but the architecture relies on that assumption silently across multiple render sites. Any change to rendering code could introduce XSS.
+
+---
+
+### Issue #10 — HIGH: `LoginResponse` interface includes `refresh_token` as plain string — API contract leakage risk
+
+**File:** `frontend/src/services/api.ts`, lines 439–444
+
+**Description:**
+The exported `LoginResponse` interface declares `refresh_token: string`. The same type exists in `authService.ts` as `AuthTokens.refresh_token`. According to the security design (comments in `authService.ts` lines 65–66 and `getRefreshToken()` line 77: "Refresh token is in httpOnly cookie, not accessible to JS"), tokens are intentionally **not** stored in JavaScript. However, `login()` in `authService.ts` returns the full `AuthTokens` object (line 133: `return response.data`), which the backend populates with `access_token` and `refresh_token` fields in the JSON body (line 132: `setTokens(response.data)`).
+
+If the backend is currently sending tokens in the **response body** AND as httpOnly cookies, the tokens are redundantly exposed in JavaScript-accessible memory. The `AuthTokens` interface and `LoginResponse` should either not include these fields (if the backend sends only cookies and a CSRF token), or they must be explicitly scrubbed from the object after `setTokens()` is called. Currently there is no scrubbing: `authService.login()` returns the token-bearing object to its callers, who could inadvertently log or store it.
+
+Additionally, test code in `diagnosisService.test.ts` (lines 77, 531) still references `localStorage.setItem('access_token', ...)` — suggesting the old localStorage-based token storage pattern was not fully cleaned up from tests, creating a misleading precedent.
+
+**Severity:** HIGH — tokens in JS-accessible memory are accessible to any XSS that executes in the same session (read from response objects before GC); test code preserving the old insecure pattern risks regression.
+
+---
+
+### Issue #11 — MEDIUM: CSP `unsafe-inline` + `unsafe-eval` in production nginx — drastically weakens XSS protection
+
+**File:** `frontend/nginx.prod.conf`, line 117
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; ..."
+```
+
+**Description:**
+Both `'unsafe-inline'` and `'unsafe-eval'` are present in `script-src`. These directives completely disable the XSS-blocking capability of CSP for scripts:
+- `'unsafe-inline'` allows injected `<script>` blocks and `javascript:` handlers.
+- `'unsafe-eval'` allows `eval()`, `Function()`, `setTimeout(string)` — common XSS payload mechanisms.
+
+In practice this renders the CSP header ineffective as a defence-in-depth layer. The development nginx config (`nginx.conf`) has no CSP header at all. The correct approach for Vite/React production builds is to use hash-based or nonce-based CSP, since Vite generates hashed filenames but no inline scripts.
+
+Additionally, `font-src 'self' data:` allows data-URI fonts, which can be abused in some browser exploit chains. The `connect-src 'self' https:` allows connections to any HTTPS host, which is overly permissive (should be locked to the specific backend domain via `VITE_API_URL`).
+
+**Severity:** MEDIUM — CSP exists but provides no practical XSS protection due to `unsafe-inline`/`unsafe-eval`.
+
+---
+
+### Issue #12 — MEDIUM: CSRF token absent on SSE streaming POST requests when `csrfToken` is null at startup
+
+**Files:**
+- `frontend/src/services/diagnosisService.ts`, lines 369–372
+- `frontend/src/services/chatService.ts`, lines 144–148
+
+**Description:**
+Both `streamDiagnosis()` and `streamChatMessage()` attach the CSRF token to fetch headers only if `getCsrfToken()` returns a non-null value:
+
+```typescript
+const csrfToken = getCsrfToken()
+if (csrfToken) {
+  headers['X-CSRF-Token'] = csrfToken
+}
+```
+
+The in-memory `csrfToken` variable is set on login and cleared on logout. However, on a **page reload**, the user may still have valid httpOnly session cookies but `csrfToken` is `null` (it was not persisted anywhere). In this scenario:
+1. The axios interceptor for regular requests also sends no CSRF token (same conditional on line 127 of `api.ts`).
+2. SSE streaming POSTs proceed without any CSRF protection.
+3. If the backend enforces CSRF validation on the `/auth/refresh` endpoint, the silent token refresh on 401 also fails.
+
+The app appears to handle page-reload re-auth via `initAuth()` in `AuthContext` which calls `getCurrentUser()` — if that succeeds it sets `authenticated = true` but does **not** obtain a fresh CSRF token (no `setTokens()` call). The CSRF token is only populated after explicit login or token refresh. This creates a window where authenticated requests are sent without CSRF tokens.
+
+**Severity:** MEDIUM — authenticated state restored after reload but CSRF protection is absent until next 401→refresh cycle.
+
+---
+
+### Issue #13 — MEDIUM: `error.detail` from backend may expose internal stack traces or sensitive field names in production
+
+**Files:**
+- `frontend/src/services/api.ts`, line 65: `const detail = data?.detail || error.message`
+- `frontend/src/components/ui/ErrorState.tsx`, lines 232–291
+
+**Description:**
+For HTTP 400 responses, `ApiError.fromAxiosError()` passes through the raw `detail` string from the backend response body without any filtering. FastAPI's default unhandled validation errors return a `detail` array with field names, types, and input values:
+
+```json
+{"detail": [{"loc": ["body", "vehicle_year"], "msg": "value is not a valid integer", "type": "type_error.integer", "input": "...user_input..."}]}
+```
+
+If the backend passes internal error messages in `detail` (database errors, model paths, etc.), these are rendered directly in the UI. The `ErrorState` component also has a `showDetails` prop defaulting to `import.meta.env.DEV`, but several call sites pass raw `apiError.detail` as the `message` prop (bypassing `showDetails`), so it appears in production regardless.
+
+**Severity:** MEDIUM — information disclosure; exact exposure depends on backend error handling hygiene, which is a cross-layer risk.
+
+---
+
+### Issue #14 — MEDIUM: `isAuthenticated()` in `authService.ts` uses `authenticated` flag OR `getCsrfToken()` — dual-state inconsistency
+
+**File:** `frontend/src/services/authService.ts`, lines 97–99
+
+```typescript
+export function isAuthenticated(): boolean {
+  return authenticated || !!getCsrfToken()
+}
+```
+
+**Description:**
+`isAuthenticated()` returns `true` if either `authenticated === true` OR a CSRF token is present in memory. The `authenticated` flag is set to `true` in `setTokens()` and `false` in `clearTokens()`. However, `AuthContext.isAuthenticated` is computed as `!!user` (line 179), not from `isAuthenticated()`. The two auth signals are independent:
+- A user could have `authenticated=false` (e.g. after a failed refresh that called `clearTokens()`) but still have a stale CSRF token in memory, causing `isAuthenticated()` to return `true`.
+- The `refreshUser()` function in `AuthContext` calls `checkAuth()` (which is `isAuthenticated()`) to guard its execution, so a stale CSRF token could allow an unauthenticated user to trigger a `getCurrentUser()` call.
+
+This inconsistency does not directly cause a security breach but weakens the integrity of the auth state machine.
+
+**Severity:** MEDIUM — auth state inconsistency; potential for authenticated API calls after intended logout in edge cases.
+
+---
+
+### Issue #15 — LOW: `console.warn('Server logout failed...')` in `authService.ts` — minor information disclosure in production
+
+**File:** `frontend/src/services/authService.ts`, line 146
+
+```typescript
+console.warn('Server logout failed, proceeding with local logout')
+```
+
+**Description:**
+The `drop_console` terser option is configured for production builds (`vite.config.ts` line 52: `drop_console: process.env.NODE_ENV === 'production'`). However, `drop_console` only drops `console.log` by default — `console.warn` and `console.error` are typically not dropped unless `pure_funcs` is configured explicitly. Depending on the terser version, this warning may survive into the production bundle and be visible in browser DevTools. While this specific message is low-sensitivity, the pattern of leaving `console.warn/error` in production may cause other more sensitive messages to leak (e.g., `useGarage.ts` uses `console.error('Jármű törlés sikertelen:', error.message)` which could expose error message details).
+
+**Severity:** LOW — minor information leakage risk; individual messages are low-sensitivity but the pattern is a code hygiene issue.
+
+---
+
+### Checklist Results
+
+| # | Check | Result | Severity | Issue |
+|---|-------|--------|----------|-------|
+| 1 | Token storage (JWT localStorage) | PASS | — | Tokens in httpOnly cookies; CSRF token in memory only; no localStorage usage in production code |
+| 2 | XSS — `dangerouslySetInnerHTML` | PASS | — | No `dangerouslySetInnerHTML` usage found anywhere in `frontend/src` |
+| 3 | XSS — server error strings rendered | PARTIAL | HIGH | Issue #9 — `error.detail` rendered without sanitisation; currently safe via React escaping but fragile |
+| 4 | CSRF token on state-changing requests | PARTIAL | MEDIUM | Issue #12 — CSRF absent after page reload until next explicit login/refresh |
+| 5 | Sensitive data in URL params | PASS | — | No tokens in URL params; reset password token is in `?token=` query param (acceptable for email link flows) |
+| 6 | Open redirect | FAIL | HIGH | Issue #8 — `from` in login redirect unvalidated |
+| 7 | CORS / API base URL | PASS | — | `VITE_API_URL` env var used; falls back to `localhost:8000`; no hardcoded production URL |
+| 8 | Error messages exposed to user | PARTIAL | MEDIUM | Issue #13 — raw backend `detail` strings rendered in production |
+| 9 | Dependency injection (mock vs real) | PASS | — | No mock/stub service injection leaking into production builds |
+| 10 | SSE security — token in URL | PASS | — | SSE uses `fetch()` POST with `credentials: 'include'`; CSRF token in header not URL |
+| 11 | CSP headers | FAIL | MEDIUM | Issue #11 — `unsafe-inline` + `unsafe-eval` in production nginx; dev nginx has no CSP |
+| 12 | `access_token`/`refresh_token` in JS | PARTIAL | HIGH | Issue #10 — tokens in response body JSON accessible in memory; test code uses localStorage pattern |
+| 13 | Auth state consistency | PARTIAL | MEDIUM | Issue #14 — dual `isAuthenticated` signals can diverge |
+| 14 | `console.*` leakage | PARTIAL | LOW | Issue #15 — `console.warn`/`console.error` not dropped by terser `drop_console` |
