@@ -281,7 +281,7 @@ class TestEmailAuthIntegration:
         )
 
     def test_forgot_password_creates_reset_token(self):
-        """forgot_password must call create_password_reset_token."""
+        """forgot_password must create a password reset token (hashed) and persist it."""
         # Find the forgot_password function body
         fn_start = self.auth_source.find("async def forgot_password")
         assert fn_start > 0
@@ -290,8 +290,11 @@ class TestEmailAuthIntegration:
             next_fn = len(self.auth_source)
         fn_body = self.auth_source[fn_start:next_fn]
 
-        assert "create_password_reset_token" in fn_body, (
-            "forgot_password must call create_password_reset_token"
+        # Either via a helper or inline: token must be hashed and stored
+        has_token_helper = "create_password_reset_token" in fn_body
+        has_inline_token = "token_hash" in fn_body and ("hashlib" in fn_body or "sha256" in fn_body)
+        assert has_token_helper or has_inline_token, (
+            "forgot_password must create and store a hashed reset token"
         )
 
     def test_forgot_password_does_not_reveal_email_existence(self):
@@ -498,12 +501,12 @@ class TestJWTClaimProtection:
 
         assert '"jti"' in fn_body, "create_access_token must include JTI claim for blacklisting"
 
-    def test_token_blacklist_fail_open(self):
-        """is_token_blacklisted must fail open (return False) when Redis is unavailable.
+    def test_token_blacklist_fail_closed(self):
+        """is_token_blacklisted must fail closed (return True) when Redis is unavailable.
 
-        Rationale: fail-closed would lock out ALL users during Redis outage.
-        Token blacklisting is a secondary defence; JWTs still have expiry.
-        Rate limiting remains fail-closed (that protects against abuse).
+        Rationale: fail-closed prevents potentially blacklisted tokens from being
+        used during a Redis outage. JWTs still expire, so a brief lockout during
+        Redis downtime is acceptable for security. Rate limiting also uses fail-closed.
         """
         fn_start = self.source.find("async def is_token_blacklisted")
         assert fn_start > 0
@@ -514,6 +517,7 @@ class TestJWTClaimProtection:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "return False" in fn_body, (
-            "is_token_blacklisted must fail open (return False) when Redis is unavailable"
+        # fail-closed: on error/unavailability, reject the token (return True)
+        assert "return True" in fn_body, (
+            "is_token_blacklisted must fail closed (return True) when Redis is unavailable"
         )

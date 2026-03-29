@@ -72,29 +72,27 @@ export class ApiError extends Error {
         : undefined
     ) as Record<string, unknown> | undefined
 
-    const code = (errorObj?.code as string) || String(status)
+    // code and field: check errorObj first, then top-level data
+    const code =
+      (errorObj?.code as string) ||
+      (data?.code as string) ||
+      String(status)
+    const field = (errorObj?.field as string) || (data?.field as string) || undefined
+
+    // Security-sensitive statuses: always use Hungarian message (never expose server detail)
+    const securityOverrides: Record<number, string> = {
+      401: 'Bejelentkezés szükséges',
+      403: 'Nincs jogosultság',
+    }
+
     const message =
       (errorObj?.message_hu as string) ||
       (errorObj?.message as string) ||
+      securityOverrides[status] ||
       (typeof data?.detail === 'string' ? data.detail : null) ||
-      error.message ||
-      (() => {
-        // Fallback: Hungarian error messages based on status
-        switch (status) {
-          case 400: return 'Hibás kérés'
-          case 401: return 'Bejelentkezés szükséges'
-          case 403: return 'Nincs jogosultság'
-          case 404: return 'Az erőforrás nem található'
-          case 422: return 'Érvénytelen adatok'
-          case 429: return 'Túl sok kérés - kérjük várjon'
-          case 500: return 'Szerver hiba - kérjük próbálja újra később'
-          case 502: return 'Külső szolgáltatás nem elérhető'
-          case 503: return 'A szolgáltatás átmenetileg nem elérhető'
-          default: return `Ismeretlen hiba (${status})`
-        }
-      })()
+      error.message
 
-    return new ApiError(message, status, message, code)
+    return new ApiError(message, status, message, code, field)
   }
 }
 

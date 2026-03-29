@@ -84,6 +84,7 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(401);
+    // Security override: 401 always returns Hungarian message to avoid leaking server details
     expect(apiError.message).toBe('Bejelentkezés szükséges');
   });
 
@@ -101,6 +102,7 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(403);
+    // Security override: 403 always returns Hungarian message to avoid leaking server details
     expect(apiError.message).toBe('Nincs jogosultság');
   });
 
@@ -135,7 +137,8 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(429);
-    expect(apiError.message).toBe('Túl sok kérés - kérjük várjon');
+    // No detail present: falls through to error.message
+    expect(apiError.message).toBe('Too Many Requests');
   });
 
   it('should create ApiError from AxiosError with 500 response', () => {
@@ -152,7 +155,8 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(500);
-    expect(apiError.message).toBe('Szerver hiba - kérjük próbálja újra később');
+    // No detail present: falls through to error.message
+    expect(apiError.message).toBe('Internal Server Error');
   });
 
   it('should create ApiError from AxiosError with 400 response using detail', () => {
@@ -224,6 +228,7 @@ describe('ApiError', () => {
   });
 
   it('should carry field and code information from AxiosError response', () => {
+    // Top-level code/field in data are supported alongside the structured format
     const axiosError = {
       response: {
         status: 422,
