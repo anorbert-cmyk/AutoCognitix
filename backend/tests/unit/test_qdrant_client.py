@@ -119,8 +119,8 @@ class TestInitializeCollections:
     async def test_creates_missing_collections(self, service):
         # No collections exist yet
         collections_resp = SimpleNamespace(collections=[])
-        service.client.get_collections = MagicMock(return_value=collections_resp)
-        service.client.create_collection = MagicMock()
+        service.client.get_collections = AsyncMock(return_value=collections_resp)
+        service.client.create_collection = AsyncMock()
 
         await service.initialize_collections()
 
@@ -136,8 +136,8 @@ class TestInitializeCollections:
             SimpleNamespace(name="known_issue_embeddings_hu"),
         ]
         collections_resp = SimpleNamespace(collections=existing)
-        service.client.get_collections = MagicMock(return_value=collections_resp)
-        service.client.create_collection = MagicMock()
+        service.client.get_collections = AsyncMock(return_value=collections_resp)
+        service.client.create_collection = AsyncMock()
 
         await service.initialize_collections()
 
@@ -145,14 +145,14 @@ class TestInitializeCollections:
 
     @pytest.mark.asyncio
     async def test_create_collection_connection_error(self, service):
-        service.client.get_collections = MagicMock(side_effect=ConnectionError("refused"))
+        service.client.get_collections = AsyncMock(side_effect=ConnectionError("refused"))
 
         with pytest.raises(QdrantConnectionException):
             await service._create_collection_if_not_exists("test_collection")
 
     @pytest.mark.asyncio
     async def test_create_collection_generic_error(self, service):
-        service.client.get_collections = MagicMock(side_effect=RuntimeError("bad"))
+        service.client.get_collections = AsyncMock(side_effect=RuntimeError("bad"))
 
         with pytest.raises(QdrantException):
             await service._create_collection_if_not_exists("test_collection")
@@ -166,7 +166,7 @@ class TestInitializeCollections:
 class TestUpsertVectors:
     @pytest.mark.asyncio
     async def test_upsert_success(self, service):
-        service.client.upsert = MagicMock()
+        service.client.upsert = AsyncMock()
         ids = ["id1", "id2"]
         vectors = [[0.1] * 768, [0.2] * 768]
         payloads = [{"code": "P0300"}, {"code": "P0301"}]
@@ -183,7 +183,7 @@ class TestUpsertVectors:
 
     @pytest.mark.asyncio
     async def test_upsert_injects_model_version(self, service):
-        service.client.upsert = MagicMock()
+        service.client.upsert = AsyncMock()
         ids = ["id1"]
         vectors = [[0.5] * 768]
         payloads = [{"code": "P0300"}]
@@ -195,7 +195,7 @@ class TestUpsertVectors:
 
     @pytest.mark.asyncio
     async def test_upsert_without_payloads(self, service):
-        service.client.upsert = MagicMock()
+        service.client.upsert = AsyncMock()
         ids = ["id1"]
         vectors = [[0.1] * 768]
 
