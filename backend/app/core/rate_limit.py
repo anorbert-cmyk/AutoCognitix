@@ -1,14 +1,15 @@
 """
 Rate limiting middleware for authentication endpoints.
 
-Uses in-memory storage (for single instance) or Redis (for distributed).
+Uses Redis as the primary backend (shared across all workers/instances).
+Falls back to in-memory storage if Redis is unavailable (single worker only).
 Implements sliding window rate limiting.
 """
 
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, Request, Response, status
 
@@ -228,6 +229,104 @@ class InMemoryRateLimiter:
 # Global rate limiter instance
 _rate_limiter = InMemoryRateLimiter()
 
+# Throttle the Redis-unavailable warning to avoid log spam.
+# Stores the timestamp of the last emitted warning.
+_redis_fallback_warned_at: float = 0.0
+_REDIS_FALLBACK_WARN_INTERVAL = 60.0  # seconds between repeated warnings
+
+
+def _in_memory_rate_limit(
+    key: str,
+    limit: int,
+    window_seconds: int,
+) -> Tuple[bool, int]:
+    """
+    Apply in-memory sliding-window rate limiting.
+
+    This is a single-worker implementation only — counters are NOT shared
+    across multiple processes or instances.  Use only as a fallback when
+    Redis is unavailable.
+
+    Args:
+        key: Unique client identifier.
+        limit: Maximum requests allowed in the window.
+        window_seconds: Length of the sliding window in seconds.
+
+    Returns:
+        (allowed, remaining) tuple.
+    """
+    now = time.time()
+    cutoff = now - window_seconds
+
+    # Reuse the existing per-minute bucket from _rate_limiter internals.
+    # We treat the full window as a generic sliding window here.
+    entries = _rate_limiter._minute_windows.get(key, [])
+    entries = [e for e in entries if e[0] > cutoff]
+
+    count = sum(e[1] for e in entries)
+
+    if count >= limit:
+        # Fail-closed: deny the request
+        _rate_limiter._minute_windows[key] = entries
+        return False, 0
+
+    # Record the new request
+    entries.append((now, 1))
+    _rate_limiter._minute_windows[key] = entries
+    remaining = max(0, limit - count - 1)
+    return True, remaining
+
+
+async def check_rate_limit_with_redis_fallback(
+    key: str,
+    limit: int,
+    window_seconds: int,
+) -> Tuple[bool, int]:
+    """
+    Redis-first rate limiting with in-memory fallback.
+
+    Tries Redis first so that limits are enforced consistently across all
+    workers.  If Redis is unavailable (not connected or circuit open), falls
+    back to in-memory sliding-window limiting for the current worker only and
+    emits a throttled warning so operators are aware of the degraded state.
+
+    Fail-closed policy is preserved in both paths:
+    - Redis path: ``RedisCacheService.check_rate_limit`` returns ``(False, 0)``
+      when Redis is down.
+    - In-memory fallback path: denies the request when the limit is exceeded.
+
+    Args:
+        key: Unique identifier for the client (e.g. IP address, user ID).
+        limit: Maximum requests allowed within ``window_seconds``.
+        window_seconds: Sliding window length in seconds.
+
+    Returns:
+        ``(allowed, remaining)`` — whether the request is permitted and how
+        many requests remain in the current window.
+    """
+    global _redis_fallback_warned_at
+
+    # Import lazily to avoid circular imports at module load time.
+    from app.db import redis_cache as _redis_cache_module
+
+    redis_svc = _redis_cache_module._cache_service
+
+    if redis_svc is not None and redis_svc._connected and not redis_svc.is_circuit_open():
+        # Use Redis-based rate limiter (shared across all workers)
+        allowed, remaining = await redis_svc.check_rate_limit(key, limit, window_seconds)
+        return allowed, remaining
+
+    # Redis unavailable — emit a throttled warning to avoid log spam
+    now = time.time()
+    if now - _redis_fallback_warned_at >= _REDIS_FALLBACK_WARN_INTERVAL:
+        logger.warning(
+            "Redis unavailable for rate limiting — using in-memory fallback "
+            "(not shared across workers)"
+        )
+        _redis_fallback_warned_at = now
+
+    return _in_memory_rate_limit(key, limit, window_seconds)
+
 
 def _set_rate_limit_headers(response: Response, info: RateLimitInfo) -> None:
     """Set standard rate limit headers on a response."""
@@ -269,6 +368,9 @@ async def check_rate_limit(
     """
     FastAPI dependency for rate limiting.
 
+    Uses Redis as the primary rate limit backend (shared across all workers).
+    Falls back to in-memory if Redis is unavailable.
+
     Raises HTTPException if rate limit exceeded.
     Sets X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset headers
     on both successful and rejected responses.
@@ -281,39 +383,62 @@ async def check_rate_limit(
             ...
     """
     client_key = get_client_key(request)
-    info = _rate_limiter.check_rate_limit(client_key, config)
 
-    if not info.allowed:
+    # --- Per-minute window (Redis-first) ---
+    allowed_minute, remaining_minute = await check_rate_limit_with_redis_fallback(
+        key=f"rl:min:{client_key}",
+        limit=config.requests_per_minute,
+        window_seconds=60,
+    )
+
+    if not allowed_minute:
         logger.warning(f"Rate limit exceeded for: {client_key}")
         headers = {
-            "X-RateLimit-Limit": str(info.limit),
+            "X-RateLimit-Limit": str(config.requests_per_minute),
             "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(info.reset_seconds),
+            "X-RateLimit-Reset": "60",
         }
-        if info.retry_after is not None:
-            headers["Retry-After"] = str(info.retry_after)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Túl sok kérés. Kérjük, próbálja újra később.",
             headers=headers,
         )
 
-    # Record the request (decrements remaining by 1)
-    _rate_limiter.record_request(client_key)
+    # --- Per-hour window (Redis-first) ---
+    allowed_hour, remaining_hour = await check_rate_limit_with_redis_fallback(
+        key=f"rl:hr:{client_key}",
+        limit=config.requests_per_hour,
+        window_seconds=3600,
+    )
+
+    if not allowed_hour:
+        logger.warning(f"Hourly rate limit exceeded for: {client_key}")
+        headers = {
+            "X-RateLimit-Limit": str(config.requests_per_hour),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": "3600",
+        }
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Túl sok kérés. Kérjük, próbálja újra később.",
+            headers=headers,
+        )
+
+    # Remaining reflects the stricter of the two windows
+    remaining = min(remaining_minute, remaining_hour)
 
     # Set rate limit headers directly on the response object
-    # The remaining count accounts for this request being recorded
-    updated_info = RateLimitInfo(
+    info = RateLimitInfo(
         allowed=True,
         retry_after=None,
-        limit=info.limit,
-        remaining=max(0, info.remaining - 1),
-        reset_seconds=info.reset_seconds,
+        limit=config.requests_per_minute,
+        remaining=remaining,
+        reset_seconds=60,
     )
-    _set_rate_limit_headers(response, updated_info)
+    _set_rate_limit_headers(response, info)
 
     # Also store on request state for downstream access if needed
-    request.state.rate_limit_info = updated_info
+    request.state.rate_limit_info = info
 
 
 async def check_auth_rate_limit(request: Request, response: Response) -> None:
