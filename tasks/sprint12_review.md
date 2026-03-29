@@ -138,3 +138,96 @@ is consistent. `StreamingCallbacks` interface is correctly implemented by the ho
 | TypeScript types overall | PASS | No type errors expected |
 
 No blocking issues. Two items recommended for the frontend lead to consider.
+
+---
+
+## PasswordReset-DB → PasswordStrength Review
+
+**Reviewer:** PasswordReset-DB Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/core/security.py`
+- `backend/app/api/v1/schemas/auth.py`
+
+---
+
+### Password hashing — PASS
+
+`get_password_hash()` uses `CryptContext(schemes=["bcrypt"], deprecated="auto")`.
+bcrypt is the correct choice. No issues.
+
+---
+
+### Password strength validation — PASS
+
+`validate_password_strength()` in `security.py` enforces:
+- Min 8 characters (`PASSWORD_MIN_LENGTH = 8`)
+- Max 100 characters
+- At least one lowercase letter `[a-z]`
+- At least one uppercase letter `[A-Z]`
+- At least one digit `\d`
+- At least one special character `[!@#$%^&*()\\\_+\-=\[\]{}|;:,.<>?]`
+
+This is comprehensive and exceeds the minimum brief (min 8 char, upper/lowercase, digit).
+
+---
+
+### `ResetPasswordRequest` schema — PASS
+
+`auth.py` line 132–142:
+```python
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+```
+The `ResetPasswordRequest` schema correctly:
+- Defines `new_password` with min/max length constraints at the Field level
+- Applies `validate_password_strength()` via `@field_validator` (uppercase + lowercase + digit + special)
+- Imports `validate_password_strength` from `app.core.security`
+
+No gaps found.
+
+---
+
+### `ForgotPasswordRequest` — PASS
+
+Only requires `email: EmailStr`. No password field needed — correct by design.
+
+---
+
+### `UserCreate` and `UserPasswordUpdate` — PASS
+
+Both also use `validate_password_strength` via `@field_validator`. Consistent across all password-bearing schemas.
+
+---
+
+### `check_password_strength()` vs `validate_password_strength()` — NOTE (not a bug)
+
+There are two password checking utilities:
+- `check_password_strength()` — returns a detailed dict with score (0–5), requirements, and Hungarian feedback. Used for UI feedback; does NOT raise.
+- `validate_password_strength()` — raises `ValueError` on failure; used in Pydantic validators.
+
+The `is_strong` threshold in `check_password_strength()` is `score >= 3` (3 out of 5 requirements met). However, `validate_password_strength()` requires ALL 5 requirements. There is a potential inconsistency: a password with `is_strong=True` from `check_password_strength()` (score=3) may still fail `validate_password_strength()`. This is a design discrepancy worth documenting but is not a security issue — the stricter validator always wins at the API boundary.
+
+**Recommendation:** Document that `check_password_strength()` is for UI hints only, while `validate_password_strength()` is the authoritative gate.
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| `get_password_hash()` uses bcrypt | PASS | CryptContext with bcrypt scheme |
+| `validate_password_strength()` min 8 char | PASS | `PASSWORD_MIN_LENGTH = 8` |
+| uppercase requirement | PASS | `re.search(r"[A-Z]", ...)` |
+| lowercase requirement | PASS | `re.search(r"[a-z]", ...)` |
+| digit requirement | PASS | `re.search(r"\d", ...)` |
+| `ResetPasswordRequest` uses strength validator | PASS | `@field_validator("new_password")` |
+| `check_password_strength` score vs validator threshold | NOTE | Score≥3 vs all-5 required — UI vs API discrepancy, not a security bug |
+
+**No blocking issues.** The PasswordStrength implementation is solid and correctly integrated into `ResetPasswordRequest`.
