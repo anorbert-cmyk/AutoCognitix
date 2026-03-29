@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
+import { ApiError, createLoadingState, setCsrfToken, getCsrfToken } from '../api';
 
 vi.mock('axios', () => {
   const mockAxiosInstance = {
@@ -27,7 +28,6 @@ vi.mock('axios', () => {
 
 describe('ApiError', () => {
   it('should create an ApiError with default values', () => {
-    const { ApiError } = require('../api');
     const error = new ApiError('test error');
     expect(error.message).toBe('test error');
     expect(error.status).toBe(500);
@@ -37,14 +37,12 @@ describe('ApiError', () => {
   });
 
   it('should create an ApiError with custom status', () => {
-    const { ApiError } = require('../api');
     const error = new ApiError('not found', 404, 'Resource not found');
     expect(error.status).toBe(404);
     expect(error.detail).toBe('Resource not found');
   });
 
   it('should create a network error', () => {
-    const { ApiError } = require('../api');
     const error = new ApiError(
       'Network error',
       0,
@@ -58,7 +56,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError without response (network error)', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: undefined,
       message: 'Network Error',
@@ -74,7 +71,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 401 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 401,
@@ -92,7 +88,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 403 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 403,
@@ -110,7 +105,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 422 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 422,
@@ -128,7 +122,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 429 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 429,
@@ -146,7 +139,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 500 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 500,
@@ -164,7 +156,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 400 response using detail', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 400,
@@ -182,7 +173,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 404 response using detail', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 404,
@@ -200,7 +190,6 @@ describe('ApiError', () => {
   });
 
   it('should create ApiError from AxiosError with 502 response', () => {
-    const { ApiError } = require('../api');
     const axiosError = {
       response: {
         status: 502,
@@ -217,8 +206,7 @@ describe('ApiError', () => {
     expect(apiError.message).toBe('Service unavailable');
   });
 
-  it('should create ApiError from AxiosError with unknown status using detail', () => {
-    const { ApiError } = require('../api');
+  it('should create ApiError from AxiosError with unknown status using detail fallback', () => {
     const axiosError = {
       response: {
         status: 418,
@@ -235,8 +223,7 @@ describe('ApiError', () => {
     expect(apiError.message).toBe("I'm a teapot");
   });
 
-  it('should carry field information from AxiosError response', () => {
-    const { ApiError } = require('../api');
+  it('should carry field and code information from AxiosError response', () => {
     const axiosError = {
       response: {
         status: 422,
@@ -252,46 +239,49 @@ describe('ApiError', () => {
     expect(apiError.code).toBe('VALIDATION_ERROR');
     expect(apiError.field).toBe('email');
   });
+
+  it('should be an instance of Error', () => {
+    const error = new ApiError('test');
+    expect(error).toBeInstanceOf(Error);
+  });
 });
 
 describe('createLoadingState', () => {
-  it('should create initial loading state', async () => {
-    const { createLoadingState } = await import('../api');
+  it('should create initial loading state', () => {
     const state = createLoadingState<string>();
     expect(state.data).toBeNull();
     expect(state.isLoading).toBe(false);
     expect(state.error).toBeNull();
   });
 
-  it('should be generic over data type', async () => {
-    const { createLoadingState } = await import('../api');
-    const numState = createLoadingState<number>();
-    const objState = createLoadingState<{ id: string }>();
-    expect(numState.data).toBeNull();
-    expect(objState.data).toBeNull();
+  it('should be generic over data type - number', () => {
+    const state = createLoadingState<number>();
+    expect(state.data).toBeNull();
+    expect(state.isLoading).toBe(false);
+  });
+
+  it('should be generic over data type - object', () => {
+    const state = createLoadingState<{ id: string; name: string }>();
+    expect(state.data).toBeNull();
+    expect(state.error).toBeNull();
   });
 });
 
 describe('setCsrfToken and getCsrfToken', () => {
   beforeEach(() => {
-    // Reset CSRF token before each test
-    const { setCsrfToken } = require('../api');
     setCsrfToken(null);
   });
 
   it('should set and get CSRF token', () => {
-    const { setCsrfToken, getCsrfToken } = require('../api');
     setCsrfToken('test-csrf-token');
     expect(getCsrfToken()).toBe('test-csrf-token');
   });
 
   it('should return null when no CSRF token is set', () => {
-    const { getCsrfToken } = require('../api');
     expect(getCsrfToken()).toBeNull();
   });
 
   it('should clear CSRF token when set to null', () => {
-    const { setCsrfToken, getCsrfToken } = require('../api');
     setCsrfToken('some-token');
     expect(getCsrfToken()).toBe('some-token');
     setCsrfToken(null);
@@ -299,7 +289,6 @@ describe('setCsrfToken and getCsrfToken', () => {
   });
 
   it('should overwrite previous CSRF token', () => {
-    const { setCsrfToken, getCsrfToken } = require('../api');
     setCsrfToken('first-token');
     setCsrfToken('second-token');
     expect(getCsrfToken()).toBe('second-token');
@@ -308,7 +297,6 @@ describe('setCsrfToken and getCsrfToken', () => {
 
 describe('axios mock - api instance creation', () => {
   it('should create axios instance via axios.create (mocked)', () => {
-    // Verify that the mocked axios.create was called during module load
     expect(axios.create).toHaveBeenCalled();
   });
 });
