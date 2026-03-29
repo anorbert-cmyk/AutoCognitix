@@ -1,0 +1,140 @@
+# Sprint 12 SSE Cross-Review Notes
+
+## SSE-Backend → SSE-Frontend Review
+
+**Reviewer:** SSE-Backend Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `frontend/src/hooks/useStreamingDiagnosis.ts`
+- `frontend/src/services/diagnosisService.ts`
+- `frontend/src/types/streaming.ts`
+
+---
+
+### Endpoint URL — OK
+
+`diagnosisService.ts:347`
+```ts
+const url = `${apiBaseUrl}/api/v1/diagnosis/analyze/stream`
+```
+Matches the backend route `POST /api/v1/diagnosis/analyze/stream`. Correct.
+
+---
+
+### SSE Parsing — OK
+
+`parseSSEEvents()` in `diagnosisService.ts` splits on `\r?\n\r?\n` and extracts
+`data:` lines. The backend `_format_sse_event()` emits:
+```
+event: {type}\ndata: {json}\n\n
+```
+The parser correctly ignores the `event:` line and only reads `data:` — this matches
+the backend format. No issue.
+
+---
+
+### `StreamingEvent` interface — MINOR ISSUE
+
+**File:** `frontend/src/types/streaming.ts:26`
+
+```ts
+export interface StreamingEvent {
+  event_type: StreamingEventType;
+  data: Record<string, unknown>;
+  diagnosis_id: string;
+  timestamp: string;
+  progress: number;
+}
+```
+
+The `progress` field is typed as `number` (non-nullable). The backend schema declares
+`progress: Optional[float]` — it can be `None` / `null` for some events. Accessing
+`event.progress` without a null-guard could surface `null` in UI.
+
+**Impact:** Low — the hook updates state with `onProgress` only in
+`useStreamingDiagnosis.ts:100`, and the `progress` field would just be `null` (rendered
+as `0` by default in most progress bars). Not a breaking bug, but the type should be
+`progress: number | null` to be accurate.
+
+**Recommended fix (frontend lead):** Change `progress: number` → `progress: number | null`
+in `streaming.ts` and guard reads as `event.progress ?? 0`.
+
+---
+
+### `onAnalysis` chunk field — POTENTIAL MISMATCH
+
+**File:** `frontend/src/hooks/useStreamingDiagnosis.ts:73`
+
+```ts
+const chunk = typeof eventData.text === 'string' ? eventData.text : ''
+```
+
+The hook reads `eventData.text` to accumulate incremental LLM text. However, the
+backend `analysis` events emitted during the streaming pipeline carry:
+```json
+{"stage": "rag_start", "message": "AI elemzes inditasa..."}
+{"stage": "rag_complete", "message": "AI elemzes kesz", "model_used": "..."}
+```
+Neither contains a `text` field. The hook will always get `chunk = ''` from
+`analysis` events, meaning `fullText` will remain empty throughout the stream.
+
+The final structured result is delivered in the `complete` event's `data` dict
+(not `full_result` as in the `stream_result_as_chunks()` fallback helper in
+`streaming_service.py`). The `complete` event carries:
+```json
+{
+  "diagnosis_id": "...",
+  "confidence_score": 0.82,
+  "urgency_level": "high",
+  "probable_causes_count": 3,
+  "repairs_count": 2,
+  "recalls_count": 0,
+  "complaints_count": 0,
+  "message": "Diagnosztika befejezve"
+}
+```
+This is stored in `fullResult` correctly via `onComplete`.
+
+**Recommendation (frontend lead):**
+- If a live text stream is desired, the backend `analysis` event would need a `text`
+  field added (e.g. from LLM streaming). Currently the backend runs the full RAG
+  pipeline and only streams structured events — not raw LLM tokens.
+- Alternatively, accumulate display text from the structured `cause` and `repair`
+  events instead of `analysis`.
+- This is a design decision; the current behaviour (empty `fullText`, structured result
+  in `fullResult`) still works end-to-end.
+
+---
+
+### `full_result` field — DESIGN NOTE (not a bug)
+
+`streaming_service.py` (newly added file) wraps a completed result dict with:
+```json
+{"chunk": "", "done": true, "full_result": {...}}
+```
+The hook's `StreamChunk` interface (`useStreamingDiagnosis.ts:131`) matches this shape.
+However, the main SSE endpoint uses the structured `complete` event format, not the
+chunk format. The `stream_result_as_chunks()` helper is a reusable utility for simpler
+consumers — it is not currently wired into the main endpoint. No conflict.
+
+---
+
+### TypeScript Types — OK
+
+`DiagnosisFormData` imported from `diagnosisService` and passed to `streamDiagnosis`
+is consistent. `StreamingCallbacks` interface is correctly implemented by the hook.
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| Endpoint URL `/analyze/stream` | PASS | Exact match |
+| SSE data parsing | PASS | Correct `data:` line extraction |
+| `chunk` / `done` / `full_result` fields | PASS | Consistent with streaming_service.py |
+| `StreamingEvent.progress` nullable | MINOR | Should be `number \| null` |
+| `onAnalysis` text accumulation | NOTE | No `text` field in current backend events; `fullText` stays empty |
+| TypeScript types overall | PASS | No type errors expected |
+
+No blocking issues. Two items recommended for the frontend lead to consider.
