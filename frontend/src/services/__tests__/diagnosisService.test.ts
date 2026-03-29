@@ -2,6 +2,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { StreamingCallbacks } from '../../types/streaming';
 
 // =============================================================================
+// Mock the api default export for non-streaming service function tests
+// =============================================================================
+
+vi.mock('../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api')>();
+  return {
+    ...actual,
+    default: {
+      get: vi.fn(),
+      post: vi.fn(),
+      put: vi.fn(),
+      delete: vi.fn(),
+    },
+  };
+});
+
+// =============================================================================
 // Test Helpers
 // =============================================================================
 
