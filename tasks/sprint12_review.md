@@ -569,3 +569,335 @@ backend adds LLM token-level streaming to `analysis` events (future sprint).
 **Conclusion:** No blocking issues. The main endpoint and `streaming_service.py` helper
 use two complementary output shapes — both handled correctly by the frontend.
 The `fullText` feature awaits future LLM token streaming work on the backend.
+
+---
+
+## Qdrant-Async → Neo4j-Thread Review
+
+**Reviewer:** Qdrant-Async Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/services/rag_service.py`
+- `backend/app/db/neo4j_models.py` (supporting context)
+
+---
+
+### Neomodel calls wrapped in `asyncio.to_thread()` — PASS
+
+All Neomodel ORM calls inside `neo4j_models.py` use `asyncio.to_thread()` correctly.
+Every `.nodes.get_or_none()`, `.nodes.filter()`, `.all()`, `.relationship()`, `.save()`,
+and `.connect()` call is awaited via `asyncio.to_thread(...)`. No bare blocking Neomodel
+calls found in async context.
+
+`rag_service.py` accesses Neo4j exclusively through `get_diagnostic_path(code)` (line 553),
+which is an async function in `neo4j_models.py` that wraps all Neomodel calls with
+`asyncio.to_thread()` internally. This is the correct layered pattern.
+
+---
+
+### `_run_neomodel_sync()` helper — PASS (with minor deprecation note)
+
+`rag_service.py` lines 73–96 define a module-level `_run_neomodel_sync()` helper that
+wraps future direct Neomodel calls with `loop.run_in_executor(None, partial(...))`.
+This is the correct canonical wrapper and serves as documentation for future authors.
+
+**Minor finding:** The helper uses `asyncio.get_event_loop()` which is deprecated since
+Python 3.10 and raises a `DeprecationWarning` in Python 3.12. The preferred call is
+`asyncio.get_running_loop()`.
+
+**Recommended fix (low priority):**
+```python
+# line 95 in rag_service.py
+loop = asyncio.get_running_loop()  # replaces asyncio.get_event_loop()
+```
+
+This is safe because `_run_neomodel_sync` is an `async` function and will always be
+called from within a running event loop.
+
+---
+
+### `asyncio.Lock` on RAGService singleton — LOW RISK (pattern inconsistency)
+
+`RAGService.__new__()` uses a basic Python `__new__` singleton pattern without a lock:
+
+```python
+def __new__(cls) -> "RAGService":
+    if cls._instance is None:
+        cls._instance = super().__new__(cls)
+        cls._instance._initialized = False
+    return cls._instance
+```
+
+There is a theoretical TOCTOU race at startup where two coroutines could both pass the
+`cls._instance is None` check before either completes the assignment. In CPython the GIL
+makes this very unlikely for pure attribute assignment, and FastAPI's startup lifecycle
+typically serialises this. However, the pattern is inconsistent with the rest of the
+codebase: both `QdrantService` (in `qdrant_client.py`) and `HungarianEmbeddingService`
+(in `embedding_service.py`) use `threading.Lock` with double-checked locking.
+
+**Recommendation (medium, non-blocking):** Add a module-level `threading.Lock` for
+consistency:
+```python
+import threading
+_rag_lock = threading.Lock()
+
+def __new__(cls) -> "RAGService":
+    if cls._instance is None:
+        with _rag_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+    return cls._instance
+```
+
+---
+
+### No bare `.nodes.filter()` in async context — PASS
+
+Full search of `rag_service.py` found no direct Neomodel ORM calls (`.nodes.filter()`,
+`.nodes.get()`, `.all()`, `.save()`) outside of `asyncio.to_thread()`. All Neo4j access
+is correctly delegated to `neo4j_models.py` functions.
+
+---
+
+### `contextvars.ContextVar` for DB session — PASS
+
+`_current_db_session` (line 68) uses `contextvars.ContextVar` for request-scoped session
+storage. This is the correct coroutine-safe pattern for a singleton service handling
+concurrent async requests. Consistent with Sprint 9/10 lessons in `CLAUDE.md`.
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| Neomodel calls wrapped in `asyncio.to_thread()` | PASS | All calls in `neo4j_models.py` properly wrapped |
+| No bare `.nodes.filter()` in async context | PASS | No direct ORM calls in `rag_service.py` |
+| `_run_neomodel_sync()` helper present | PASS | Canonical wrapper defined |
+| `asyncio.get_event_loop()` deprecation | LOW | Prefer `asyncio.get_running_loop()` in `_run_neomodel_sync()` |
+| `asyncio.Lock` on RAGService singleton | MEDIUM | No lock; `threading.Lock` double-check pattern recommended for consistency |
+| `contextvars.ContextVar` for DB session | PASS | Correct concurrent-safe pattern used |
+
+**No blocking issues.** Two findings for the Neo4j-Thread lead:
+1. **LOW:** Replace `asyncio.get_event_loop()` → `asyncio.get_running_loop()` in `_run_neomodel_sync()`.
+2. **MEDIUM:** Add `threading.Lock` double-checked locking to `RAGService.__new__()` for consistency with other singletons in the codebase.
+
+---
+
+## Email-Templates → PasswordReset-API Review
+
+**Reviewer:** Email-Templates Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/api/v1/endpoints/auth.py` (forgot-password, reset-password routes)
+
+---
+
+### Token generation — PASS
+
+`forgot_password` (line 932):
+```python
+plain_token = secrets.token_urlsafe(32)
+token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
+```
+`secrets.token_urlsafe(32)` produces ~256 bits of entropy. The SHA-256 hash is stored in
+DB — never the raw token. Correct defence against DB leaks.
+
+---
+
+### Token expiry — PASS
+
+```python
+expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+```
+1-hour expiry. The `reset-password` endpoint checks expiry at the DB query level:
+```python
+PasswordResetToken.expires_at > datetime.now(timezone.utc)
+```
+Expired tokens are rejected before they are loaded into memory. Correct.
+
+---
+
+### `send_password_reset_email` is called — PASS
+
+`forgot_password` calls `send_password_reset_email` inside a best-effort `try/except`
+block (line 961-965). Email failure does not block the response — correct design.
+
+---
+
+### Email call signature mismatch with new method — MEDIUM
+
+The endpoint calls the **old** module-level signature:
+```python
+await send_password_reset_email(to_email=..., name=..., reset_link=...)
+```
+This is correct for the current module-level function and works. However, the new
+`EmailService.send_password_reset_email(to_email, reset_token, username, expires_minutes)`
+method added in this sprint constructs the URL internally from `settings.FRONTEND_URL`.
+Two parallel implementations now exist. The endpoint should eventually be updated to use
+the new method directly, removing the `getattr(settings, "FRONTEND_URL", ...)` workaround.
+
+---
+
+### `FRONTEND_URL` getattr workaround — LOW
+
+Line 959: `frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")`
+
+`FRONTEND_URL` is now a proper `Settings` field (added in this sprint). The `getattr`
+fallback is no longer needed — `settings.FRONTEND_URL` can be used directly.
+
+---
+
+### Rate limiting on `/forgot-password` — HIGH
+
+The endpoint has **no per-endpoint rate limit**. Only the global
+`RATE_LIMIT_PER_MINUTE = 60` applies, which is too permissive for a password reset
+endpoint. Without a stricter limit, an attacker can flood the email system with reset
+requests or perform timing-based email enumeration at scale.
+
+**Recommended fix:** Add a tighter rate limit dependency (e.g. 5 requests per IP per
+15 minutes) specifically for this endpoint.
+
+---
+
+### Used-token invalidation — PASS
+
+DB strategy: `reset_record.used = True` committed before response. Prevents replay.
+JWT (legacy) strategy: `await blacklist_token(request_data.token)` after password update.
+Both paths correctly prevent token reuse.
+
+---
+
+### Log injection protection — PASS
+
+All user-controlled values logged via `sanitize_log(...)`. No raw user input in log calls.
+
+---
+
+### XSS in new email method — PASS
+
+The new `EmailService.send_password_reset_email()` method added in this sprint uses
+`html.escape(username)` and `html.escape(reset_url)` — correctly mitigating XSS in the
+new code path.
+
+The legacy `send_password_reset` still uses raw f-string interpolation without
+`html.escape`. That legacy path remains in use by the endpoint until the signature
+migration is completed (MEDIUM item above).
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| Token is `secrets.token_urlsafe(32)` | PASS | ~256-bit entropy |
+| Token stored as SHA-256 hash | PASS | Protects against DB leaks |
+| Expiry checked at DB query level | PASS | `expires_at > now()` in WHERE |
+| Used-token invalidation | PASS | `used=True` / JWT blacklist |
+| `send_password_reset_email` called | PASS | Best-effort try/except block |
+| Email method signature aligned | MEDIUM | Two parallel implementations exist |
+| `FRONTEND_URL` getattr workaround | LOW | Redundant since Settings field added |
+| Rate limiting on `/forgot-password` | HIGH | No per-endpoint limit configured |
+| Log injection protection | PASS | `sanitize_log` used consistently |
+| XSS in new `send_password_reset_email` | PASS | `html.escape` applied correctly |
+
+**One HIGH finding (missing rate limit) and one MEDIUM (dual email method signatures).
+No blocking bugs. Rate limiting should be addressed before production deployment.**
+
+---
+
+## RateLimit-Redis → BE-Tests Review
+
+**Reviewer:** RateLimit-Redis Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/tests/test_sprint12_streaming.py`
+
+---
+
+### SSE streaming endpoint coverage — PASS
+
+`TestStreamingEndpoint` (18 tests) thoroughly checks `diagnosis.py` for:
+- `analyze_vehicle_stream` function presence and route at `/analyze/stream`
+- `text/event-stream` media type + `StreamingResponse` usage
+- `X-Accel-Buffering` and `Cache-Control: no-cache` headers
+- All required event types: `start`, `complete`, `error`, `cause`, `repair`
+- `progress=` tracking in events
+- `DTCValidationError`, `VINDecodeError`, and generic `Exception` handling
+- `_format_sse_event` helper with `event:`/`data:` SSE fields
+- `_save_diagnosis_session` persistence call
+
+Coverage is comprehensive. All checks are source-inspection-based — no app imports, no DB, fully unit-testable. No gaps found.
+
+---
+
+### Streaming schema coverage — PASS
+
+`TestStreamingSchemas` (8 tests) verifies:
+- `StreamingEventType(str, Enum)` with all 8 required values (START, CONTEXT, ANALYSIS, CAUSE, REPAIR, WARNING, COMPLETE, ERROR)
+- `StreamingEvent(BaseModel)` with `progress`, `diagnosis_id`, `timestamp` fields
+- `DiagnosisStreamRequest(BaseModel)` with streaming options
+
+All checks are precise and match the backend schema design.
+
+---
+
+### Rate limiter Redis fallback coverage — MISSING
+
+`test_sprint12_streaming.py` does NOT contain any tests for:
+- `check_rate_limit_with_redis_fallback()` — the new Redis-first function
+- `_in_memory_rate_limit()` — the in-memory fallback
+- Redis fallback warning throttling (`_REDIS_FALLBACK_WARN_INTERVAL`)
+- Fail-closed behaviour when Redis is unavailable and in-memory limit is exceeded
+- Fail-closed behaviour when Redis circuit breaker is open
+
+**Severity:** MEDIUM — the rate limiter changes introduced in this sprint are not covered.
+
+**Recommended additions (source-inspection + mock, no DB needed):**
+
+1. `test_redis_fallback_called_when_redis_none` — mock `_cache_service = None`, assert in-memory path.
+2. `test_redis_fallback_called_when_circuit_open` — mock `is_circuit_open() = True`, assert fallback.
+3. `test_in_memory_rate_limit_allows_within_limit` — call `_in_memory_rate_limit` N < limit times, assert `allowed=True`.
+4. `test_in_memory_rate_limit_denies_at_limit` — call limit+1 times, assert `allowed=False, remaining=0`.
+5. `test_redis_first_used_when_connected` — mock connected Redis, assert `redis_svc.check_rate_limit` is awaited.
+6. `test_fallback_warning_throttled` — call fallback path twice within interval, assert warning logged once.
+
+---
+
+### Email + Auth integration coverage — PASS
+
+`TestEmailAuthIntegration` (11 tests): `send_password_reset_email`, `send_welcome_email` imports,
+`forgot_password` endpoint, anti-enumeration response, `EmailService` singleton, demo mode, HTML
+templates, `ImportError` handling. All checks precise.
+
+---
+
+### Password strength + JWT coverage — PASS
+
+`TestPasswordStrength` (8 tests): min/max length, uppercase, lowercase, digits, special chars, error list.
+`TestJWTClaimProtection` (3 tests): protected critical claims, JTI inclusion, `is_token_blacklisted` fail-open.
+
+---
+
+### Unit test purity — PASS
+
+All test classes use `Path(...).read_text()` only. Zero app imports, zero DB, zero network. Fully portable CI.
+
+---
+
+### Summary
+
+| Area | Coverage | Status |
+|------|----------|--------|
+| SSE streaming endpoint structure | 18 checks | PASS |
+| SSE streaming schemas | 8 checks | PASS |
+| Email + auth integration | 11 checks | PASS |
+| Password strength validation | 8 checks | PASS |
+| JWT claim protection | 3 checks | PASS |
+| Rate limiter Redis fallback (new) | 0 checks | MISSING — MEDIUM |
+| Unit test purity (no DB/imports) | All tests | PASS |
+
+**Conclusion:** Tests are high quality for all sprint 12 features. The only gap is the absence
+of tests for the new `check_rate_limit_with_redis_fallback()` introduced this sprint.
+Recommend adding a `TestRateLimitRedisFallback` class (6 cases above) to cover the new logic.
