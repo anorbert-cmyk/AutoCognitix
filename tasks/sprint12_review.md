@@ -382,3 +382,190 @@ Three-tier fallback is correctly implemented:
 One medium-severity finding: HTML template interpolation should use `html.escape()` for
 the `name` field to prevent potential XSS in email clients rendering HTML. Not a blocker
 for the password reset flow, but should be addressed before production.
+
+---
+
+## Neo4j-Thread → Qdrant-Async Review
+
+**Reviewer:** Neo4j-Thread Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/db/qdrant_client.py`
+- `backend/app/services/rag_service.py` (own file, for context)
+
+---
+
+### AsyncQdrantClient import — PASS
+
+`qdrant_client.py` line 12:
+```python
+from qdrant_client import AsyncQdrantClient
+```
+`AsyncQdrantClient` is the correct async-native client. The sync `QdrantClient` is NOT
+imported anywhere. Full marks.
+
+---
+
+### All public operations are awaited — PASS
+
+Every method in `QdrantService` that touches `self.client` uses `await`:
+
+| Method | Await pattern | Status |
+|--------|---------------|--------|
+| `_create_collection_if_not_exists` | `await self.client.get_collections()` / `await self.client.create_collection(...)` | PASS |
+| `upsert_vectors` | `await self.client.upsert(...)` | PASS |
+| `search` | `await self.client.search(...)` | PASS |
+| `delete_by_user` | `await self.client.delete(...)` | PASS |
+| `delete_collection` | `await self.client.delete_collection(...)` | PASS |
+| `get_collection_info` | `await self.client.get_collection(...)` | PASS |
+
+No blocking calls detected. Event loop will not be stalled.
+
+---
+
+### `connect()` / explicit connect step — N/A (not applicable)
+
+`AsyncQdrantClient` connects lazily on first network call. There is no explicit
+`connect()` step in the Qdrant async client API, so the absence of one is correct
+by design.
+
+---
+
+### Lazy singleton — PASS
+
+`_LazyQdrantProxy` defers `QdrantService.__init__()` (and therefore the
+`AsyncQdrantClient` constructor + network connection) until first actual use.
+The `threading.Lock` protecting singleton creation is appropriate because the
+initialisation path is synchronous; no asyncio.Lock is needed here.
+
+---
+
+### GDPR `delete_by_user` — MINOR NOTE
+
+`delete_by_user` is an `async` method and correctly uses `await self.client.delete(...)`.
+However, the method catches all exceptions with a broad `except Exception` and only logs
+a warning, silently swallowing errors mid-loop. If a deletion fails, the loop continues
+and the caller receives the count of *attempted* collections, not the count of
+*successfully deleted* ones. Not a thread-safety issue, but worth noting for auditability.
+
+**Recommendation:** Track failed collections and include them in the return value or raise
+after the loop if any deletions failed.
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| `AsyncQdrantClient` imported | PASS | Correct async-native client |
+| All search/upsert/create await-ed | PASS | No blocking calls |
+| `connect()` method needed | N/A | Qdrant async client connects lazily |
+| `asyncio.to_thread` misuse on async methods | PASS | None found |
+| Singleton thread safety | PASS | `threading.Lock` for sync init path |
+| `delete_by_user` error handling | MINOR | Silently swallows per-collection errors |
+
+**No blocking issues.** The Qdrant-Async pair's implementation is correct and fully
+async throughout. One minor recommendation for `delete_by_user` error reporting.
+
+---
+
+## SSE-Frontend → SSE-Backend Review
+
+**Reviewer:** SSE-Frontend Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/services/streaming_service.py`
+- `backend/app/api/v1/endpoints/diagnosis.py` (streaming route `/analyze/stream`)
+
+---
+
+### Endpoint URL — PASS
+
+Route registered as `POST /analyze/stream` under the `/api/v1/diagnosis` router prefix.
+Combined path: `/api/v1/diagnosis/analyze/stream`.
+Frontend `diagnosisService.ts` calls `${VITE_API_URL}/api/v1/diagnosis/analyze/stream`. Exact match.
+
+---
+
+### SSE Format — PASS
+
+`_format_sse_event()` emits:
+```
+event: {type}\ndata: {json}\n\n
+```
+This is well-formed SSE. The frontend `parseSSEEvents()` correctly handles `event:` + `data:` lines, extracting only the JSON payload. No mismatch.
+
+---
+
+### `done: true` + `full_result` in final event — DESIGN NOTE (not a bug)
+
+`streaming_service.py` `stream_result_as_chunks()` correctly emits a final event:
+```json
+{"chunk": "", "done": true, "full_result": {...}}
+```
+This matches the `StreamChunk` interface in `useStreamingDiagnosis.ts`.
+
+However, the **main streaming endpoint** (`analyze_vehicle_stream`) does NOT use
+`stream_result_as_chunks()`. Its final event is a `complete`-typed `StreamingEvent`:
+```json
+{"event_type": "complete", "data": {"confidence_score": ..., "diagnosis_id": ..., ...}, "progress": 1.0}
+```
+There is no top-level `done: true` field or `full_result` key in this event.
+
+The hook handles this correctly via `onComplete` → `fullResult`. Consumers using
+`streamDiagnosisGenerator` expecting `event.done === true` will only see it from
+the `stream_result_as_chunks()` helper, not the main endpoint.
+
+**Status:** No blocking issue. Design boundary is intentional; should be documented for future consumers.
+
+---
+
+### `complete` event payload — PASS
+
+The `complete` event at `progress=1.0` carries `confidence_score`, `urgency_level`,
+`probable_causes_count`, `repairs_count`, etc. Frontend `onComplete` stores this in
+`fullResult`. Sufficient for UI rendering.
+
+---
+
+### Semaphore + capacity error — PASS
+
+`MAX_CONCURRENT_STREAMS = 10`, 10-second acquisition timeout. If capacity is full,
+endpoint yields `error` event with `error_type: "capacity"`. Frontend `onError` handles
+all `error` event types uniformly. No gap.
+
+---
+
+### CSRF Token — PASS
+
+`streamDiagnosis` attaches `X-CSRF-Token` header via `getCsrfToken()`. Correct.
+
+---
+
+### `analysis` events — no `text` field (confirmed from backend review)
+
+Both leads independently identified this. Backend `analysis` events carry `stage` + `message`
+fields only — no incremental LLM token streaming. `fullText` in the hook stays empty.
+All actionable data arrives via `cause`, `repair`, and `complete` events.
+
+**Status:** Known limitation, not a bug. `fullText` accumulation will activate once the
+backend adds LLM token-level streaming to `analysis` events (future sprint).
+
+---
+
+### Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| Endpoint URL `/api/v1/diagnosis/analyze/stream` | PASS | Exact match |
+| SSE format `event:/data:/\n\n` | PASS | Correct |
+| `done: true` in main endpoint final event | NOTE | Uses `complete` event type; handled correctly by hook |
+| `full_result` in main endpoint | NOTE | Via `complete.data`; `stream_result_as_chunks()` uses top-level field |
+| Error event capacity handling | PASS | Frontend `onError` catches uniformly |
+| Semaphore protection | PASS | 10 concurrent max, fail-safe error event |
+| CSRF token in streaming request | PASS | `getCsrfToken()` attached |
+| `analysis` text accumulation | NOTE | Confirmed known limitation; no `text` field yet |
+
+**Conclusion:** No blocking issues. The main endpoint and `streaming_service.py` helper
+use two complementary output shapes — both handled correctly by the frontend.
+The `fullText` feature awaits future LLM token streaming work on the backend.
