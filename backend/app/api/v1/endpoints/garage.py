@@ -114,13 +114,17 @@ def _build_reminder_response(reminder: MaintenanceReminder) -> MaintenanceRemind
     description="Az aktuális felhasználó összes járművének listája.",
 )
 async def list_vehicles(
+    skip: int = Query(default=0, ge=0, description="Kihagyandó elemek száma"),
+    limit: int = Query(default=20, ge=1, le=100, description="Visszaadandó elemek max. száma"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_token),
 ) -> UserVehicleListResponse:
     """List all vehicles belonging to the current user."""
     try:
         service = get_vehicle_garage_service()
-        vehicles, total = await service.get_vehicles(db, str(current_user.id))
+        vehicles, total = await service.get_vehicles(
+            db, str(current_user.id), skip=skip, limit=limit
+        )
 
         logger.info(
             "Járművek listázva",
@@ -159,8 +163,15 @@ async def create_vehicle(
     current_user: User = Depends(get_current_user_from_token),
 ) -> UserVehicleResponse:
     """Create a new vehicle for the current user."""
+    MAX_VEHICLES_PER_USER = 20
     try:
         service = get_vehicle_garage_service()
+        _, existing_total = await service.get_vehicles(db, str(current_user.id), skip=0, limit=1)
+        if existing_total >= MAX_VEHICLES_PER_USER:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": f"Maximum {MAX_VEHICLES_PER_USER} jármű tárolható."},
+            )
         vehicle = await service.create_vehicle(
             db, str(current_user.id), data.model_dump(exclude_none=True)
         )
@@ -177,6 +188,8 @@ async def create_vehicle(
 
         return UserVehicleResponse.model_validate(vehicle)  # type: ignore[no-any-return]
 
+    except HTTPException:
+        raise
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -420,7 +433,7 @@ async def list_reminders(
     """List all reminders for the current user."""
     try:
         service = get_vehicle_garage_service()
-        reminders, _ = await service.get_reminders(
+        reminders, total = await service.get_reminders(
             db,
             str(current_user.id),
             vehicle_id=vehicle_id,
@@ -432,7 +445,7 @@ async def list_reminders(
             extra={
                 "user_id": sanitize_log(str(current_user.id)),
                 "vehicle_id": sanitize_log(vehicle_id) if vehicle_id else None,
-                "count": len(reminders),
+                "count": total,
             },
         )
 
@@ -442,7 +455,7 @@ async def list_reminders(
 
         return MaintenanceReminderListResponse(
             reminders=enriched,
-            total=len(enriched),
+            total=total,
             overdue_count=overdue_count,
             urgent_count=urgent_count,
         )

@@ -162,6 +162,24 @@ export async function refreshTokens(): Promise<AuthTokens> {
 }
 
 /**
+ * Restore the CSRF token after a page reload.
+ * Called after getCurrentUser() succeeds to re-populate the in-memory CSRF token.
+ * Silently fails if the refresh endpoint is not available.
+ */
+export async function refreshCsrfToken(): Promise<void> {
+  try {
+    const tokens = await refreshTokens()
+    if (tokens.csrf_token) {
+      setCsrfToken(tokens.csrf_token)
+      authenticated = true
+    }
+  } catch {
+    // Silently ignore — the CSRF token may be missing only on page reload
+    // before a user-initiated action forces a re-login
+  }
+}
+
+/**
  * Get the current authenticated user's profile.
  */
 export async function getCurrentUser(): Promise<User> {
@@ -208,6 +226,7 @@ export const authService = {
   login,
   logout,
   refreshTokens,
+  refreshCsrfToken,
   getCurrentUser,
   updateProfile,
   changePassword,
