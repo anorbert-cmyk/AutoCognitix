@@ -8,13 +8,14 @@ import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import jwt
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_log
 
 # PyJWT encode returns str, decode returns dict
 # passlib CryptContext.verify/hash also return Any
@@ -173,7 +174,7 @@ async def decode_token(token: str, expected_type: str = "access") -> Optional[Di
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
-            leeway=30,
+            leeway=10,
         )
 
         # Validate token type to prevent type confusion attacks
@@ -248,30 +249,30 @@ async def is_token_blacklisted(jti: str) -> bool:
     """
     Check if a token JTI is in the Redis blacklist.
 
+    Fail-closed: if Redis is unavailable or the circuit breaker is open,
+    the token is rejected to prevent use of potentially blacklisted tokens.
+
     Args:
         jti: The JWT ID to check
 
     Returns:
-        True if blacklisted, False otherwise
+        True if blacklisted (or Redis unavailable), False otherwise
     """
     try:
         from app.db.redis_cache import get_cache_service
 
         cache = await get_cache_service()
 
-        # If circuit breaker is open, fail open (accept token)
-        # Rationale: fail-closed locks out ALL users during Redis outage.
-        # Token blacklisting is a secondary defence; JWTs still have expiry.
-        # Rate limiting remains fail-closed (that protects against abuse).
+        # If circuit breaker is open, Redis is considered unavailable — reject token
         if cache.is_circuit_open():
-            logger.warning("Redis circuit breaker open - accepting token (fail-open)")
-            return False
+            logger.warning("Redis circuit breaker open — rejecting token (fail-closed)")
+            return True  # fail-closed
 
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.warning(f"Token blacklist check failed - accepting token (fail-open): {e}")
-        return False
+        logger.error(f"Token blacklist check failed: {sanitize_log(str(e))}")
+        return True  # fail-closed
 
 
 def check_password_strength(password: str) -> Dict[str, Any]:
@@ -315,41 +316,55 @@ def check_password_strength(password: str) -> Dict[str, Any]:
     }
 
 
-def validate_password_strength(password: str) -> Tuple[bool, List[str]]:
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")
+
+
+def validate_password_strength(password: str) -> str:
     """
-    Validate password strength.
+    Validate password strength. Returns password if valid, raises ValueError.
+
+    Requirements:
+    - At least 8 characters
+    - At most 100 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
 
     Args:
         password: The password to validate
 
     Returns:
-        Tuple of (is_valid, list of error messages)
+        The original password if all requirements are met
+
+    Raises:
+        ValueError: If any requirement is not met
     """
-    errors = []
-
-    if len(password) < 8:
-        errors.append("A jelszónak legalább 8 karakter hosszúnak kell lennie")
-
-    if len(password) > 100:
-        errors.append("A jelszó maximum 100 karakter hosszú lehet")
-
-    if not any(c.isupper() for c in password):
-        errors.append("A jelszónak tartalmaznia kell legalább egy nagybetűt")
-
-    if not any(c.islower() for c in password):
-        errors.append("A jelszónak tartalmaznia kell legalább egy kisbetűt")
-
-    if not any(c.isdigit() for c in password):
-        errors.append("A jelszónak tartalmaznia kell legalább egy számot")
-
-    # Check for special characters
-    special_chars = set("!@#$%^&*()_+-=[]{}|;:,.<>?")
-    if not any(c in special_chars for c in password):
-        errors.append(
-            "A jelszónak tartalmaznia kell legalább egy speciális karaktert (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise ValueError(
+            f"A jelszónak legalább {PASSWORD_MIN_LENGTH} karakter hosszúnak kell lennie."
         )
 
-    return len(errors) == 0, errors
+    if len(password) > 100:
+        raise ValueError("A jelszó maximum 100 karakter hosszú lehet.")
+
+    if not re.search(r"[a-z]", password):
+        raise ValueError("A jelszónak tartalmaznia kell legalább egy kisbetűt.")
+
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("A jelszónak tartalmaznia kell legalább egy nagybetűt.")
+
+    if not re.search(r"\d", password):
+        raise ValueError("A jelszónak tartalmaznia kell legalább egy számot.")
+
+    if not re.search(r"[!@#$%^&*()\\_+\-=\[\]{}|;:,.<>?]", password):
+        raise ValueError(
+            "A jelszónak tartalmaznia kell legalább egy speciális karaktert"
+            " (!@#$%^&*()_+-=[]{}|;:,.<>?)."
+        )
+
+    return password
 
 
 def generate_secure_token(length: int = 32) -> str:

@@ -13,7 +13,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import {
   User,
   LoginCredentials,
@@ -28,6 +28,7 @@ import {
   changePassword as changePasswordApi,
   isAuthenticated as checkAuth,
   clearTokens,
+  refreshCsrfToken,
 } from '../services/authService'
 import { ApiError } from '../services/api'
 
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   // Check authentication on mount
   useEffect(() => {
@@ -74,6 +76,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const userData = await getCurrentUser()
         setUser(userData)
+        // Restore CSRF token after page reload (it lives in memory only)
+        await refreshCsrfToken()
       } catch (err) {
         clearTokens()
         setUser(null)
@@ -83,6 +87,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     initAuth()
   }, [])
+
+  // Listen for 401 events dispatched by the axios interceptor.
+  // This lets us nullify user state and redirect via React Router
+  // instead of using window.location.href (which bypasses the router
+  // and leaves stale UI state).
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setUser(null)
+      clearTokens()
+      navigate('/login', { replace: true })
+    }
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
+  }, [navigate])
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     setIsLoading(true)

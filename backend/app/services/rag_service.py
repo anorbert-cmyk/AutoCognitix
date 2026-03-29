@@ -15,6 +15,7 @@ Author: AutoCognitix Team
 import asyncio
 import contextvars
 import hashlib
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -68,6 +69,32 @@ MAX_PROMPT_TOKENS = 8000
 _current_db_session: contextvars.ContextVar[Optional[AsyncSession]] = contextvars.ContextVar(
     "_current_db_session", default=None
 )
+
+
+async def _run_neomodel_sync(func, *args, **kwargs):  # type: ignore[no-untyped-def]
+    """Run synchronous Neomodel calls in a thread pool executor.
+
+    Neomodel ORM operations are blocking by design.  Calling them directly
+    inside an async context would stall the event loop.  This helper offloads
+    them to the default ``ThreadPoolExecutor`` so the event loop stays free.
+
+    All Neomodel calls in the codebase (``neo4j_models.py``) already use
+    ``asyncio.to_thread()`` directly.  This module-level function is provided
+    as the canonical wrapper for any *future* Neomodel calls that may be added
+    directly inside ``rag_service.py``.
+
+    Usage::
+
+        # BEFORE (blocks event loop):
+        results = DTCNode.nodes.filter(code=dtc_code)
+
+        # AFTER (non-blocking):
+        results = await _run_neomodel_sync(DTCNode.nodes.filter, code=dtc_code)
+    """
+    from functools import partial
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 
 # =============================================================================
@@ -391,12 +418,15 @@ class RAGService:
     """
 
     _instance: Optional["RAGService"] = None
+    _instance_lock: threading.Lock = threading.Lock()
 
     def __new__(cls) -> "RAGService":
-        """Singleton pattern to reuse connections."""
+        """Singleton pattern with double-checked locking (consistent with QdrantService)."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
@@ -461,7 +491,14 @@ class RAGService:
             return cast("List[RetrievedItem]", cached)
 
         # Generate embedding for query (async to avoid blocking event loop)
-        query_embedding = await embed_text_async(query, preprocess=True)
+        try:
+            query_embedding = await embed_text_async(query, preprocess=True)
+        except (RuntimeError, Exception) as e:
+            logger.warning(f"Embedding failed, falling back to keyword search: {e}")
+            query_embedding = None
+
+        if query_embedding is None:
+            return []
 
         try:
             results = await self._qdrant.search(
@@ -1019,6 +1056,8 @@ class RAGService:
             )
 
         # Get LLM provider and generate
+        LLM_TIMEOUT_SECONDS = 30
+
         try:
             provider = get_llm_provider()
             llm_config = LLMConfig(
@@ -1026,10 +1065,13 @@ class RAGService:
                 max_tokens=4096,
             )
 
-            response = await provider.generate_with_system(
-                system_prompt=SYSTEM_PROMPT_HU,
-                user_prompt=user_prompt,
-                config=llm_config,
+            response = await asyncio.wait_for(
+                provider.generate_with_system(
+                    system_prompt=SYSTEM_PROMPT_HU,
+                    user_prompt=user_prompt,
+                    config=llm_config,
+                ),
+                timeout=LLM_TIMEOUT_SECONDS,
             )
 
             # Parse the response
@@ -1039,6 +1081,10 @@ class RAGService:
             parsed.raw_response = response.content
 
             return parsed
+
+        except asyncio.TimeoutError:
+            logger.warning(f"LLM call timed out after {LLM_TIMEOUT_SECONDS}s")
+            raise TimeoutError("Az AI elemzés túllépte az időkorlátot. Kérjük próbálja újra.")
 
         except Exception as e:
             logger.error(f"LLM generation error: {e}, falling back to rule-based")
@@ -1170,7 +1216,8 @@ class RAGService:
                 sources.append(
                     {
                         "type": item.source.value,
-                        "title": item.content.get("code") or item.content.get("title", source_name),
+                        "title": (item.content or {}).get("code")
+                        or (item.content or {}).get("title", source_name),
                         "relevance_score": item.score,
                     }
                 )

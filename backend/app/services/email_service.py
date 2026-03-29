@@ -17,6 +17,7 @@ Author: AutoCognitix Team
 """
 
 import asyncio
+import html
 import logging
 import re
 from typing import Optional
@@ -253,35 +254,170 @@ class EmailService:
         name: str,
         reset_link: str,
     ) -> bool:
-        """
-        Send password reset email.
+        """Wrapper — delegates to XSS-safe send_password_reset_email.
 
         Args:
             to_email: Recipient email
             name: User name
-            reset_link: Password reset link
+            reset_link: Full password reset URL (token extracted automatically)
 
         Returns:
             True if successful
         """
-        subject = "AutoCognitix - Jelszo visszaallitas"
+        import urllib.parse
 
-        text_content = PASSWORD_RESET_TEMPLATE_HU.format(
-            name=name,
-            reset_link=reset_link,
-        )
-
-        html_content = PASSWORD_RESET_TEMPLATE_HTML.format(
-            name=name,
-            reset_link=reset_link,
-        )
-
-        return await self._send_email(
+        parsed = urllib.parse.urlparse(reset_link)
+        token = urllib.parse.parse_qs(parsed.query).get("token", [""])[0]
+        return await self.send_password_reset_email(
             to_email=to_email,
-            subject=subject,
-            text_content=text_content,
-            html_content=html_content,
+            reset_token=token,
+            username=name,
         )
+
+    async def send_password_reset_email(
+        self,
+        to_email: str,
+        reset_token: str,
+        username: str,
+        expires_minutes: int = 60,
+    ) -> bool:
+        """Send password reset email with token link.
+
+        Constructs the reset URL from settings.FRONTEND_URL and the provided
+        token.  User-supplied values are HTML-escaped to prevent XSS in the
+        HTML body.
+
+        Args:
+            to_email: Recipient email address
+            reset_token: Opaque reset token (URL-safe)
+            username: Display name shown in the email body
+            expires_minutes: Token validity window in minutes (default 60)
+
+        Returns:
+            True if the email was accepted for delivery
+        """
+        safe_username = html.escape(username)
+        safe_reset_url = html.escape(f"{settings.FRONTEND_URL}/reset-password?token={reset_token}")
+
+        subject = "Jelszó visszaállítás - AutoCognitix"
+
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #1a56db; color: white; padding: 20px; text-align: center; }}
+        .content {{ padding: 20px; background-color: #f9fafb; }}
+        .button {{ display: inline-block; background-color: #1a56db; color: white;
+                   padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0; }}
+        .footer {{ padding: 20px; text-align: center; font-size: 12px; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header"><h1>AutoCognitix</h1></div>
+        <div class="content">
+            <h2>Jelszó visszaállítás</h2>
+            <p>Kedves {safe_username}!</p>
+            <p>Jelszó visszaállítási kérelmet kaptunk a fiókodhoz.</p>
+            <p style="text-align: center;">
+                <a href="{safe_reset_url}" class="button">Jelszó visszaállítása</a>
+            </p>
+            <p>Ez a link <strong>{expires_minutes} percig</strong> érvényes.</p>
+            <p>Ha nem te kérted ezt, hagyd figyelmen kívül ezt az emailt.</p>
+        </div>
+        <div class="footer">
+            <p>AutoCognitix csapat</p>
+            <p>&copy; 2024 AutoCognitix. Minden jog fenntartva.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = f"""Jelszó visszaállítás - AutoCognitix
+
+Kedves {username}!
+
+Jelszó visszaállítási kérelmet kaptunk a fiókodhoz.
+
+Link: {settings.FRONTEND_URL}/reset-password?token={reset_token}
+Érvényes: {expires_minutes} perc
+
+Ha nem te kérted, hagyd figyelmen kívül.
+
+AutoCognitix csapat
+"""
+
+        return await self._send(to_email, subject, html_body, text_body)
+
+    async def _send(self, to: str, subject: str, html_body: str, text: str) -> bool:
+        """Send email. Falls back to logging if SMTP not configured.
+
+        This is a convenience wrapper that delegates to :meth:`_send_email`.
+        When ``settings.SMTP_HOST`` is not set the call is forwarded to the
+        existing priority chain (n8n → Resend → demo/log fallback) so that
+        all existing behaviour is preserved.
+
+        Args:
+            to: Recipient email address
+            subject: Email subject line
+            html_body: HTML email body
+            text: Plain-text email body
+
+        Returns:
+            True if the email was accepted
+        """
+        if not settings.SMTP_HOST:
+            logger.info(
+                "[EMAIL MOCK] To: %s, Subject: %s",
+                _sanitize_log(to),
+                _sanitize_log(subject),
+            )
+            # Delegate to existing pipeline (demo/Resend/n8n)
+            return await self._send_email(
+                to_email=to,
+                subject=subject,
+                text_content=text,
+                html_content=html_body,
+            )
+
+        # Real SMTP implementation (used when SMTP_HOST is configured)
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = self._from_email
+        msg["To"] = to
+        msg.attach(MIMEText(text, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self._smtp_send(msg, to),
+            )
+            logger.info("Email sent via SMTP: %s", _sanitize_log(to))
+            return True
+        except Exception as e:
+            logger.error("SMTP send error (%s): %s", _sanitize_log(to), e)
+            return False
+
+    def _smtp_send(self, msg: object, to: str) -> None:  # type: ignore[override]
+        """Synchronous SMTP send (runs in executor)."""
+        import smtplib
+
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:  # type: ignore[arg-type]
+            smtp.ehlo()
+            smtp.starttls()
+            if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            smtp.sendmail(self._from_email, [to], msg.as_string())  # type: ignore[attr-defined]
 
     async def send_welcome(
         self,
@@ -300,6 +436,11 @@ class EmailService:
         Returns:
             True if successful
         """
+        import html as html_lib
+
+        safe_name = html_lib.escape(name)
+        safe_login_link = html_lib.escape(login_link)
+
         subject = "Udvozoljuk az AutoCognitix-en!"
 
         text_content = WELCOME_TEMPLATE_HU.format(
@@ -308,8 +449,8 @@ class EmailService:
         )
 
         html_content = WELCOME_TEMPLATE_HTML.format(
-            name=name,
-            login_link=login_link,
+            name=safe_name,
+            login_link=safe_login_link,
         )
 
         return await self._send_email(

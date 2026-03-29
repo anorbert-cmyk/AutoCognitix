@@ -710,12 +710,18 @@ async def async_client(app, db_session) -> AsyncGenerator[AsyncClient, None]:
     from unittest.mock import patch as sync_patch
 
     from app.db.postgres.session import get_db
+    from app.core.rate_limit import check_diagnosis_rate_limit
 
     # Override the database dependency
     async def override_get_db():
         yield db_session
 
+    # Bypass rate limiting in tests
+    async def override_rate_limit():
+        return None
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[check_diagnosis_rate_limit] = override_rate_limit
 
     # Mock Redis-dependent security functions so tests work without Redis.
     # Uses an in-memory set to simulate token blacklisting behavior.

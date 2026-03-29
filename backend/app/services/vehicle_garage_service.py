@@ -3,6 +3,7 @@ Vehicle Garage Service — CRUD operations for user vehicles,
 maintenance reminders, and maintenance cost tracking.
 """
 
+import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -37,6 +38,9 @@ class VehicleGarageServiceError(Exception):
         super().__init__(self.message)
 
 
+_garage_service_lock = threading.Lock()
+
+
 class VehicleGarageService:
     """Service for managing user vehicle garage, reminders, and maintenance costs."""
 
@@ -45,8 +49,10 @@ class VehicleGarageService:
 
     def __new__(cls) -> "VehicleGarageService":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with _garage_service_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self) -> None:
@@ -170,6 +176,13 @@ class VehicleGarageService:
         - Diagnosis sessions in last 90 days (+5, max +10)
         Base score: 80
         """
+        # Ownership check — prevent IDOR
+        vehicle = await self.get_vehicle(db, vehicle_id, user_id)
+        if not vehicle:
+            raise VehicleGarageServiceError(
+                f"Vehicle {sanitize_log(vehicle_id)} not found or not owned by user"
+            )
+
         score = 80
         factors: List[Dict[str, Any]] = []
 
@@ -264,6 +277,14 @@ class VehicleGarageService:
     ) -> MaintenanceReminder:
         """Create a new maintenance reminder."""
         try:
+            # Ownership check — prevent IDOR via vehicle_id
+            vehicle_id = data.get("vehicle_id")
+            if vehicle_id:
+                vehicle = await self.get_vehicle(db, str(vehicle_id), user_id)
+                if not vehicle:
+                    raise VehicleGarageServiceError(
+                        f"Vehicle {sanitize_log(str(vehicle_id))} not found or not owned by user"
+                    )
             reminder = MaintenanceReminder(id=str(uuid4()), user_id=user_id, **data)
             db.add(reminder)
             await db.flush()
@@ -380,6 +401,14 @@ class VehicleGarageService:
     ) -> MaintenanceCost:
         """Record a maintenance cost entry."""
         try:
+            # Ownership check — prevent IDOR via vehicle_id
+            vehicle_id = data.get("vehicle_id")
+            if vehicle_id:
+                vehicle = await self.get_vehicle(db, str(vehicle_id), user_id)
+                if not vehicle:
+                    raise VehicleGarageServiceError(
+                        f"Vehicle {sanitize_log(str(vehicle_id))} not found or not owned by user"
+                    )
             cost = MaintenanceCost(id=str(uuid4()), user_id=user_id, **data)
             db.add(cost)
             await db.flush()

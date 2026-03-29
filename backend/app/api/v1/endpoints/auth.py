@@ -33,7 +33,6 @@ from app.core.config import settings
 from app.core.security import (
     blacklist_token,
     create_access_token,
-    create_password_reset_token,
     create_refresh_token,
     decode_token,
     generate_csrf_token,
@@ -883,13 +882,19 @@ async def change_password(
     await repository.update_password(current_user, hashed_password)
     await db.commit()
 
-    logger.info(f"User changed password: {current_user.email}")
+    logger.info(f"Password changed for user_id={sanitize_log(str(current_user.id))}")
+
+    # Invalidate the current access token so the session cannot be reused
+    # with the old password after a successful change.
+    if hasattr(current_user, "jti") and current_user.jti:
+        await blacklist_token(current_user.jti)
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 
 
 @router.post(
     "/forgot-password",
+    status_code=202,
     response_model=ForgotPasswordResponse,
     summary="Elfelejtett jelszó",
     description="""
@@ -910,6 +915,9 @@ async def forgot_password(
     """
     Request password reset token.
 
+    Always returns 202 to prevent user enumeration (no information about
+    whether the email address is registered).
+
     Args:
         request_data: Email address for password reset
         db: Database session
@@ -917,28 +925,60 @@ async def forgot_password(
     Returns:
         Generic message (does not reveal if email exists)
     """
+    import hashlib
+    import secrets
+    from datetime import timedelta
+
     repository = UserRepository(db)
     user = await repository.get_by_email(request_data.email.lower())
 
     if user and user.is_active:
-        # Generate password reset token
-        reset_token = create_password_reset_token(user.email)
-        await repository.set_password_reset_token(user, reset_token)
-        await db.commit()
+        plain_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
-        # Send password reset email (best-effort, don't block the response)
+        # Try to persist using PasswordResetToken model (created by DB migration agent).
+        # Fall back to the legacy per-user token field if the model is not yet available.
+        try:
+            from app.db.postgres.models import PasswordResetToken  # type: ignore[attr-defined]
+
+            reset_record = PasswordResetToken(
+                user_id=user.id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+                used=False,
+            )
+            db.add(reset_record)
+            await db.commit()
+        except (ImportError, AttributeError):
+            logger.error(
+                "PasswordResetToken model not available — password reset service unavailable"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Password reset service temporarily unavailable",
+            )
+
+        # Send password reset email (best-effort, do not block the response)
         try:
             frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
-            reset_link = f"{frontend_url}/reset-password?token={reset_token}"
+            reset_link = f"{frontend_url}/reset-password?token={plain_token}"
             await send_password_reset_email(
                 to_email=user.email,
                 name=user.full_name or user.email,
                 reset_link=reset_link,
             )
         except Exception as e:
-            logger.warning(f"Failed to send password reset email to {user.email[:3]}***@***: {e}")
+            logger.warning(
+                "Failed to send password reset email to %s: %s",
+                sanitize_log(user.email[:3] + "***@***"),
+                e,
+            )
 
-        logger.info(f"Password reset requested for: {user.email[:3]}***@***")
+        logger.info(
+            "Password reset requested for: %s",
+            sanitize_log(user.email[:3] + "***@***"),
+        )
 
     # Always return same response for security (prevents email enumeration)
     return ForgotPasswordResponse()
@@ -965,6 +1005,10 @@ async def reset_password(
     """
     Reset password using reset token.
 
+    Supports two token strategies:
+    1. SHA256-hashed PasswordResetToken DB record (preferred, created by migration agent)
+    2. JWT-based legacy token stored on the User row (fallback)
+
     Args:
         request_data: Reset token and new password
         db: Database session
@@ -972,42 +1016,52 @@ async def reset_password(
     Returns:
         Success message
     """
-    # Verify token
-    payload = await decode_token(request_data.token, expected_type="password_reset")
+    import hashlib
 
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Érvénytelen vagy lejárt visszaállítási token",
-        )
-
-    email = payload.get("sub")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Érvénytelen token",
-        )
+    from sqlalchemy import select
 
     repository = UserRepository(db)
-    user = await repository.get_by_email(email.lower())
+    user = None
 
-    if not user:
+    # --- Strategy 1: PasswordResetToken DB model (sha256 hash) ---
+    try:
+        from app.db.postgres.models import PasswordResetToken  # type: ignore[attr-defined]
+
+        token_hash = hashlib.sha256(request_data.token.encode()).hexdigest()
+        result = await db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.used == False,  # noqa: E712
+                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+            )
+        )
+        reset_record = result.scalar_one_or_none()  # type: ignore[no-any-return]
+
+        if reset_record is not None:
+            user = await repository.get(reset_record.user_id)
+            if user:
+                hashed_password = get_password_hash(request_data.new_password)
+                await repository.update_password(user, hashed_password)
+                reset_record.used = True
+                await db.commit()
+                logger.info(
+                    "Password reset (DB token) completed for: %s",
+                    sanitize_log(user.email[:3] + "***@***"),
+                )
+                return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
+
+    except (ImportError, AttributeError):
+        logger.error("PasswordResetToken model not available — password reset service unavailable")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Felhasználó nem található",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset service temporarily unavailable",
         )
 
-    # Update password
-    hashed_password = get_password_hash(request_data.new_password)
-    await repository.update_password(user, hashed_password)
-    await db.commit()
-
-    # Blacklist the used reset token
-    await blacklist_token(request_data.token)
-
-    logger.info(f"Password reset completed for: {user.email[:3]}***@***")
-
-    return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
+    # PasswordResetToken model available but no matching record found
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Érvénytelen vagy lejárt visszaállítási token",
+    )
 
 
 # =============================================================================

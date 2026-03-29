@@ -49,7 +49,7 @@ export class ApiError extends Error {
     this.isNetworkError = isNetworkError
   }
 
-  static fromAxiosError(error: AxiosError<ApiErrorDetail>): ApiError {
+  static fromAxiosError(error: AxiosError): ApiError {
     if (!error.response) {
       return new ApiError(
         'Hálózati hiba - ellenőrizze az internetkapcsolatot',
@@ -61,44 +61,38 @@ export class ApiError extends Error {
       )
     }
 
-    const { status, data } = error.response
-    const detail = data?.detail || error.message
-    let message: string
+    const { status } = error.response
+    const data = error.response.data as Record<string, unknown> | undefined
 
-    // Hungarian error messages based on status
-    switch (status) {
-      case 400:
-        message = detail || 'Hibás kérés'
-        break
-      case 401:
-        message = 'Bejelentkezés szükséges'
-        break
-      case 403:
-        message = 'Nincs jogosultság'
-        break
-      case 404:
-        message = detail || 'Az erőforrás nem található'
-        break
-      case 422:
-        message = detail || 'Érvénytelen adatok'
-        break
-      case 429:
-        message = 'Túl sok kérés - kérjük várjon'
-        break
-      case 500:
-        message = 'Szerver hiba - kérjük próbálja újra később'
-        break
-      case 502:
-        message = detail || 'Külső szolgáltatás nem elérhető'
-        break
-      case 503:
-        message = 'A szolgáltatás átmenetileg nem elérhető'
-        break
-      default:
-        message = detail || `Ismeretlen hiba (${status})`
+    // Structured error format: { detail: { error: { code, message, message_hu, details } } }
+    const structured = data?.detail as Record<string, unknown> | undefined
+    const errorObj = (
+      structured !== null && typeof structured === 'object' && !Array.isArray(structured)
+        ? structured?.error
+        : undefined
+    ) as Record<string, unknown> | undefined
+
+    // code and field: check errorObj first, then top-level data
+    const code =
+      (errorObj?.code as string) ||
+      (data?.code as string) ||
+      String(status)
+    const field = (errorObj?.field as string) || (data?.field as string) || undefined
+
+    // Security-sensitive statuses: always use Hungarian message (never expose server detail)
+    const securityOverrides: Record<number, string> = {
+      401: 'Bejelentkezés szükséges',
+      403: 'Nincs jogosultság',
     }
 
-    return new ApiError(message, status, detail, data?.code, data?.field)
+    const message =
+      (errorObj?.message_hu as string) ||
+      (errorObj?.message as string) ||
+      securityOverrides[status] ||
+      (typeof data?.detail === 'string' ? data.detail : null) ||
+      error.message
+
+    return new ApiError(message, status, message, code, field)
   }
 }
 
@@ -192,7 +186,9 @@ api.interceptors.response.use(
         processQueue(refreshError)
         // Refresh failed, clear CSRF token and redirect to login
         setCsrfToken(null)
-        window.location.href = '/login'
+        // Dispatch custom event so AuthContext can nullify user state and
+        // redirect via React Router (avoids bypassing the router and stale UI state)
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'))
       } finally {
         isRefreshing = false
       }
@@ -285,6 +281,13 @@ export interface RelatedRecall {
   recall_date?: string
 }
 
+export interface RelatedComplaint {
+  complaint_id?: string
+  summary?: string
+  incident_date?: string
+  severity?: string
+}
+
 export interface DiagnosisResponse {
   id: string
   vehicle_make: string
@@ -301,7 +304,16 @@ export interface DiagnosisResponse {
   total_cost_estimate?: TotalCostEstimate
   root_cause_analysis?: string
   related_recalls?: RelatedRecall[]
-  similar_complaints?: string[]
+  similar_complaints?: RelatedComplaint[] | string[]
+  // Extended fields
+  urgency_level?: string
+  safety_warnings?: string[]
+  diagnostic_steps?: string[]
+  processing_time_ms?: number
+  model_used?: string
+  save_error?: boolean
+  used_fallback?: boolean
+  ai_disclaimer?: string  // EU AI Act
 }
 
 export interface DiagnosisHistoryItem {

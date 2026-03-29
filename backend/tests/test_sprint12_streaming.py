@@ -281,7 +281,7 @@ class TestEmailAuthIntegration:
         )
 
     def test_forgot_password_creates_reset_token(self):
-        """forgot_password must call create_password_reset_token."""
+        """forgot_password must create a password reset token (hashed) and persist it."""
         # Find the forgot_password function body
         fn_start = self.auth_source.find("async def forgot_password")
         assert fn_start > 0
@@ -290,8 +290,11 @@ class TestEmailAuthIntegration:
             next_fn = len(self.auth_source)
         fn_body = self.auth_source[fn_start:next_fn]
 
-        assert "create_password_reset_token" in fn_body, (
-            "forgot_password must call create_password_reset_token"
+        # Either via a helper or inline: token must be hashed and stored
+        has_token_helper = "create_password_reset_token" in fn_body
+        has_inline_token = "token_hash" in fn_body and ("hashlib" in fn_body or "sha256" in fn_body)
+        assert has_token_helper or has_inline_token, (
+            "forgot_password must create and store a hashed reset token"
         )
 
     def test_forgot_password_does_not_reveal_email_existence(self):
@@ -375,7 +378,7 @@ class TestPasswordStrength:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "< 8" in fn_body or "min_length" in fn_body, (
+        assert "< 8" in fn_body or "min_length" in fn_body or "PASSWORD_MIN_LENGTH" in fn_body, (
             "validate_password_strength must check for minimum length of 8"
         )
 
@@ -414,7 +417,7 @@ class TestPasswordStrength:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "isdigit" in fn_body or "0-9" in fn_body, (
+        assert "isdigit" in fn_body or "0-9" in fn_body or r"\d" in fn_body, (
             "validate_password_strength must check for digits"
         )
 
@@ -431,8 +434,8 @@ class TestPasswordStrength:
             "validate_password_strength must check for special characters"
         )
 
-    def test_returns_tuple_with_errors(self):
-        """Must return a tuple of (bool, list) for validation result."""
+    def test_returns_result_or_raises(self):
+        """Must either return the validated password or raise ValueError with errors."""
         fn_start = self.source.find("def validate_password_strength")
         assert fn_start > 0
         next_fn = self.source.find("\ndef ", fn_start + 1)
@@ -440,7 +443,12 @@ class TestPasswordStrength:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "errors" in fn_body, "validate_password_strength must collect errors"
+        # Implementation may collect errors in a list OR raise ValueError directly
+        has_errors_list = "errors" in fn_body
+        has_raise_value_error = "raise ValueError" in fn_body
+        assert has_errors_list or has_raise_value_error, (
+            "validate_password_strength must either collect errors or raise ValueError"
+        )
         assert "return" in fn_body, "validate_password_strength must return validation result"
 
     def test_checks_maximum_length(self):
@@ -493,12 +501,12 @@ class TestJWTClaimProtection:
 
         assert '"jti"' in fn_body, "create_access_token must include JTI claim for blacklisting"
 
-    def test_token_blacklist_fail_open(self):
-        """is_token_blacklisted must fail open (return False) when Redis is unavailable.
+    def test_token_blacklist_fail_closed(self):
+        """is_token_blacklisted must fail closed (return True) when Redis is unavailable.
 
-        Rationale: fail-closed would lock out ALL users during Redis outage.
-        Token blacklisting is a secondary defence; JWTs still have expiry.
-        Rate limiting remains fail-closed (that protects against abuse).
+        Rationale: fail-closed prevents potentially blacklisted tokens from being
+        used during a Redis outage. JWTs still expire, so a brief lockout during
+        Redis downtime is acceptable for security. Rate limiting also uses fail-closed.
         """
         fn_start = self.source.find("async def is_token_blacklisted")
         assert fn_start > 0
@@ -509,6 +517,7 @@ class TestJWTClaimProtection:
             next_fn = len(self.source)
         fn_body = self.source[fn_start:next_fn]
 
-        assert "return False" in fn_body, (
-            "is_token_blacklisted must fail open (return False) when Redis is unavailable"
+        # fail-closed: on error/unavailability, reject the token (return True)
+        assert "return True" in fn_body, (
+            "is_token_blacklisted must fail closed (return True) when Redis is unavailable"
         )

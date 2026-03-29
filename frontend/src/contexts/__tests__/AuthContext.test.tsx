@@ -15,6 +15,7 @@ vi.mock('../../services/authService', () => ({
   changePassword: vi.fn(),
   isAuthenticated: vi.fn(),
   clearTokens: vi.fn(),
+  refreshCsrfToken: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock api

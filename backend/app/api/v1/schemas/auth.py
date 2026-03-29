@@ -4,56 +4,17 @@ Authentication schemas.
 Provides Pydantic models for authentication requests and responses.
 """
 
-import re
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.security import validate_password_strength
 
 # =============================================================================
 # User Role Types
 # =============================================================================
 
 UserRole = Literal["user", "mechanic", "admin"]
-
-
-# =============================================================================
-# Password Validation
-# =============================================================================
-
-
-def validate_password_strength(password: str) -> str:
-    """
-    Validate password strength.
-
-    Requirements:
-    - At least 8 characters
-    - At most 100 characters
-    - At least one uppercase letter
-    - At least one lowercase letter
-    - At least one digit
-    - At least one special character
-    """
-    if len(password) < 8:
-        raise ValueError("A jelszónak legalább 8 karakter hosszúnak kell lennie")
-
-    if len(password) > 100:
-        raise ValueError("A jelszó maximum 100 karakter hosszú lehet")
-
-    if not re.search(r"[A-Z]", password):
-        raise ValueError("A jelszónak tartalmaznia kell legalább egy nagybetűt")
-
-    if not re.search(r"[a-z]", password):
-        raise ValueError("A jelszónak tartalmaznia kell legalább egy kisbetűt")
-
-    if not re.search(r"\d", password):
-        raise ValueError("A jelszónak tartalmaznia kell legalább egy számot")
-
-    if not re.search(r"[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]", password):
-        raise ValueError(
-            "A jelszónak tartalmaznia kell legalább egy speciális karaktert (!@#$%^&*()_+-=[]{}|;:,.<>?)"
-        )
-
-    return password
 
 
 # =============================================================================

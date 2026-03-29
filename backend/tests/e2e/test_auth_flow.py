@@ -720,8 +720,8 @@ class TestForgotPassword:
             json={"email": "forgottest@example.com"},
         )
 
-        # Should return success (doesn't reveal if email exists)
-        assert response.status_code == 200
+        # Should return 202 Accepted (doesn't reveal if email exists)
+        assert response.status_code == 202
 
     @pytest.mark.asyncio
     async def test_forgot_password_with_nonexistent_email(self, async_client, seeded_db):
@@ -731,8 +731,8 @@ class TestForgotPassword:
             json={"email": "nonexistent@example.com"},
         )
 
-        # Should return same response for security
-        assert response.status_code == 200
+        # Should return same 202 response for security (no enumeration)
+        assert response.status_code == 202
 
     @pytest.mark.asyncio
     async def test_forgot_password_response_format(self, async_client, seeded_db):
@@ -742,7 +742,7 @@ class TestForgotPassword:
             json={"email": "anyemail@example.com"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()
         assert "message" in data
 
@@ -1172,9 +1172,13 @@ class TestResetPasswordFlow:
     """Test complete password reset flow."""
 
     @pytest.mark.asyncio
-    async def test_reset_password_with_valid_token(self, async_client, seeded_db):
-        """Test password reset with valid token."""
-        from app.core.security import create_password_reset_token
+    async def test_reset_password_with_valid_token(self, async_client, db_session, seeded_db):
+        """Test password reset with valid DB token."""
+        import hashlib
+        import secrets
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+        from app.db.postgres.models import PasswordResetToken, User
 
         # Register user
         user_data = {
@@ -1183,14 +1187,28 @@ class TestResetPasswordFlow:
         }
         await async_client.post("/api/v1/auth/register", json=user_data)
 
-        # Create reset token (normally sent via email)
-        reset_token = create_password_reset_token("resetvalid@example.com")
+        # Look up the user to get their ID
+        stmt = select(User).where(User.email == "resetvalid@example.com")
+        result = await db_session.execute(stmt)
+        user = result.scalar_one_or_none()
+        assert user is not None
 
-        # Reset password
+        # Create a PasswordResetToken directly in the DB (mimics what forgot-password does)
+        plain_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
+        reset_record = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db_session.add(reset_record)
+        await db_session.commit()
+
+        # Reset password using the plain token
         response = await async_client.post(
             "/api/v1/auth/reset-password",
             json={
-                "token": reset_token,
+                "token": plain_token,
                 "new_password": "NewPassword456!",
             },
         )
@@ -1205,9 +1223,13 @@ class TestResetPasswordFlow:
         assert login_response.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_reset_password_token_single_use(self, async_client, seeded_db):
+    async def test_reset_password_token_single_use(self, async_client, db_session, seeded_db):
         """Test that reset token can only be used once."""
-        from app.core.security import create_password_reset_token
+        import hashlib
+        import secrets
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+        from app.db.postgres.models import PasswordResetToken, User
 
         # Register user
         user_data = {
@@ -1216,24 +1238,38 @@ class TestResetPasswordFlow:
         }
         await async_client.post("/api/v1/auth/register", json=user_data)
 
-        # Create reset token
-        reset_token = create_password_reset_token("resetsingle@example.com")
+        # Look up the user
+        stmt = select(User).where(User.email == "resetsingle@example.com")
+        result = await db_session.execute(stmt)
+        user = result.scalar_one_or_none()
+        assert user is not None
+
+        # Create a PasswordResetToken directly in the DB
+        plain_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(plain_token.encode()).hexdigest()
+        reset_record = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db_session.add(reset_record)
+        await db_session.commit()
 
         # First reset should succeed
         response1 = await async_client.post(
             "/api/v1/auth/reset-password",
             json={
-                "token": reset_token,
+                "token": plain_token,
                 "new_password": "NewPassword456!",
             },
         )
         assert response1.status_code == 200
 
-        # Second reset with same token should fail
+        # Second reset with same token should fail (token marked as used)
         response2 = await async_client.post(
             "/api/v1/auth/reset-password",
             json={
-                "token": reset_token,
+                "token": plain_token,
                 "new_password": "AnotherPassword789!",
             },
         )

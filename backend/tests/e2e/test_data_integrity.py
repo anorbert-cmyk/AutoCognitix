@@ -22,10 +22,10 @@ class TestPostgreSQLDataIntegrity:
     """Test PostgreSQL data integrity constraints."""
 
     @pytest.mark.asyncio
-    async def test_dtc_code_unique_constraint(self, authenticated_client, seeded_db):
+    async def test_dtc_code_unique_constraint(self, admin_client, seeded_db):
         """Test that DTC code is unique in database."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # First create a DTC code
         dtc1 = {
@@ -71,10 +71,10 @@ class TestPostgreSQLDataIntegrity:
         assert response2.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_dtc_code_format_constraint(self, authenticated_client, seeded_db):
+    async def test_dtc_code_format_constraint(self, admin_client, seeded_db):
         """Test that DTC code format is validated."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         invalid_dtcs = [
             {
@@ -104,10 +104,10 @@ class TestPostgreSQLDataIntegrity:
             )
 
     @pytest.mark.asyncio
-    async def test_dtc_category_enum_constraint(self, authenticated_client, seeded_db):
+    async def test_dtc_category_enum_constraint(self, admin_client, seeded_db):
         """Test that DTC category must be valid enum value."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         invalid_dtc = {
             "code": "P5555",
@@ -120,10 +120,10 @@ class TestPostgreSQLDataIntegrity:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_dtc_severity_enum_constraint(self, authenticated_client, seeded_db):
+    async def test_dtc_severity_enum_constraint(self, admin_client, seeded_db):
         """Test that DTC severity must be valid enum value."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         invalid_dtc = {
             "code": "P5556",
@@ -525,10 +525,10 @@ class TestDataPersistence:
     """Test data persistence across operations."""
 
     @pytest.mark.asyncio
-    async def test_created_dtc_persists(self, authenticated_client, seeded_db):
+    async def test_created_dtc_persists(self, admin_client, seeded_db):
         """Test that created DTC code persists."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # Create DTC
         dtc = {
@@ -590,10 +590,10 @@ class TestBulkOperationIntegrity:
     """Test data integrity during bulk operations."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_atomic(self, authenticated_client, seeded_db):
+    async def test_bulk_import_atomic(self, admin_client, seeded_db):
         """Test that bulk import operations maintain atomicity."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -627,10 +627,10 @@ class TestBulkOperationIntegrity:
                 assert check_response.status_code in [200, 404]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_error_handling(self, authenticated_client, seeded_db):
+    async def test_bulk_import_error_handling(self, admin_client, seeded_db):
         """Test that bulk import handles errors without corrupting data."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # First create a code
         await client.post(
@@ -681,10 +681,10 @@ class TestSearchIndexConsistency:
     """Test search index consistency."""
 
     @pytest.mark.asyncio
-    async def test_newly_created_dtc_searchable(self, authenticated_client, seeded_db):
+    async def test_newly_created_dtc_searchable(self, admin_client, seeded_db):
         """Test that newly created DTC is immediately searchable."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # Create new DTC
         dtc = {
@@ -799,10 +799,10 @@ class TestDataValidationConsistency:
     """Test that validation is consistent across endpoints."""
 
     @pytest.mark.asyncio
-    async def test_dtc_code_validation_consistent(self, authenticated_client, seeded_db):
+    async def test_dtc_code_validation_consistent(self, admin_client, seeded_db):
         """Test that DTC code validation is consistent across endpoints."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         invalid_code = "X1234"
 
@@ -970,10 +970,10 @@ class TestConcurrentDataAccess:
     """Test concurrent data access scenarios."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_dtc_creation(self, authenticated_client, seeded_db):
+    async def test_concurrent_dtc_creation(self, admin_client, seeded_db):
         """Test DTC creation with same code is prevented."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc_data = {
             "code": "P9500",
@@ -1020,10 +1020,10 @@ class TestNullHandling:
     """Test null value handling across the system."""
 
     @pytest.mark.asyncio
-    async def test_null_description_hu_handled(self, authenticated_client, seeded_db):
+    async def test_null_description_hu_handled(self, admin_client, seeded_db):
         """Test that null Hungarian description is handled."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P9600",
@@ -1044,10 +1044,10 @@ class TestNullHandling:
             assert data["description_hu"] in [None, ""]
 
     @pytest.mark.asyncio
-    async def test_empty_lists_handled(self, authenticated_client, seeded_db):
+    async def test_empty_lists_handled(self, admin_client, seeded_db):
         """Test that empty lists are handled correctly."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P9601",
@@ -1075,10 +1075,10 @@ class TestDataSanitization:
     """Test data sanitization and XSS prevention."""
 
     @pytest.mark.asyncio
-    async def test_html_in_description_escaped(self, authenticated_client, seeded_db):
+    async def test_html_in_description_escaped(self, admin_client, seeded_db):
         """Test that HTML in descriptions is properly handled."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P9700",

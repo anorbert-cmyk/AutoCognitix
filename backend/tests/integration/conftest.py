@@ -512,12 +512,18 @@ def mock_authenticated_user():
 async def async_client(app, db_session) -> AsyncGenerator[AsyncClient, None]:
     """Create async HTTP client for testing."""
     from app.db.postgres.session import get_db
+    from app.core.rate_limit import check_diagnosis_rate_limit
 
     # Override the database dependency
     async def override_get_db():
         yield db_session
 
+    # Bypass rate limiting in tests
+    async def override_rate_limit():
+        return None
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[check_diagnosis_rate_limit] = override_rate_limit
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client

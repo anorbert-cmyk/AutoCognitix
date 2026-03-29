@@ -555,10 +555,10 @@ class TestDTCCreateEndpoint:
     """Test POST /api/v1/dtc endpoint."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_code(self, authenticated_client, seeded_db):
+    async def test_create_dtc_code(self, admin_client, seeded_db):
         """Test creating a new DTC code."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         new_dtc = {
             "code": "P1234",
@@ -576,10 +576,10 @@ class TestDTCCreateEndpoint:
         assert data["code"] == "P1234"
 
     @pytest.mark.asyncio
-    async def test_create_duplicate_dtc_fails(self, authenticated_client, seeded_db):
+    async def test_create_duplicate_dtc_fails(self, admin_client, seeded_db):
         """Test that creating duplicate DTC code fails."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         duplicate_dtc = {
             "code": "P0101",  # Already exists in seeded data
@@ -593,10 +593,10 @@ class TestDTCCreateEndpoint:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_create_dtc_validates_code_format(self, authenticated_client, seeded_db):
+    async def test_create_dtc_validates_code_format(self, admin_client, seeded_db):
         """Test that create validates DTC code format."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         invalid_dtc = {
             "code": "X999",  # Invalid prefix
@@ -611,10 +611,10 @@ class TestDTCCreateEndpoint:
         assert response.status_code in [400, 422]
 
     @pytest.mark.asyncio
-    async def test_create_dtc_requires_description(self, authenticated_client, seeded_db):
+    async def test_create_dtc_requires_description(self, admin_client, seeded_db):
         """Test that create requires description."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         incomplete_dtc = {
             "code": "P5555",
@@ -631,10 +631,10 @@ class TestDTCBulkImportEndpoint:
     """Test POST /api/v1/dtc/bulk endpoint."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_multiple_codes(self, authenticated_client, seeded_db):
+    async def test_bulk_import_multiple_codes(self, admin_client, seeded_db):
         """Test bulk importing multiple DTC codes."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -662,10 +662,10 @@ class TestDTCBulkImportEndpoint:
         assert data["created"] >= 0
 
     @pytest.mark.asyncio
-    async def test_bulk_import_skips_existing_by_default(self, authenticated_client, seeded_db):
+    async def test_bulk_import_skips_existing_by_default(self, admin_client, seeded_db):
         """Test that bulk import skips existing codes by default."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -686,10 +686,10 @@ class TestDTCBulkImportEndpoint:
         assert data["skipped"] >= 1
 
     @pytest.mark.asyncio
-    async def test_bulk_import_can_overwrite(self, authenticated_client, seeded_db):
+    async def test_bulk_import_can_overwrite(self, admin_client, seeded_db):
         """Test that bulk import can overwrite existing codes."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -710,10 +710,10 @@ class TestDTCBulkImportEndpoint:
         assert data["updated"] >= 0 or data["created"] >= 0
 
     @pytest.mark.asyncio
-    async def test_bulk_import_returns_summary(self, authenticated_client, seeded_db):
+    async def test_bulk_import_returns_summary(self, admin_client, seeded_db):
         """Test that bulk import returns summary."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -865,10 +865,10 @@ class TestDTCUpdateEndpoint:
     """Test DTC code update functionality."""
 
     @pytest.mark.asyncio
-    async def test_update_dtc_description(self, authenticated_client, seeded_db):
+    async def test_update_dtc_description(self, admin_client, seeded_db):
         """Test updating DTC description."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # First create a DTC
         dtc = {
@@ -955,10 +955,10 @@ class TestDTCHungarianContent:
     """Test Hungarian content handling in DTC operations."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_with_hungarian_description(self, authenticated_client, seeded_db):
+    async def test_create_dtc_with_hungarian_description(self, admin_client, seeded_db):
         """Test creating DTC with Hungarian description."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P6100",
@@ -1026,10 +1026,10 @@ class TestDTCBulkOperations:
     """Test DTC bulk operation edge cases."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_empty_list(self, authenticated_client, seeded_db):
+    async def test_bulk_import_empty_list(self, admin_client, seeded_db):
         """Test bulk import with empty list."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [],
@@ -1042,10 +1042,10 @@ class TestDTCBulkOperations:
         assert response.status_code in [201, 422]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_with_invalid_codes(self, authenticated_client, seeded_db):
+    async def test_bulk_import_with_invalid_codes(self, admin_client, seeded_db):
         """Test bulk import with some invalid codes."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
@@ -1071,10 +1071,10 @@ class TestDTCBulkOperations:
         assert response.status_code in [200, 201, 422]
 
     @pytest.mark.asyncio
-    async def test_bulk_import_large_batch(self, authenticated_client, seeded_db):
+    async def test_bulk_import_large_batch(self, admin_client, seeded_db):
         """Test bulk import with larger batch."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         codes = [
             {
@@ -1169,10 +1169,10 @@ class TestDTCManufacturerSpecific:
     """Test manufacturer-specific DTC handling."""
 
     @pytest.mark.asyncio
-    async def test_create_manufacturer_specific_code(self, authenticated_client, seeded_db):
+    async def test_create_manufacturer_specific_code(self, admin_client, seeded_db):
         """Test creating manufacturer-specific DTC code."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P1234",  # Manufacturer-specific range
@@ -1191,10 +1191,10 @@ class TestDTCManufacturerSpecific:
         assert data["code"] == "P1234"
 
     @pytest.mark.asyncio
-    async def test_generic_vs_manufacturer_flag(self, authenticated_client, seeded_db):
+    async def test_generic_vs_manufacturer_flag(self, admin_client, seeded_db):
         """Test is_generic flag handling."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         # Create generic code
         generic_dtc = {
@@ -1219,10 +1219,10 @@ class TestDTCDiagnosticSteps:
     """Test DTC diagnostic steps handling."""
 
     @pytest.mark.asyncio
-    async def test_create_dtc_with_diagnostic_steps(self, authenticated_client, seeded_db):
+    async def test_create_dtc_with_diagnostic_steps(self, admin_client, seeded_db):
         """Test creating DTC with diagnostic steps."""
-        client = authenticated_client["client"]
-        headers = authenticated_client["headers"]
+        client = admin_client["client"]
+        headers = admin_client["headers"]
 
         dtc = {
             "code": "P6200",

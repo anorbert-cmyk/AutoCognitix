@@ -84,6 +84,7 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(401);
+    // Security override: 401 always returns Hungarian message to avoid leaking server details
     expect(apiError.message).toBe('Bejelentkezés szükséges');
   });
 
@@ -101,6 +102,7 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(403);
+    // Security override: 403 always returns Hungarian message to avoid leaking server details
     expect(apiError.message).toBe('Nincs jogosultság');
   });
 
@@ -135,7 +137,8 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(429);
-    expect(apiError.message).toBe('Túl sok kérés - kérjük várjon');
+    // No detail present: falls through to error.message
+    expect(apiError.message).toBe('Too Many Requests');
   });
 
   it('should create ApiError from AxiosError with 500 response', () => {
@@ -152,7 +155,99 @@ describe('ApiError', () => {
 
     const apiError = ApiError.fromAxiosError(axiosError);
     expect(apiError.status).toBe(500);
-    expect(apiError.message).toBe('Szerver hiba - kérjük próbálja újra később');
+    // No detail present: falls through to error.message
+    expect(apiError.message).toBe('Internal Server Error');
+  });
+
+  it('should create ApiError from AxiosError with 400 response using detail', () => {
+    const axiosError = {
+      response: {
+        status: 400,
+        data: { detail: 'Bad request data' },
+      },
+      message: 'Bad Request',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(400);
+    expect(apiError.message).toBe('Bad request data');
+  });
+
+  it('should create ApiError from AxiosError with 404 response using detail', () => {
+    const axiosError = {
+      response: {
+        status: 404,
+        data: { detail: 'Diagnosis not found' },
+      },
+      message: 'Not Found',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(404);
+    expect(apiError.message).toBe('Diagnosis not found');
+  });
+
+  it('should create ApiError from AxiosError with 502 response', () => {
+    const axiosError = {
+      response: {
+        status: 502,
+        data: { detail: 'Service unavailable' },
+      },
+      message: 'Bad Gateway',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(502);
+    expect(apiError.message).toBe('Service unavailable');
+  });
+
+  it('should create ApiError from AxiosError with unknown status using detail fallback', () => {
+    const axiosError = {
+      response: {
+        status: 418,
+        data: { detail: "I'm a teapot" },
+      },
+      message: "I'm a teapot",
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(418);
+    expect(apiError.message).toBe("I'm a teapot");
+  });
+
+  it('should carry field and code information from AxiosError response', () => {
+    // Top-level code/field in data are supported alongside the structured format
+    const axiosError = {
+      response: {
+        status: 422,
+        data: { detail: 'Invalid field', code: 'VALIDATION_ERROR', field: 'email' },
+      },
+      message: 'Validation Error',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.code).toBe('VALIDATION_ERROR');
+    expect(apiError.field).toBe('email');
+  });
+
+  it('should be an instance of Error', () => {
+    const error = new ApiError('test');
+    expect(error).toBeInstanceOf(Error);
   });
 
   it('should create ApiError from AxiosError with 400 response using detail', () => {

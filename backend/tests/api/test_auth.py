@@ -632,20 +632,20 @@ class TestForgotPassword:
             json={"email": test_user.email},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()
         assert "message" in data
 
     @pytest.mark.asyncio
     async def test_forgot_password_nonexistent_email_returns_200(self, async_client: AsyncClient):
-        """Test forgot password with nonexistent email returns 200 (security)."""
+        """Test forgot password with nonexistent email returns 202 (security)."""
         # For security, should not reveal if email exists
         response = await async_client.post(
             "/api/v1/auth/forgot-password",
             json={"email": "nonexistent@example.com"},
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
         data = response.json()
         assert "message" in data
 
