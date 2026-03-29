@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_HOUR: int = 1000
+    TRUSTED_PROXY_COUNT: int = 1  # Number of trusted reverse proxies (Railway = 1)
 
 
 @lru_cache

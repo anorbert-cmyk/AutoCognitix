@@ -241,14 +241,19 @@ def get_client_key(request: Request) -> str:
     Get unique client identifier from request.
 
     Uses IP address, with X-Forwarded-For header support for proxies.
+    Reads TRUSTED_PROXY_COUNT from settings to determine how many proxies
+    are trusted, preventing X-Forwarded-For spoofing by malicious clients.
     """
     # Check for X-Forwarded-For header (common with reverse proxies)
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        # Take the last IP - the trusted reverse proxy (Railway) appends the real
-        # client IP; earlier entries can be spoofed by the client.
         ips = [ip.strip() for ip in forwarded_for.split(",")]
-        client_ip = ips[-1]
+        # Select the IP added by the outermost trusted proxy.
+        # With TRUSTED_PROXY_COUNT=N, the real client IP sits at index
+        # len(ips) - N (clamped to 0 to avoid index errors).
+        trusted_count = getattr(settings, "TRUSTED_PROXY_COUNT", 1)
+        idx = max(0, len(ips) - trusted_count)
+        client_ip = ips[idx]
     else:
         # Fall back to direct client IP
         client_ip = str(request.client.host) if request.client else "unknown"
