@@ -38,6 +38,7 @@ def service() -> RedisCacheService:
     svc._circuit_open = False
     svc._failure_count = 0
     svc._client = AsyncMock()
+    svc._incr_expire_script = AsyncMock(return_value=[1, True])
     return svc
 
 
@@ -557,14 +558,14 @@ class TestEmbeddingCache:
         ) as mock_get:
             result = await service.get_embedding("motor hibakod")
             assert result == [0.1, 0.2]
-            expected_hash = hashlib.md5(b"motor hibakod", usedforsecurity=False).hexdigest()
+            expected_hash = hashlib.sha256(b"motor hibakod").hexdigest()
             mock_get.assert_awaited_once_with(f"embed:{expected_hash}")
 
     @pytest.mark.asyncio
     async def test_set_embedding(self, service):
         with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
             await service.set_embedding("test", [0.1])
-            expected_hash = hashlib.md5(b"test", usedforsecurity=False).hexdigest()
+            expected_hash = hashlib.sha256(b"test").hexdigest()
             mock_set.assert_awaited_once_with(f"embed:{expected_hash}", [0.1], CacheTTL.EMBEDDINGS)
 
     @pytest.mark.asyncio
@@ -585,11 +586,8 @@ class TestEmbeddingCache:
 class TestRateLimiting:
     @pytest.mark.asyncio
     async def test_rate_limit_allowed(self, service):
-        pipe_mock = AsyncMock()
-        pipe_mock.__aenter__ = AsyncMock(return_value=pipe_mock)
-        pipe_mock.__aexit__ = AsyncMock(return_value=False)
-        pipe_mock.execute = AsyncMock(return_value=[3, True])  # 3rd request
-        service._client.pipeline = MagicMock(return_value=pipe_mock)
+        # Implementation uses Lua script returning scalar count
+        service._incr_expire_script = AsyncMock(return_value=3)  # 3rd request
 
         allowed, remaining = await service.check_rate_limit("ip:1.2.3.4", 10, 60)
         assert allowed is True
@@ -597,11 +595,8 @@ class TestRateLimiting:
 
     @pytest.mark.asyncio
     async def test_rate_limit_exceeded(self, service):
-        pipe_mock = AsyncMock()
-        pipe_mock.__aenter__ = AsyncMock(return_value=pipe_mock)
-        pipe_mock.__aexit__ = AsyncMock(return_value=False)
-        pipe_mock.execute = AsyncMock(return_value=[11, True])
-        service._client.pipeline = MagicMock(return_value=pipe_mock)
+        # Implementation uses Lua script returning scalar count
+        service._incr_expire_script = AsyncMock(return_value=11)  # exceeded
 
         allowed, remaining = await service.check_rate_limit("ip:1.2.3.4", 10, 60)
         assert allowed is False
@@ -616,11 +611,7 @@ class TestRateLimiting:
 
     @pytest.mark.asyncio
     async def test_rate_limit_fail_closed_on_exception(self, service):
-        pipe_mock = AsyncMock()
-        pipe_mock.__aenter__ = AsyncMock(return_value=pipe_mock)
-        pipe_mock.__aexit__ = AsyncMock(return_value=False)
-        pipe_mock.execute = AsyncMock(side_effect=Exception("redis down"))
-        service._client.pipeline = MagicMock(return_value=pipe_mock)
+        service._incr_expire_script = AsyncMock(side_effect=Exception("redis down"))
 
         allowed, remaining = await service.check_rate_limit("ip:1.2.3.4", 10, 60)
         assert allowed is False
