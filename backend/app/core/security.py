@@ -15,6 +15,7 @@ from jwt.exceptions import InvalidTokenError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_log
 
 # PyJWT encode returns str, decode returns dict
 # passlib CryptContext.verify/hash also return Any
@@ -173,7 +174,7 @@ async def decode_token(token: str, expected_type: str = "access") -> Optional[Di
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
-            leeway=30,
+            leeway=10,
         )
 
         # Validate token type to prevent type confusion attacks
@@ -248,30 +249,30 @@ async def is_token_blacklisted(jti: str) -> bool:
     """
     Check if a token JTI is in the Redis blacklist.
 
+    Fail-closed: if Redis is unavailable or the circuit breaker is open,
+    the token is rejected to prevent use of potentially blacklisted tokens.
+
     Args:
         jti: The JWT ID to check
 
     Returns:
-        True if blacklisted, False otherwise
+        True if blacklisted (or Redis unavailable), False otherwise
     """
     try:
         from app.db.redis_cache import get_cache_service
 
         cache = await get_cache_service()
 
-        # If circuit breaker is open, fail open (accept token)
-        # Rationale: fail-closed locks out ALL users during Redis outage.
-        # Token blacklisting is a secondary defence; JWTs still have expiry.
-        # Rate limiting remains fail-closed (that protects against abuse).
+        # If circuit breaker is open, Redis is considered unavailable — reject token
         if cache.is_circuit_open():
-            logger.warning("Redis circuit breaker open - accepting token (fail-open)")
-            return False
+            logger.warning("Redis circuit breaker open — rejecting token (fail-closed)")
+            return True  # fail-closed
 
         result = await cache.get(f"blacklist:{jti}")
         return result is not None
     except Exception as e:
-        logger.warning(f"Token blacklist check failed - accepting token (fail-open): {e}")
-        return False
+        logger.error(f"Token blacklist check failed: {sanitize_log(str(e))}")
+        return True  # fail-closed
 
 
 def check_password_strength(password: str) -> Dict[str, Any]:

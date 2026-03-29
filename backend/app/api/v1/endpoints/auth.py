@@ -33,7 +33,6 @@ from app.core.config import settings
 from app.core.security import (
     blacklist_token,
     create_access_token,
-    create_password_reset_token,
     create_refresh_token,
     decode_token,
     generate_csrf_token,
@@ -883,7 +882,12 @@ async def change_password(
     await repository.update_password(current_user, hashed_password)
     await db.commit()
 
-    logger.info(f"User changed password: {current_user.email}")
+    logger.info(f"Password changed for user_id={sanitize_log(str(current_user.id))}")
+
+    # Invalidate the current access token so the session cannot be reused
+    # with the old password after a successful change.
+    if hasattr(current_user, "jti") and current_user.jti:
+        await blacklist_token(current_user.jti)
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 
@@ -947,12 +951,13 @@ async def forgot_password(
             db.add(reset_record)
             await db.commit()
         except (ImportError, AttributeError):
-            logger.warning("PasswordResetToken model not yet available, using legacy token field")
-            # Legacy fallback: store raw token on the user row
-            reset_record = None  # type: ignore[assignment]
-            plain_token = create_password_reset_token(user.email)
-            await repository.set_password_reset_token(user, plain_token)
-            await db.commit()
+            logger.error(
+                "PasswordResetToken model not available — password reset service unavailable"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Password reset service temporarily unavailable",
+            )
 
         # Send password reset email (best-effort, do not block the response)
         try:
@@ -1046,46 +1051,17 @@ async def reset_password(
                 return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 
     except (ImportError, AttributeError):
-        logger.debug("PasswordResetToken model not available, falling back to JWT strategy")
-
-    # --- Strategy 2: Legacy JWT token ---
-    payload = await decode_token(request_data.token, expected_type="password_reset")
-
-    if not payload:
+        logger.error("PasswordResetToken model not available — password reset service unavailable")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Érvénytelen vagy lejárt visszaállítási token",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset service temporarily unavailable",
         )
 
-    email = payload.get("sub")
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Érvénytelen token",
-        )
-
-    user = await repository.get_by_email(email.lower())
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Felhasználó nem található",
-        )
-
-    # Update password
-    hashed_password = get_password_hash(request_data.new_password)
-    await repository.update_password(user, hashed_password)
-    await db.commit()
-
-    # Blacklist the used reset token
-    await blacklist_token(request_data.token)
-
-    logger.info(
-        "Password reset (JWT) completed for: %s",
-        sanitize_log(user.email[:3] + "***@***"),
+    # PasswordResetToken model available but no matching record found
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Érvénytelen vagy lejárt visszaállítási token",
     )
-
-    return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 
 
 # =============================================================================
