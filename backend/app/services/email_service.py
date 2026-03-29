@@ -408,7 +408,7 @@ AutoCognitix csapat
             logger.error("SMTP send error (%s): %s", _sanitize_log(to), e)
             return False
 
-    def _smtp_send(self, msg: object, to: str) -> None:
+    def _smtp_send(self, msg: object, to: str) -> None:  # type: ignore[override]
         """Synchronous SMTP send (runs in executor)."""
         import smtplib
 
@@ -417,7 +417,7 @@ AutoCognitix csapat
             smtp.starttls()
             if settings.SMTP_USER and settings.SMTP_PASSWORD:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            smtp.sendmail(self._from_email, [to], msg.as_string())
+            smtp.sendmail(self._from_email, [to], msg.as_string())  # type: ignore[attr-defined]
 
     async def send_welcome(
         self,

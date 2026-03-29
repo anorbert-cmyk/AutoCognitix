@@ -35,7 +35,7 @@ if settings.NEO4J_URI and "://" in settings.NEO4J_URI:
     _neo4j_host = settings.NEO4J_URI
     for _scheme in ("neo4j+s://", "neo4j+ssc://", "neo4j://", "bolt+s://", "bolt://"):
         _neo4j_host = _neo4j_host.replace(_scheme, "")
-    config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"
+    config.DATABASE_URL = f"{settings.NEO4J_URI.split('://')[0]}://{settings.NEO4J_USER}:{settings.NEO4J_PASSWORD}@{_neo4j_host}"  # type: ignore[attr-defined]
 
 
 # Neo4j health check with caching

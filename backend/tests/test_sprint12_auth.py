@@ -22,6 +22,7 @@ def _import_validate_password_strength():
         return validate_password_strength
     except (ImportError, AttributeError):
         pytest.skip("validate_password_strength not yet implemented")
+        return None  # unreachable; pytest.skip() raises
 
 
 # =============================================================================

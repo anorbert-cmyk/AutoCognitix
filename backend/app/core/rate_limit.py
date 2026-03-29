@@ -323,7 +323,7 @@ async def check_rate_limit_with_redis_fallback(
             "Redis unavailable for rate limiting — using in-memory fallback "
             "(not shared across workers)"
         )
-        _redis_fallback_warned_at = now
+        _redis_fallback_warned_at = now  # lgtm[py/unused-global-variable]
 
     return _in_memory_rate_limit(key, limit, window_seconds)
 
