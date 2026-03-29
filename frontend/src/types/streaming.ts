@@ -28,7 +28,7 @@ export interface StreamingEvent {
   data: Record<string, unknown>;
   diagnosis_id: string;
   timestamp: string;
-  progress: number; // 0.0 - 1.0 (backend uses float, not percentage)
+  progress?: number | null; // 0.0 - 1.0 (backend uses float, not percentage)
 }
 
 // =============================================================================
