@@ -641,3 +641,208 @@ The `drop_console` terser option is configured for production builds (`vite.conf
 | 12 | `access_token`/`refresh_token` in JS | PARTIAL | HIGH | Issue #10 — tokens in response body JSON accessible in memory; test code uses localStorage pattern |
 | 13 | Auth state consistency | PARTIAL | MEDIUM | Issue #14 — dual `isAuthenticated` signals can diverge |
 | 14 | `console.*` leakage | PARTIAL | LOW | Issue #15 — `console.warn`/`console.error` not dropped by terser `drop_console` |
+
+---
+
+## API Logic Audit
+**Auditor:** API-Logic Specialist
+**Branch:** `claude/ralph-loop-global-memory-lFEhR`
+**Date:** 2026-03-29
+**Files audited:**
+- `backend/app/api/v1/endpoints/diagnosis.py`
+- `backend/app/api/v1/endpoints/garage.py`
+- `backend/app/api/v1/endpoints/vehicles.py`
+- `backend/app/api/v1/endpoints/dtc_codes.py`
+- `backend/app/api/v1/schemas/diagnosis.py`
+- `backend/app/api/v1/schemas/garage.py`
+
+---
+
+### CRITICAL
+
+#### [CRITICAL-1] DTC Create/Bulk Import — No Role Check (Missing Authorization)
+**File:** `backend/app/api/v1/endpoints/dtc_codes.py` — lines 796–956
+**Description:** `POST /api/v1/dtc/` (create_dtc_code) and `POST /api/v1/dtc/bulk` (bulk_import_dtc_codes) only require any authenticated user (`get_current_user_from_token`) — there is no `require_role("admin")` dependency. Any registered user can create or overwrite DTC codes in the database, including bulk-importing thousands of records.
+**Impact:** Unprivileged users can poison the DTC database (integrity risk), trigger large DB writes (DoS), or overwrite production diagnostic knowledge.
+**Recommendation:** Add `require_role("admin")` dependency to both endpoints.
+
+---
+
+#### [CRITICAL-2] SSE Streaming Endpoint — No Rate Limiting Dependency Injected
+**File:** `backend/app/api/v1/endpoints/diagnosis.py` — line 834
+**Description:** The docstring on `analyze_vehicle_stream` claims "Rate limiting via middleware (5 req/min)" but no rate-limit dependency (`check_diagnosis_rate_limit` or similar) is injected into the endpoint signature. The `_stream_semaphore` limits concurrent streams globally (10 max) but does not limit per-user or per-IP request frequency. The non-streaming `/analyze` endpoint (line 203) also lacks an explicit rate-limit dependency injection.
+**Impact:** A single unauthenticated client can submit unlimited diagnosis requests, exhausting LLM API quota and triggering costly AI calls without throttle.
+**Recommendation:** Inject `check_diagnosis_rate_limit` as a Depends on both `/analyze` and `/analyze/stream`.
+
+---
+
+### HIGH
+
+#### [HIGH-1] `POST /garage/vehicles` — No Per-User Vehicle Count Limit
+**File:** `backend/app/api/v1/endpoints/garage.py` — line 156; `backend/app/services/vehicle_garage_service.py` — line 85
+**Description:** `POST /garage/vehicles` has no check on how many vehicles the user already owns. The service `get_vehicles` supports a default `limit=50` but no business-logic cap is enforced before creating a new vehicle.
+**Impact:** DB table bloat, potential abuse of health-score/recall computation resources, no fair-use control.
+**Recommendation:** Before `service.create_vehicle(...)`, call `get_vehicles` and reject with 409/422 if `total >= MAX_VEHICLES_PER_USER` (suggested: 50).
+
+---
+
+#### [HIGH-2] `GET /garage/vehicles` — Pagination Parameters Not Exposed; Silent Truncation
+**File:** `backend/app/api/v1/endpoints/garage.py` — line 116; service line 85
+**Description:** The service `get_vehicles()` accepts `skip`/`limit` (default limit=50) and applies them to the DB query, but the endpoint never exposes these as Query parameters. The response returns `total` but the caller can never page through results if a user has more than 50 vehicles — they are silently dropped.
+**Impact:** Silent data truncation; `total` may exceed the number of items returned with no way for the client to request the remainder.
+**Recommendation:** Expose `skip: int = Query(0, ge=0)` and `limit: int = Query(50, ge=1, le=100)` on the endpoint and pass them to the service.
+
+---
+
+#### [HIGH-3] `GET /garage/costs` — Pagination Not Exposed; `total_cost_huf` Incorrect on Truncation
+**File:** `backend/app/api/v1/endpoints/garage.py` — line 603; service line 392
+**Description:** Same pattern as HIGH-2. The service `get_costs()` defaults to `limit=50`, but the endpoint does not expose `skip`/`limit` query parameters. Additionally, `total_cost_huf` in the response is computed only over the fetched (limited) rows, not all rows in the DB.
+**Impact:** Users with extensive maintenance history get silently truncated results; `total_cost_huf` is incorrect (understated) when there are more than 50 records.
+**Recommendation:** Expose pagination params; compute `total_cost_huf` with a separate SUM query over all matching rows, independent of the page limit.
+
+---
+
+#### [HIGH-4] `GET /garage/reminders` — DB Total Count Discarded, Recomputed from In-Memory Page
+**File:** `backend/app/api/v1/endpoints/garage.py` — lines 423–447
+**Description:** `list_reminders` calls `reminders, _ = await service.get_reminders(...)` — the DB-provided `total` is explicitly discarded (`_`). The response then sets `total=len(enriched)`, which is the count of the in-memory (possibly truncated) page, not the true DB count.
+**Impact:** Reported `total` is incorrect if the service applies an internal limit; the client cannot know whether pagination is needed.
+**Recommendation:** Use the DB-provided total: `reminders, total = await service.get_reminders(...)` and pass `total` to the response.
+
+---
+
+#### [HIGH-5] `POST /diagnosis/quick-analyze` — No Authentication, No Rate Limiting
+**File:** `backend/app/api/v1/endpoints/diagnosis.py` — line 635
+**Description:** `quick_analyze` requires no authentication and no rate-limit dependency. Any anonymous client can submit up to 10 DTC codes per request and query the database at unlimited frequency.
+**Impact:** Information scraping of the full DTC database and DB read amplification without any throttle.
+**Recommendation:** Add a `check_search_rate_limit` or anonymous-tier rate-limit dependency.
+
+---
+
+#### [HIGH-6] `GET /vehicles/{make}/{model}/{year}/recalls` and `/complaints` — Unvalidated Path Parameters Forwarded to External URL
+**File:** `backend/app/api/v1/endpoints/vehicles.py` — lines 655, 717
+**Description:** `make` and `model` are `str` Path parameters with no `max_length` constraint or character whitelist. They are passed directly to `nhtsa_service.get_recalls(make, model, year)` and `get_complaints(make, model, year)`, which constructs outbound HTTP URLs.
+**Impact:** Potential SSRF or header injection via crafted `make`/`model` values if the NHTSA client does not properly URL-encode parameters (e.g. `model = "x%0d%0aInjected-Header: value"`).
+**Recommendation:** Add `max_length=100` and alphanumeric/hyphen/space validation to `make` and `model` Path parameters; verify that the NHTSA HTTP client URL-encodes all parameters.
+
+---
+
+### MEDIUM
+
+#### [MEDIUM-1] `POST /diagnosis/analyze` — Unauthenticated Use Creates Orphaned Sessions
+**File:** `backend/app/api/v1/endpoints/diagnosis.py` — line 203
+**Description:** `analyze_vehicle` uses `get_optional_current_user` — unauthenticated requests are accepted. When `user_id=None` the service may save a diagnosis record with no owning user, and there is no IP-level rate limit for unauthenticated callers.
+**Impact:** DB accumulation of anonymous diagnosis sessions, AI API abuse without account-level tracking.
+**Recommendation:** Either require authentication for persistence, or apply per-IP rate limiting and TTL-based cleanup for anonymous sessions.
+
+---
+
+#### [MEDIUM-2] `DELETE /garage/reminders/{reminder_id}` — No Explicit 404 on Not-Found
+**File:** `backend/app/api/v1/endpoints/garage.py` — line 560
+**Description:** `delete_reminder` catches `VehicleGarageServiceError` and returns 400. If the reminder does not exist or belongs to another user, there is no explicit `HTTP_404_NOT_FOUND` returned. Compare with `complete_reminder` (line 521) which checks `if not reminder: raise 404`. The pattern is inconsistent.
+**Impact:** Clients receive 400 Bad Request instead of semantically correct 404 for missing/foreign reminders.
+**Recommendation:** Check existence/ownership before calling `delete_reminder`, returning 404 if not found (mirror the `complete_reminder` pattern).
+
+---
+
+#### [MEDIUM-3] `GET /dtc/search` — No Rate-Limit Dependency; `make` Has No Max Length
+**File:** `backend/app/api/v1/endpoints/dtc_codes.py` — line 396
+**Description:** DTC search is fully public (no auth). With `use_semantic=True` (default), every request triggers HuBERT embedding + Qdrant vector search. No rate-limit dependency is injected. The `make` Query parameter has no `max_length`.
+**Impact:** Unauthenticated callers can trigger expensive ML inference (CPU/GPU) per request with no throttle.
+**Recommendation:** Inject `check_search_rate_limit` as a Depends; add `max_length=100` to the `make` Query parameter.
+
+---
+
+#### [MEDIUM-4] `GET /dtc/{code}/related` — No Auth/Rate Limit; Sync neomodel Call Blocks Event Loop
+**File:** `backend/app/api/v1/endpoints/dtc_codes.py` — line 687
+**Description:** The endpoint is fully public with no rate limiting. Additionally, the neomodel call `DTCNode.nodes.get_or_none(code=code)` and subsequent `.related_to.all()` (lines 737–741) are **synchronous** neomodel ORM calls inside an async handler, blocking the event loop for the duration of the Neo4j query.
+**Impact:** Unauthenticated graph enumeration; event loop blocking under concurrent load.
+**Recommendation:** Add rate limiting; replace synchronous neomodel calls with the async graph helper (`_get_neo4j_relationships`) already used elsewhere.
+
+---
+
+#### [MEDIUM-5] `GET /vehicles/makes` and `/models` — `search` Parameter Has No Max Length
+**File:** `backend/app/api/v1/endpoints/vehicles.py` — lines 304, 382
+**Description:** The `search` query parameter has `min_length=1` but no `max_length`. It is passed to `vehicle_service.get_all_makes(search=...)` and `get_models_for_make(search=...)` for Neo4j Cypher queries. Oversized or specially crafted strings reach the graph layer.
+**Impact:** Unnecessary graph traversal; potential Cypher injection if parameterization is not used in the service layer.
+**Recommendation:** Add `max_length=100` to the `search` Query parameter; verify the Neo4j service uses parameterized Cypher (`$param`) and not string interpolation.
+
+---
+
+#### [MEDIUM-6] DTC Detail Cache Key Collision — `include_graph` Flag Not Propagated to Redis
+**File:** `backend/app/api/v1/endpoints/dtc_codes.py` — lines 641–666
+**Description:** The local cache key is built as `f"{code}:{include_graph}"` (e.g. `P0101:True`), but `_cache_dtc_detail(cache_key, result.model_dump())` passes this to `cache.set_dtc_code(code, ...)`, which likely uses only the bare `code` as the Redis key, ignoring the `include_graph` suffix. A response cached with `include_graph=True` (full Neo4j enrichment) will be returned for a subsequent request with `include_graph=False`, and vice versa.
+**Impact:** Incorrect (over- or under-populated) data served from cache depending on which request was cached first.
+**Recommendation:** Ensure the Redis key used in `set_dtc_code` / `get_dtc_code` includes the full compound key string; or pass `cache_key` directly as the Redis key.
+
+---
+
+#### [MEDIUM-7] `POST /garage/costs` and `POST /garage/reminders` — No Ownership Check on `vehicle_id`
+**File:** `backend/app/api/v1/endpoints/garage.py` — lines 471, 652; schema lines 132, 183
+**Description:** Both `create_reminder` and `create_cost` pass a user-supplied `data.vehicle_id` string to the service without first verifying that the vehicle belongs to `current_user`. An authenticated user can record costs or reminders against another user's `vehicle_id`.
+**Impact:** Cross-user data pollution — a malicious authenticated user can append records to vehicles they do not own.
+**Recommendation:** Call `_get_vehicle_or_404(data.vehicle_id, str(current_user.id), db)` before creating the cost/reminder to enforce vehicle ownership.
+
+---
+
+### LOW
+
+#### [LOW-1] `DiagnosisRequest.dtc_codes` — Individual DTC String Length Not Validated in Schema
+**File:** `backend/app/api/v1/schemas/diagnosis.py` — line 24
+**Description:** `dtc_codes: List[str]` validates the list length (1–20) but not the length or format of each individual DTC string. A request with `dtc_codes=["AAAAAAAAAAAAAAAAAAAAAAAA"]` reaches the service layer.
+**Recommendation:** Add a `@field_validator("dtc_codes")` enforcing `max_length=10` per code and matching the pattern `^[PBCU]\d{4}$`.
+
+---
+
+#### [LOW-2] `GET /garage/vehicles/{vehicle_id}/recalls` — NHTSA Errors Silently Swallowed
+**File:** `backend/app/api/v1/endpoints/garage.py` — lines 722–726
+**Description:** A bare `except Exception` returns `[]` for all failures, including NHTSA service errors. Other NHTSA endpoints (`vehicles.py`) correctly raise HTTP 502. Clients cannot distinguish "no recalls found" from "recall lookup failed".
+**Impact:** Silent failures; clients may incorrectly infer a clean recall history.
+**Recommendation:** Re-raise `NHTSAError` as 502 (matching the pattern in `vehicles.py`); swallow only non-critical timeouts.
+
+---
+
+#### [LOW-3] `GET /diagnosis/history/list` — `date_from > date_to` Not Validated
+**File:** `backend/app/api/v1/endpoints/diagnosis.py` — line 380
+**Description:** `date_from` and `date_to` are accepted independently. Passing `date_from` later than `date_to` silently returns zero results rather than a 422 validation error.
+**Recommendation:** Add a check (inline or in `DiagnosisHistoryFilter`) enforcing `date_from <= date_to` when both are provided.
+
+---
+
+#### [LOW-4] `POST /diagnosis/analyze` — Returns HTTP 201 for Detected Duplicate Submissions
+**File:** `backend/app/api/v1/endpoints/diagnosis.py` — lines 237–243
+**Description:** When a duplicate submission is detected, the endpoint returns `HTTP 201 Created` with an `X-Duplicate-Of` header. Semantically, a resource was not created; 201 is misleading.
+**Recommendation:** Return `HTTP_200_OK` (or `HTTP_303_SEE_OTHER` + `Location: /api/v1/diagnosis/{duplicate_id}`) for detected duplicates.
+
+---
+
+#### [LOW-5] `GET /vehicles/{make}/{model}/common-issues` — No Result Limit; Unbounded Neo4j Response
+**File:** `backend/app/api/v1/endpoints/vehicles.py` — line 779
+**Description:** Fully public endpoint with no `limit` query parameter. If the Neo4j service returns a large result set, the entire list is serialized without bound.
+**Recommendation:** Add a `limit: int = Query(20, ge=1, le=100)` parameter and pass it to the service layer.
+
+---
+
+### Summary Table
+
+| ID | Severity | Endpoint | Issue |
+|----|----------|----------|-------|
+| CRITICAL-1 | CRITICAL | `POST /dtc/` + `POST /dtc/bulk` | No admin role check — any user can write/overwrite DTC DB |
+| CRITICAL-2 | CRITICAL | `POST /diagnosis/analyze/stream` | Rate limiting claimed in docstring but not injected as dependency |
+| HIGH-1 | HIGH | `POST /garage/vehicles` | No per-user vehicle count limit |
+| HIGH-2 | HIGH | `GET /garage/vehicles` | Pagination params not exposed; silent 50-vehicle truncation |
+| HIGH-3 | HIGH | `GET /garage/costs` | Pagination not exposed; `total_cost_huf` computed on truncated page only |
+| HIGH-4 | HIGH | `GET /garage/reminders` | DB total count discarded; recomputed from in-memory paginated list |
+| HIGH-5 | HIGH | `POST /diagnosis/quick-analyze` | No auth, no rate limit |
+| HIGH-6 | HIGH | `GET /vehicles/{make}/{model}/{year}/recalls+complaints` | Unvalidated path params forwarded to external HTTP URL |
+| MEDIUM-1 | MEDIUM | `POST /diagnosis/analyze` | Unauthenticated use, no IP rate limit, orphaned sessions |
+| MEDIUM-2 | MEDIUM | `DELETE /garage/reminders/{id}` | Missing explicit 404; inconsistent with complete_reminder pattern |
+| MEDIUM-3 | MEDIUM | `GET /dtc/search` | No rate-limit dependency injected; `make` param has no max_length |
+| MEDIUM-4 | MEDIUM | `GET /dtc/{code}/related` | No auth/rate limit; sync neomodel calls block event loop |
+| MEDIUM-5 | MEDIUM | `GET /vehicles/makes` + `/models` | `search` param has no max_length; Cypher injection risk |
+| MEDIUM-6 | MEDIUM | `GET /dtc/{code}` | Cache key `include_graph` flag not propagated to Redis store |
+| MEDIUM-7 | MEDIUM | `POST /garage/costs` + `POST /garage/reminders` | No ownership check on user-supplied `vehicle_id` |
+| LOW-1 | LOW | `POST /diagnosis/analyze` | Individual DTC string length/format not validated in schema |
+| LOW-2 | LOW | `GET /garage/vehicles/{id}/recalls` | NHTSA errors silently swallowed, returns empty list |
+| LOW-3 | LOW | `GET /diagnosis/history/list` | date_from > date_to not validated |
+| LOW-4 | LOW | `POST /diagnosis/analyze` | HTTP 201 returned for duplicate submissions (semantic error) |
+| LOW-5 | LOW | `GET /vehicles/{make}/{model}/common-issues` | No result limit; unbounded Neo4j traversal |
