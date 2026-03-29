@@ -38,8 +38,8 @@ def _make_collection_info(name, points_count, status="green", vectors_count=0):
 
 @pytest.fixture
 def service():
-    """Create a QdrantService with the underlying QdrantClient fully mocked."""
-    with patch("app.db.qdrant_client.QdrantClient") as MockClient:
+    """Create a QdrantService with the underlying AsyncQdrantClient fully mocked."""
+    with patch("app.db.qdrant_client.AsyncQdrantClient") as MockClient:
         mock_client = MagicMock()
         MockClient.return_value = mock_client
 
@@ -60,7 +60,7 @@ class TestInit:
     def test_init_with_cloud_url(self):
         with (
             patch("app.db.qdrant_client.settings") as mock_settings,
-            patch("app.db.qdrant_client.QdrantClient") as MockClient,
+            patch("app.db.qdrant_client.AsyncQdrantClient") as MockClient,
         ):
             mock_settings.QDRANT_URL = "https://cloud.qdrant.io:6333"
             mock_settings.QDRANT_API_KEY = "test-key"
@@ -79,7 +79,7 @@ class TestInit:
     def test_init_with_local(self):
         with (
             patch("app.db.qdrant_client.settings") as mock_settings,
-            patch("app.db.qdrant_client.QdrantClient") as MockClient,
+            patch("app.db.qdrant_client.AsyncQdrantClient") as MockClient,
         ):
             mock_settings.QDRANT_URL = ""  # falsy → local
             mock_settings.QDRANT_API_KEY = None
@@ -559,7 +559,7 @@ class TestCheckStorageAlerts:
 class TestGetQdrantService:
     @pytest.mark.asyncio
     async def test_returns_qdrant_service(self):
-        with patch("app.db.qdrant_client.QdrantClient"):
+        with patch("app.db.qdrant_client.AsyncQdrantClient"):
             from app.db.qdrant_client import get_qdrant_service
 
             svc = await get_qdrant_service()
