@@ -861,12 +861,22 @@ def get_metrics_summary() -> Dict[str, Any]:
         "service": settings.PROJECT_NAME,
         "environment": settings.ENVIRONMENT,
         "system": {
-            "cpu_percent": SYSTEM_CPU_PERCENT._value._value
-            if hasattr(SYSTEM_CPU_PERCENT._value, "_value")
-            else 0,
-            "memory_percent": SYSTEM_MEMORY_PERCENT._value._value
-            if hasattr(SYSTEM_MEMORY_PERCENT._value, "_value")
-            else 0,
+            "cpu_percent": next(
+                (
+                    sample.value
+                    for metric in SYSTEM_CPU_PERCENT.collect()
+                    for sample in metric.samples
+                ),
+                0,
+            ),
+            "memory_percent": next(
+                (
+                    sample.value
+                    for metric in SYSTEM_MEMORY_PERCENT.collect()
+                    for sample in metric.samples
+                ),
+                0,
+            ),
         },
         "endpoints": {
             "metrics": "/metrics",
