@@ -657,7 +657,9 @@ async def create_cost(
     """Create a new maintenance cost entry."""
     try:
         service = get_vehicle_garage_service()
-        cost = await service.create_cost(db, str(current_user.id), data)
+        cost = await service.create_cost(
+            db, str(current_user.id), data.model_dump(exclude_none=True)
+        )
 
         logger.info(
             "Karbantartási költség rögzítve",
