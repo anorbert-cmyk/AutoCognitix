@@ -406,3 +406,363 @@ logger.warning(
 | 8 | Log levels / log injection | LOW | CQ-13 (`response.text` not sanitized in `send_via_n8n`) |
 | 9 | Email service — duplicate `send_password_reset` methods | HIGH | CQ-1 (module-level function routes to unescaped method; secure method is dead code) |
 | 10 | Hungarian string consistency | LOW | CQ-8 (`check_password_strength` ASCII-only), CQ-11 (`RAGException` typo) |
+
+---
+
+## API Contract / Integration Audit
+**Auditor:** Integration Specialist
+**Date:** 2026-03-29
+**Files Reviewed:**
+- `backend/app/api/v1/schemas/diagnosis.py`
+- `backend/app/api/v1/schemas/auth.py`
+- `backend/app/api/v1/schemas/garage.py`
+- `backend/app/api/v1/endpoints/diagnosis.py`
+- `backend/app/api/v1/endpoints/garage.py`
+- `backend/app/services/nhtsa_service.py`
+- `backend/app/core/security.py`
+- `backend/app/core/exceptions.py`
+- `frontend/src/services/diagnosisService.ts`
+- `frontend/src/services/api.ts`
+- `frontend/src/services/authService.ts`
+- `frontend/src/services/garageService.ts`
+- `frontend/src/hooks/useStreamingDiagnosis.ts`
+- `frontend/src/types/streaming.ts`
+- `frontend/src/components/ui/PasswordStrengthMeter.tsx`
+
+---
+
+### Summary
+
+10 issues found: 1 HIGH, 5 MEDIUM, 4 LOW.
+
+---
+
+### Issue #A1 — HIGH: `DiagnosisResponse.similar_complaints` type mismatch
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, line 207
+**File (frontend):** `frontend/src/services/api.ts`, line 304
+
+**Description:**
+The backend schema defines `similar_complaints` as `List[RelatedComplaint]` — a list of structured objects with fields `odi_number`, `components`, `summary`, `crash`, `fire`, `similarity_score`.
+
+The frontend `DiagnosisResponse` interface declares:
+```typescript
+similar_complaints?: string[]
+```
+
+This is typed as a list of strings, not a list of objects. If the backend ever populates this field, the frontend will receive structured `RelatedComplaint` objects but TypeScript will treat them as strings, causing silent runtime type confusion. Any component reading `similar_complaints[n].summary` would fail (`.summary` on a string is `undefined`).
+
+**Checklist item:** #9 (Optional fields, wrong type)
+
+---
+
+### Issue #A2 — MEDIUM: `DiagnosisResponse` frontend interface missing 8 backend fields
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, lines 212–244
+**File (frontend):** `frontend/src/services/api.ts`, lines 288–305
+
+**Description:**
+The backend `DiagnosisResponse` has the following fields that are entirely absent from the frontend `DiagnosisResponse` interface:
+
+| Missing Field | Backend type | Notes |
+|---|---|---|
+| `urgency_level` | `str` | "low/medium/high/critical" |
+| `safety_warnings` | `List[str]` | Safety-critical warnings |
+| `diagnostic_steps` | `List[str]` | Recommended diagnostic steps |
+| `processing_time_ms` | `Optional[int]` | Processing metadata |
+| `model_used` | `Optional[str]` | AI model identifier |
+| `save_error` | `bool` | Whether DB persist failed |
+| `used_fallback` | `bool` | Whether fallback diagnosis was used |
+| `ai_disclaimer` | `str` | EU AI Act disclaimer (always present) |
+
+Frontend consumers cannot access these fields without casting to `any`. In particular, `safety_warnings` and `urgency_level` are semantically important for UI safety indicators, and `ai_disclaimer` is legally required (EU AI Act compliance) — yet it cannot be rendered without a `(response as any).ai_disclaimer` workaround.
+
+**Checklist item:** #9 (Optional fields)
+
+---
+
+### Issue #A3 — MEDIUM: `DiagnosisHistoryItem` missing `symptoms_text` and `vehicle_vin` fields
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, lines 276–277
+**File (frontend):** `frontend/src/services/api.ts`, lines 307–315
+
+**Description:**
+The backend `DiagnosisHistoryItem` includes `symptoms_text: str` and `vehicle_vin: Optional[str]`. The backend endpoint (`get_diagnosis_history`) explicitly populates both (diagnosis.py lines 438–440):
+```python
+vehicle_vin=item.vehicle_vin,
+symptoms_text=item.symptoms_text,
+```
+
+The frontend `DiagnosisHistoryItem` interface has neither field, so both are silently dropped at the TypeScript boundary. A history list UI cannot display symptom summaries or VIN without using untyped access.
+
+**Checklist item:** #9 (Optional fields)
+
+---
+
+### Issue #A4 — MEDIUM: Error format mismatch — backend nested `{ error: { code, message, message_hu } }`, frontend reads flat `{ detail }`
+
+**File (backend):** `backend/app/core/exceptions.py`, lines 164–173
+**File (frontend):** `frontend/src/services/api.ts`, line 65
+
+**Description:**
+When an `AutoCognitixError` subclass is raised and converted to HTTP via `to_http_exception()`, FastAPI wraps it as:
+```json
+{
+  "detail": {
+    "error": {
+      "code": "ERR_4001",
+      "message": "...",
+      "message_hu": "...",
+      "details": {}
+    }
+  }
+}
+```
+
+The frontend `ApiError.fromAxiosError` reads:
+```typescript
+const detail = data?.detail || error.message
+```
+
+`data.detail` is typed as `string` in `ApiErrorDetail`, but actually receives an object. When coerced to string it becomes `"[object Object]"` — the human-readable Hungarian error message is lost. Neither `code` (e.g. `"ERR_4001"`) nor `message_hu` is ever extracted. Client-side error code routing and Hungarian localised messages are fully broken for structured `AutoCognitixError` exceptions.
+
+Note: Plain `HTTPException(detail=str)` from standard endpoints works fine; only `AutoCognitixError.to_http_exception()` is affected.
+
+**Checklist item:** #3 (Error format)
+
+---
+
+### Issue #A5 — MEDIUM: `UserResponse` in `api.ts` missing `full_name` and `role` fields
+
+**File (backend):** `backend/app/api/v1/schemas/auth.py`, lines 47–58
+**File (frontend):** `frontend/src/services/api.ts`, lines 450–455
+
+**Description:**
+The backend `UserResponse` schema has 6 fields: `id`, `email`, `full_name`, `is_active`, `role`, `created_at`.
+
+The frontend `UserResponse` interface in `api.ts` only declares `id`, `email`, `is_active`, `created_at` — missing `full_name` and `role`.
+
+`authService.ts` `User` interface correctly includes both fields. The split means code importing `UserResponse` from `api.ts` silently loses `full_name` and `role`. The `role` field matters for conditional rendering of admin/mechanic UI elements.
+
+**Checklist item:** #4 (Auth schemas)
+
+---
+
+### Issue #A6 — LOW: `StreamingEvent.progress` typed as non-optional in frontend, optional in backend
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, line 429
+**File (frontend):** `frontend/src/types/streaming.ts`, line 31
+
+**Description:**
+Backend: `progress: Optional[float] = Field(None, ge=0, le=1, ...)`
+Frontend: `progress: number` (non-optional, no `| null`)
+
+When the backend emits `progress: null` the frontend type declaration is inaccurate. The runtime guard `event.progress != null` in `diagnosisService.ts` (line 454) prevents a crash, but the type annotation misleads future consumers.
+
+**Checklist item:** #2 (SSE event shapes)
+
+---
+
+### Issue #A7 — LOW: `MaintenanceReminderCreate.due_date` and `MaintenanceCostCreate.service_date` — backend `date` type, frontend untyped `string`
+
+**File (backend):** `backend/app/api/v1/schemas/garage.py`, lines 137, 187
+**File (frontend):** `frontend/src/services/garageService.ts`, lines 129, 159
+
+**Description:**
+Backend `due_date: Optional[date]` and `service_date: date` expect `YYYY-MM-DD` format. The frontend uses `string` with no format constraint. A form submitting `"29/03/2026"` or a full datetime `"2026-03-29T00:00:00Z"` will fail with a 422 Pydantic error at runtime, with no type-level warning to the developer.
+
+**Checklist item:** #8 (Date formats)
+
+---
+
+### Issue #A8 — LOW: Generic `PaginatedResponse<T>` in `api.ts` missing `has_more` field
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, lines 301–308
+**File (frontend):** `frontend/src/services/api.ts`, lines 461–466
+
+**Description:**
+The backend `PaginatedDiagnosisHistory` includes `has_more: bool`. The generic `PaginatedResponse<T>` utility type in `api.ts` declares only `{ items, total, skip, limit }`. The concrete `PaginatedHistoryResponse` in `diagnosisService.ts` (line 47) correctly adds `has_more: boolean`, but any future paginated endpoint using `PaginatedResponse<T>` directly would silently drop `has_more`.
+
+**Checklist item:** #7 (Pagination)
+
+---
+
+### Issue #A9 — LOW: Two "Recall" shapes share similar names, causing implicit confusion
+
+**File (backend):** `backend/app/api/v1/schemas/diagnosis.py`, lines 153–161 (`RelatedRecall`)
+**File (backend):** `backend/app/services/nhtsa_service.py`, lines 74–88 (`Recall`)
+**File (frontend):** `frontend/src/services/api.ts`, lines 279–286 (`RelatedRecall`)
+**File (frontend):** `frontend/src/services/garageService.ts`, lines 279–292 (`VehicleRecall`)
+
+**Description:**
+`RelatedRecall` (used in `DiagnosisResponse.related_recalls`) lacks `manufacturer`, `make`, `model`, `model_year` fields that the full NHTSA `Recall` (returned by `GET /garage/vehicles/{id}/recalls`) has. The garage endpoint uses `response_model=List[dict]` (untyped) instead of a typed schema. A developer may confuse the two recall shapes. The backend should use a typed `response_model` for the recalls endpoint.
+
+**Checklist item:** #1 (Field names / conceptual clarity)
+
+---
+
+### Issue #A10 — LOW: `PASSWORD_PATTERN` regex does not enforce special character requirement
+
+**File (backend):** `backend/app/core/security.py`, line 319
+
+**Description:**
+`PASSWORD_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$")` — checks lowercase + uppercase + digit only. Does not enforce the special character requirement that `validate_password_strength` (line 360) enforces. If any code path validates via `PASSWORD_PATTERN.match()` directly rather than `validate_password_strength`, special-character enforcement is silently bypassed.
+
+The frontend `PasswordStrengthMeter` correctly includes the special character requirement, matching `validate_password_strength`. The inconsistency is internal to the backend.
+
+**Checklist item:** #5 (Password strength)
+
+---
+
+### Checklist Results
+
+| # | Check | Result | Issue |
+|---|-------|--------|-------|
+| 1 | Field names: snake_case conversion | PASS | `diagnosisService.ts` correctly maps camelCase → snake_case before sending |
+| 2 | SSE event shapes: `StreamingEvent` fields match | PARTIAL | Issue #A6 — `progress` optionality mismatch |
+| 3 | Error format: `{ error: { code, message_hu } }` handling | FAIL | Issue #A4 — `AutoCognitixError` responses produce `[object Object]` on frontend |
+| 4 | Auth schemas: ForgotPassword / ResetPassword frontend compat | PASS | `authService.ts` field names match backend exactly |
+| 5 | Password strength: frontend meter vs backend validator | PARTIAL | Issue #A10 — `PASSWORD_PATTERN` regex inconsistency |
+| 6 | Garage schemas: `UserVehicleCreate` fields match | PASS | All 9 fields match |
+| 7 | Pagination: frontend params match backend query params | PASS | All filter/pagination params match |
+| 8 | Date formats: ISO 8601 consistency | MEDIUM | Issue #A7 — backend `date` vs frontend untyped `string` |
+| 9 | Optional fields: null/undefined handling | FAIL | Issues #A1, #A2, #A3 — wrong type / missing fields |
+| 10 | HTTP methods: frontend fetch = backend router method | PASS | POST/GET/PUT/DELETE consistent throughout |
+
+---
+
+## Services Logic Audit
+**Auditor:** Services-Logic Specialist
+**Date:** 2026-03-29
+**Branch:** claude/ralph-loop-global-memory-lFEhR
+**Files reviewed:**
+- `backend/app/services/diagnosis_service.py`
+- `backend/app/services/rag_service.py`
+- `backend/app/services/embedding_service.py`
+- `backend/app/services/parts_price_service.py`
+- `backend/app/services/vehicle_garage_service.py`
+
+---
+
+### CRITICAL
+
+#### C1 — LLM hívásoknak nincs timeout — `rag_service.py:1059`
+**Hely:** `RAGService.generate_diagnosis()` → `provider.generate_with_system()` (sor ~1059)
+**Leírás:** Az LLM provider hívás (`generate_with_system`) semmilyen `asyncio.wait_for` vagy timeout paraméter nélkül van meghívva. Ha az LLM (Anthropic/OpenAI) nem válaszol vagy nagyon lassan válaszol, a teljes diagnózis worker-thread blokkolva marad — nincs felső időhatár. Ezzel szemben a RAG retrieval blokknak van 30 mp timeout (`assemble_context`), és az NHTSA hívásnak 15 mp — de az LLM hívásnak nincs.
+**Kockázat:** Worker thread/event loop végtelen blokkolódás, service degradation, Railway pod restart.
+**Javítási irány:** `asyncio.wait_for(provider.generate_with_system(...), timeout=60.0)` + timeout esetén fallback rule-based diagnosis.
+
+---
+
+#### C2 — `PartsPriceService` singleton nincs thread-lock-kal védve — `parts_price_service.py:388-402`
+**Hely:** `PartsPriceService.__new__` (sor 388-393)
+**Leírás:** A `PartsPriceService.__new__` nem használ `threading.Lock`-ot (ellentétben a `HungarianEmbeddingService` és `RAGService` implementációkkal). Egyidejű első-kérés esetén race condition: két szál egyszerre léphet be a `if cls._instance is None:` ágba, és két külön instance jöhet létre. Így a `_garage_service_instance` modul-szintű globális és a `PartsPriceService._instance` eltérhet.
+**Kockázat:** Duplikált singleton, cache inkonzisztencia, redundáns Redis connection pool.
+**Javítási irány:** Adjunk hozzá `_instance_lock: threading.Lock = threading.Lock()` osztályváltozót és double-checked locking-ot, ahogy a `HungarianEmbeddingService` és `RAGService` csinálja.
+
+---
+
+### HIGH
+
+#### H1 — Embedding hiba (`RuntimeError`) nem kerül elkapásra a `retrieve_from_qdrant`-ban — `rag_service.py:494`
+**Hely:** `RAGService.retrieve_from_qdrant()` sor ~494: `query_embedding = await embed_text_async(query, preprocess=True)`
+**Leírás:** Ha a HuBERT modell betöltése meghibásodik (`_load_hubert_model` → `RuntimeError`), az `embed_text_async` hívás `RuntimeError`-t dob. Ez a `retrieve_from_qdrant` metódusban nincs elkapva — csak a `try/except Exception` blokk a `self._qdrant.search(...)` hívás körül védi a Qdrant I/O hibákat, de az embedding generálási hiba a `try` blokkon kívül történik (az embedding hívás a `try` előtt van). Az embedding hiba tehát felfelé propagál, és az `assemble_context` → `gather` hívást egy `BaseException`-ként kezeli, azaz az összes Qdrant forrás üres lesz.
+**Kockázat:** Néma teljes Qdrant fallback, alacsony confidence score figyelmeztetés nélkül.
+**Javítási irány:** Az `embed_text_async` hívást belül kell a try/except blokkba helyezni, vagy az embedding hibát külön elkapni és HIGH szinten logolni.
+
+#### H2 — `_save_diagnosis_session` nem commit-ol — diagnózis elveszhet — `diagnosis_service.py:1195`
+**Hely:** `DiagnosisService._save_diagnosis_session()` sor 1195: `await self.db.flush()`
+**Leírás:** A diagnózis session mentése csak `flush()`-t hív, nem `commit()`-ot. FastAPI dependency injection kontextusban ez helyes, ha a request életciklus végén automatikus commit történik — de ha a kérés kivétellel zárul a flush után, az adatbázis session rollback-elhet, és a diagnózis elvész. Emellett a `save_ok=False` ág (sor 261-267) a `response.model_copy(update={"save_error": True})` hívással jelöli a hibát, de a `DiagnosisResponse` Pydantic modellben nincs `save_error` field — ez `ValidationError`-t dobhat.
+**Kockázat:** Adatvesztés + potenciálisan `ValidationError` a response assembly-ben.
+**Javítási irány:** Ellenőrizni, hogy `DiagnosisResponse`-nak van-e `save_error` opcionális mezője; ha nincs, a jelölés módszere hibás.
+
+#### H3 — `VehicleGarageService` singleton: nincs lock — `vehicle_garage_service.py:46`
+**Hely:** `VehicleGarageService.__new__` (sor 46-50) és `get_vehicle_garage_service()` (sor 431-436)
+**Leírás:** A `VehicleGarageService.__new__` szintén hiányzó threading.Lock-kal van implementálva. Ezen felül a `get_vehicle_garage_service()` factory function egy `_garage_service_instance` modul-szintű globálist kezel a `VehicleGarageService` belső singleton-jától függetlenül — így két, egymástól független "egyke" mechanizmus létezik ugyanahhoz a service-hez.
+**Kockázat:** Race condition az első párhuzamos kéréskor.
+
+#### H4 — `ContextCache` (RAG in-memory cache) nincs thread-safe — `rag_service.py:363-398`
+**Hely:** `ContextCache` osztály (sor 363-398)
+**Leírás:** A `ContextCache._cache` dict nem védett semmilyen `threading.Lock`-kal. A `RAGService` singleton, és egyszerre több async coroutine manipulálhatja a cache-t. A `get` → `del` (lejárt entry törlés, sor 383) és a `set` → eviction (sor 390) kombinációja nem atomikus — `KeyError` lehetséges high-load esetén.
+**Kockázat:** Sporadikus `KeyError` magas terhelésnél.
+**Javítási irány:** `threading.Lock()` a `get`/`set`/`clear` metódusokhoz.
+
+#### H5 — `get_diagnosis_by_id` hiányos rekonstrukció duplikát visszaadáskor — `diagnosis_service.py:1238`
+**Hely:** `DiagnosisService.get_diagnosis_by_id()` sor 1238-1265
+**Leírás:** A duplikált diagnózis visszaadásakor (sor 193-199) az `existing_response = await self.get_diagnosis_by_id(...)` által visszaadott `DiagnosisResponse` nem tartalmazza a `related_recalls`, `similar_complaints`, `urgency_level`, `safety_warnings`, `diagnostic_steps` mezőket — ezek a JSON-ból nem kerülnek visszaállításra a rekonstrukció során.
+**Kockázat:** Duplikát diagnózis visszaadásakor hiányos adat, a kliens kevesebb figyelmeztetést/visszahívást kap.
+**Javítási irány:** A `get_diagnosis_by_id` rekonstrukció ki kell egészíteni minden opcionális mezővel.
+
+---
+
+### MEDIUM
+
+#### M1 — Business rule hiány: `vehicle_year` nincs tartomány-validálva service szinten — `diagnosis_service.py:169`
+**Hely:** `DiagnosisService.analyze_vehicle()` — nincs service szintű `vehicle_year` validáció
+**Leírás:** A `vehicle_year` értéke közvetlenül továbbkerül a NHTSA hívásokba és a RAG pipeline-ba anélkül, hogy a service réteg ellenőrizné tartományát (pl. 1886 < year <= current_year). Pl. `vehicle_year=0` értékkel a teljes pipeline lefut és üres/hibás eredményt ad.
+**Kockázat:** Szemét adat a pipeline-ban, NHTSA API hibák.
+
+#### M2 — `PartsPriceCache.get()` Redis bytes→str konverzió hibás, cache sosem működik — `parts_price_service.py:320`
+**Hely:** `PartsPriceCache.get()` sor 320: `return str(result) if result is not None else None`
+**Leírás:** Az aioredis `get` bytes típust ad vissza. A metódus `str(result)`-ot ad vissza, ami `"b'{...}'"` formátumú string lesz (bytes repr), nem tiszta JSON string. A hívók `json.loads(cached)`-val parse-olják — ami `json.JSONDecodeError`-t dob a `b'...'` prefix miatt. Így a Redis parts cache sosem működik tényleges találattal; minden kérés static fallback-et használ.
+**Kockázat:** Redis cache teljes kiesése parts price-ra.
+**Javítási irány:** `result.decode("utf-8")` helyett `str(result)`.
+
+#### M3 — `embed_batch` szinkron `use_cache=True` paraméter silent no-op — `embedding_service.py:425-440`
+**Hely:** `HungarianEmbeddingService.embed_batch()` sor 425-440
+**Leírás:** A szinkron `embed_batch` metódusban a Redis cache kezelés az `else` ágban azonnal `texts_to_embed = [(i, t) for i, t in enumerate(texts)]`-re esik vissza, tényleges cache lekérés nélkül. Így a `use_cache=True` paraméter misleading — a szinkron batch sosem kér Redis cache-ből.
+**Kockázat:** Vártnál magasabb embedding számítási terhelés.
+
+#### M4 — `VehicleGarageService.get_health_score` nem ellenőrzi az ownership-et — `vehicle_garage_service.py:160`
+**Hely:** `VehicleGarageService.get_health_score()` sor 160-255
+**Leírás:** A metódus `vehicle_id` és `user_id` paramétereket kap, de nem ellenőrzi, hogy a jármű ténylegesen a megadott `user_id`-hoz tartozik — csak a `MaintenanceReminder` táblákon szűr `vehicle_id` alapján. Ha más felhasználó `vehicle_id`-ját adja meg, az ő adataik alapján számolódik a health score.
+**Kockázat:** IDOR jellegű adatszivárgás (health score adat).
+**Javítási irány:** `get_vehicle(db, vehicle_id, user_id)` meghívása első lépésként.
+
+#### M5 — Tünet-alapú diagnózis sosem kap alkatrész árbecslést — `diagnosis_service.py:894`
+**Hely:** `DiagnosisService._enrich_with_parts_prices()` sor 894-896
+**Leírás:** Ha a DTC lista üres (csak tünet alapú diagnózis), `all_parts` üres lesz és a metódus `{"parts": [], "cost_estimate": None}`-t ad vissza log nélkül. A user sosem kap alkatrész árbecslést tünet-alapú diagnózisnál, bár ez a korlát nem jelenik meg a frontend válaszban.
+**Kockázat:** Funkcionálisan hiányos tünet-alapú diagnózis.
+
+---
+
+### LOW
+
+#### L1 — `DiagnosisService.__aexit__` nem zárja a NHTSA service HTTP session-t — `diagnosis_service.py:131`
+**Hely:** `DiagnosisService.__aexit__` sor 131-134: `pass`
+**Leírás:** A `NHTSAService` HTTP klienst (aiohttp session) tartalmaz, amelyet az `__aexit__` nem zár le. A megjegyzés szerint "NHTSA service cleanup is handled at the application level" — de ez nincs a service-en belül garantálva.
+**Kockázat:** Kapcsolat szivárgás hosszú futáskor.
+
+#### L2 — `ContextCache` TTL eviction csak `get()`-kor fut — stale memória overhead — `rag_service.py:375`
+**Hely:** `ContextCache.get()` sor 375-384
+**Leírás:** A lejárt cache entry csak `get()` híváskor törlődik. Nincs háttér-task vagy `set()` közbeni tisztítás. `max_size=100` limignél az eviction az "oldest entry" politika alapján törölhet még valid bejegyzést.
+**Kockázat:** Kis memória overhead, potenciálisan stale adat visszaadás szélső esetben.
+
+#### L3 — `embed_batch_async` return type `Optional` nem kezelt hívóknál — `embedding_service.py:703`
+**Hely:** `HungarianEmbeddingService.embed_batch_async()` sor 703
+**Leírás:** A metódus `List[Optional[List[float]]]`-ot deklarál, de a hívók `List[List[float]]`-ot várnak. A `None` értékek kezelése nincs minden hívóban implementálva.
+**Kockázat:** Runtime `TypeError` ha `None` értékeket a hívó indexeli.
+
+#### L4 — `create_reminder` szűrés nélkül ad át `None` értékeket — `vehicle_garage_service.py:267`
+**Hely:** `VehicleGarageService.create_reminder()` sor 267
+**Leírás:** `MaintenanceReminder(id=str(uuid4()), user_id=user_id, **data)` — nincs `{k: v for k, v in data.items() if v is not None}` szűrés, ellentétben a `create_vehicle` sor 71-72-vel. Inkonzisztens `None` kezelés.
+**Kockázat:** Esetleges constraint violation ha a model mező nem nullable.
+
+---
+
+### Összefoglalás
+
+| Kategória | Darab |
+|-----------|-------|
+| CRITICAL  | 2     |
+| HIGH      | 5     |
+| MEDIUM    | 5     |
+| LOW       | 4     |
+| **ÖSSZESEN** | **16** |
+
+**Legfontosabb javítási prioritások:**
+1. **C1** — LLM timeout hozzáadása (service degradation megakadályozása)
+2. **C2** — `PartsPriceService` thread-safe singleton (race condition)
+3. **M2** — Redis cache bytes→string konverzió hiba (parts cache teljes kiesése)
+4. **H2** — `save_error` mező ellenőrzése `DiagnosisResponse`-ban
+5. **H5** — Duplikát diagnózis visszaadásakor hiányos rekonstrukció
