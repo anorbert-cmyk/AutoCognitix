@@ -1,3 +1,24 @@
+# AutoCognitix Sprint Tracker
+
+**Utolsó frissítés:** 2026-03-29
+**Aktuális sprint:** Sprint 11 (Frontend Testing + MEDIUM audit fixes)
+
+## Sprint Státusz Összefoglaló
+
+| Sprint | Státusz | Fő eredmény |
+|--------|---------|-------------|
+| 2-5 | ✅ KÉSZ | Neo4j seed, Qdrant indexelés, HuBERT, RAG |
+| 6 | ✅ KÉSZ | Auth, DTC, VIN, frontend wizard |
+| 7.5 | ✅ KÉSZ | LLM prompt, PartsPriceService, ResultPage |
+| 8 | ✅ KÉSZ | Demo oldal, PartStoreCard, store árak |
+| 9 | ✅ KÉSZ | Post-Sprint audit: 3 CRITICAL + 6 HIGH javítva |
+| 9.1 | ✅ KÉSZ | Garage CI: tuple fix, Pydantic→dict, cascade, migration |
+| 10 | ✅ KÉSZ | Leaflet map, NHTSA recalls, MyPy, CodeQL log injection |
+| 11 | 🔄 FOLYAMATBAN | Frontend tesztek (5/93 → 40+), MEDIUM audit fixek |
+| 12 | 📋 TERVEZETT | SSE streaming, email auth, jelszó erősség |
+
+---
+
 # Comprehensive Error Handling (2026-02-05)
 
 ## Status: COMPLETED

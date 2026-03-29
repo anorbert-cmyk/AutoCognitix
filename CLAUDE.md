@@ -4,7 +4,7 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 8 befejezve - Demo Error Simulation & Store-specific Parts Pricing
+**Státusz:** Sprint 10 befejezve - Leaflet térkép + NHTSA visszahívás badge + Garage CI javítások
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
@@ -247,6 +247,11 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 | `POST /api/v1/vehicles/decode-vin` | ✅ Kész | VIN dekódolás |
 | `POST /api/v1/auth/login` | ✅ Kész | Bejelentkezés (JWT) |
 | `GET /demo` | ✅ Kész | Demo bemutató oldal (P0300 szimuláció, valós árak) |
+| `GET /api/v1/garage/vehicles` | ✅ Kész | Felhasználó járműveinek listázása |
+| `POST /api/v1/garage/vehicles` | ✅ Kész | Jármű hozzáadása garázshoz |
+| `GET /api/v1/garage/vehicles/{id}/recalls` | ✅ Kész | Jármű NHTSA visszahívásai |
+| `GET /api/v1/garage/vehicles/{id}/health` | ✅ Kész | Jármű egészségi pontszám |
+| `GET /api/v1/garage/reminders` | ✅ Kész | Karbantartási emlékeztetők |
 
 ## Frontend Demo Oldal
 
@@ -271,6 +276,18 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-03-29 - Sprint 9/10 CI Javítások
+
+- **Tuple destructuring**: `get_vehicles()` / `get_reminders()` `Tuple[List, int]`-et ad vissza → endpoint-okban `vehicles, total = await service.get_vehicles(...)` kötelező
+- **Pydantic → dict**: Service metódusok `Dict[str, Any]`-t várnak → `data.model_dump(exclude_none=True)` konverzió szükséges átadás előtt
+- **MyPy no-any-return**: SQLAlchemy `scalar_one_or_none()` és Pydantic `model_validate()` `Any`-t ad vissza MyPy szerint → `# type: ignore[no-any-return]` komment a sor végén
+- **CodeQL log injection**: Minden felhasználói adat logba kerülés előtt `sanitize_log()` kötelező, számok esetén is: `sanitize_log(str(days_ahead))`
+- **ruff format vs check**: CI mindkettőt futtatja (`ruff check` + `ruff format --check`). Lokálisan mindig futtasd mindkettőt!
+- **ESLint exhaustive-deps**: `const shops = data?.shops || []` minden rendernél új referenciát hoz létre → memo mindig újraszámol. Fix: `data?.shops ?? []` a memo belsejében, `[data?.shops]` a deps-ben
+- **Alembic revision/down_revision**: Ezek `# lgtm[py/unused-global-variable]` suppression kommenttel jelölendők (Alembic runtime-ban olvassa őket, CodeQL nem látja). `branch_labels` és `depends_on = None` biztonságosan eltávolítható
+- **Vitest AuthProvider trap**: `test-utils.tsx`-hez NEM szabad `AuthProvider`-t adni, mert egyes tesztfájlok az egész `AuthContext` modult mockolják (Provider export nélkül). Per-file mock a helyes megközelítés.
+- **react-leaflet Vite marker icon**: Vite asset hashing törli a default marker iconokat → CDN URL-ek + `delete L.Icon.Default.prototype._getIconUrl` fix szükséges
 
 ### 2026-03-20 - Post-Sprint Review Audit (Sprint 9/10)
 - **Új kötelező workflow**: Minden sprint után Parallel Review Team (4 specialist) audit
@@ -337,6 +354,24 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - [x] 6 alkatrész demó adattal: gyújtógyertya, gyújtótekercs, levegőszűrő, üzemanyagszűrő, injektor, lambda szonda
 - [x] Demo route (/demo) + HomePage demo gomb
 - [x] Agent Teams (7+ ügynök) implementáció: koordinátor + 7 specialist
+
+### Sprint 9 - Security & CI Hardening: ✅ BEFEJEZVE
+- [x] Tuple destructuring fix (`get_vehicles`, `get_reminders`)
+- [x] Pydantic → dict konverzió (`create_vehicle`, `update_vehicle`, `create_reminder`)
+- [x] Cascade invalidation fix (`useCompleteReminder` → targeted key)
+- [x] Alembic migration downgrade fix (explicit index drops)
+- [x] Post-Sprint Review: 3 CRITICAL + 6 HIGH biztonsági hiba javítva
+- [x] Rate limiter fail-closed, JWT claim protection, SQL injection escape
+
+### Sprint 10 - Leaflet Map + NHTSA Recalls: ✅ BEFEJEZVE
+- [x] react-leaflet integráció ServiceComparisonPage-en (valós térkép, marker click, FlyToSelected)
+- [x] NHTSA visszahívás badge ResultPage-en (piros kártya, campaign_number, summary, remedy)
+- [x] VehicleDetailPage "Visszahívások" tab (useVehicleRecalls hook)
+- [x] Backend recalls endpoint (`GET /garage/vehicles/{id}/recalls`)
+- [x] RelatedRecall interface (`api.ts`), VehicleRecall interface (`garageService.ts`)
+- [x] MyPy type: ignore fix (SQLAlchemy + Pydantic no-any-return)
+- [x] CodeQL log injection fix (4 HIGH severity sanitize_log)
+- [x] Alembic unused globals fix (branch_labels/depends_on eltávolítva, lgtm suppress)
 
 ## Deployment - Railway
 
