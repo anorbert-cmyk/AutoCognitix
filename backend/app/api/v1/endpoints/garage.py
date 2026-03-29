@@ -673,3 +673,44 @@ async def create_cost(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
         )
+
+
+@router.get(
+    "/vehicles/{vehicle_id}/recalls",
+    response_model=List[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Jármű visszahívások",
+    description="NHTSA visszahívások lekérdezése a jármű gyártója/modellje/évjárata alapján.",
+)
+async def get_vehicle_recalls(
+    vehicle_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+) -> List[dict]:
+    """Fetch NHTSA recalls for a vehicle owned by the current user."""
+    vehicle = await _get_vehicle_or_404(vehicle_id, str(current_user.id), db)
+
+    try:
+        from app.services.nhtsa_service import get_nhtsa_service
+
+        nhtsa = await get_nhtsa_service()
+        recalls = await nhtsa.get_recalls(
+            make=vehicle.make,
+            model=vehicle.model,
+            year=vehicle.year,
+        )
+
+        logger.info(
+            "Visszahívások lekérdezve",
+            extra={
+                "user_id": sanitize_log(str(current_user.id)),
+                "vehicle_id": sanitize_log(vehicle_id),
+                "recall_count": len(recalls),
+            },
+        )
+
+        return [r.model_dump() for r in recalls]
+
+    except Exception:
+        logger.warning("Visszahívások lekérdezése sikertelen", exc_info=True)
+        return []

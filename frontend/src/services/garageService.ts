@@ -275,3 +275,23 @@ export function getUrgencyColorClass(urgency: ReminderUrgency): string {
 export function formatCostHuf(amount: number): string {
   return new Intl.NumberFormat('hu-HU', { style: 'currency', currency: 'HUF', maximumFractionDigits: 0 }).format(amount)
 }
+
+export interface VehicleRecall {
+  campaign_number: string
+  manufacturer: string
+  make: string
+  model: string
+  model_year: number
+  recall_date?: string
+  component: string
+  summary: string
+  consequence?: string
+  remedy?: string
+  notes?: string
+  nhtsa_id?: string
+}
+
+export async function getVehicleRecalls(vehicleId: string): Promise<VehicleRecall[]> {
+  const response = await api.get<VehicleRecall[]>(`/garage/vehicles/${vehicleId}/recalls`)
+  return response.data
+}

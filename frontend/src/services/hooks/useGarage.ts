@@ -16,6 +16,7 @@ import {
   getUpcomingReminders,
   getVehicle,
   getVehicleHealth,
+  getVehicleRecalls,
   getVehicles,
   updateVehicle,
   type GetRemindersParams,
@@ -26,6 +27,7 @@ import {
   type UserVehicle,
   type UserVehicleCreate,
   type UserVehicleUpdate,
+  type VehicleRecall,
 } from '../garageService'
 
 // ─── Query Keys ───────────────────────────────────────────────────────────────
@@ -193,3 +195,15 @@ export function useCreateCost() {
     },
   })
 }
+
+export function useVehicleRecalls(vehicleId: string | undefined) {
+  return useQuery({
+    queryKey: [...garageKeys.all, 'recalls', vehicleId] as const,
+    queryFn: () => getVehicleRecalls(vehicleId!),
+    enabled: !!vehicleId,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+// Re-export VehicleRecall type for consumers
+export type { VehicleRecall }

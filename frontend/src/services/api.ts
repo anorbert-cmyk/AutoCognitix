@@ -276,6 +276,15 @@ export interface Source {
   relevance_score: number
 }
 
+export interface RelatedRecall {
+  campaign_number: string
+  component: string
+  summary: string
+  consequence?: string
+  remedy?: string
+  recall_date?: string
+}
+
 export interface DiagnosisResponse {
   id: string
   vehicle_make: string
@@ -291,6 +300,8 @@ export interface DiagnosisResponse {
   parts_with_prices: PartWithPrice[]
   total_cost_estimate?: TotalCostEstimate
   root_cause_analysis?: string
+  related_recalls?: RelatedRecall[]
+  similar_complaints?: string[]
 }
 
 export interface DiagnosisHistoryItem {
@@ -401,6 +412,7 @@ export interface Recall {
   consequence?: string
   remedy?: string
   manufacturer?: string
+  recall_date?: string
 }
 
 export interface Complaint {

@@ -31,6 +31,7 @@ import {
   useCompleteReminder,
   useDeleteReminder,
   useCreateCost,
+  useVehicleRecalls,
 } from '../services/hooks/useGarage'
 import {
   formatHealthScore,
@@ -48,7 +49,7 @@ import {
 // Constants
 // =============================================================================
 
-type ActiveTab = 'reminders' | 'costs'
+type ActiveTab = 'reminders' | 'costs' | 'recalls'
 
 const EMPTY_REMINDER: Omit<MaintenanceReminderCreate, 'vehicle_id'> = {
   reminder_type: 'oil_change',
@@ -93,6 +94,7 @@ export default function VehicleDetailPage() {
   const { data: health } = useVehicleHealth(vehicleId)
   const { data: remindersData } = useReminders({ vehicle_id: vehicleId })
   const { data: costsData } = useCosts(vehicleId)
+  const { data: recalls = [] } = useVehicleRecalls(vehicleId)
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -332,6 +334,21 @@ export default function VehicleDetailPage() {
             <Banknote className="h-4 w-4" aria-hidden="true" />
             Karbantartási log
           </button>
+          <button
+            onClick={() => setActiveTab('recalls')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'recalls'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Visszahívások
+            {recalls.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
+                {recalls.length}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* ── Reminders tab ─────────────────────────────────────────────────── */}
@@ -482,6 +499,43 @@ export default function VehicleDetailPage() {
               <Plus className="h-4 w-4" aria-hidden="true" />
               Kiadás rögzítése
             </button>
+          </div>
+        )}
+
+        {/* ── Recalls tab ───────────────────────────────────────────────────── */}
+        {activeTab === 'recalls' && (
+          <div>
+            {recalls.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <p className="text-sm font-medium">Nincs ismert visszahívás ehhez a járműhöz</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recalls.map((recall, idx) => (
+                  <div
+                    key={recall.campaign_number || idx}
+                    className="bg-red-50 border border-red-200 rounded-xl p-4"
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-bold uppercase text-red-600 tracking-wide">
+                        {recall.component}
+                      </span>
+                      {recall.campaign_number && (
+                        <span className="text-xs text-slate-400 font-mono">
+                          #{recall.campaign_number}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-slate-700 leading-relaxed">{recall.summary}</p>
+                    {recall.remedy && (
+                      <p className="text-xs text-green-700 mt-2">
+                        <span className="font-semibold">Javítás:</span> {recall.remedy}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </main>

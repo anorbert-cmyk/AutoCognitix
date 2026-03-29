@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react'
-import { Loader2, MapPin, Search, Wrench } from 'lucide-react'
+import { Loader2, Search, Wrench } from 'lucide-react'
 import { regions } from '../data/regions'
 import { RegionSelector } from '../components/features/services/RegionSelector'
 import { ShopFilters } from '../components/features/services/ShopFilters'
@@ -17,6 +17,8 @@ import { ShopCard } from '../components/features/services/ShopCard'
 import { useServiceShops } from '../services/hooks/useServiceShops'
 import type { ShopFilterValues } from '../components/features/services/ShopFilters'
 import type { ServiceSearchParams } from '../services/serviceShopService'
+import ServiceMap from '../components/features/services/ServiceMap'
+import type { MapMarker } from '../components/features/services/ServiceMap'
 
 export function ServiceComparisonPage() {
   // ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ export function ServiceComparisonPage() {
     service_type: '',
     sort_by: 'rating',
   })
-  const [, setSelectedShopId] = useState<string | null>(null)
+  const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
 
   // ---------------------------------------------------------------------------
   // Build search params from state
@@ -49,6 +51,30 @@ export function ServiceComparisonPage() {
 
   const shops = data?.shops || []
   const totalCount = data?.total || 0
+
+  const mapMarkers = useMemo<MapMarker[]>(
+    () =>
+      shops
+        .filter((s) => s.lat && s.lng)
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          lat: s.lat,
+          lng: s.lng,
+          rating: s.rating,
+          address: s.address,
+          city: s.city,
+        })),
+    [shops]
+  )
+
+  const mapCenter = useMemo(
+    () =>
+      selectedRegion
+        ? (regions.find((r) => r.id === selectedRegion) ?? { lat: 47.1625, lng: 19.5033 })
+        : { lat: 47.1625, lng: 19.5033 },
+    [selectedRegion]
+  )
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -174,18 +200,15 @@ export function ServiceComparisonPage() {
             </div>
           </div>
 
-          {/* Right: Map Placeholder */}
+          {/* Right: Leaflet Map */}
           <div className="flex-1 min-h-[400px] lg:min-h-0">
-            <div className="w-full h-full min-h-[400px] rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col items-center justify-center text-slate-400">
-              <div className="flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
-                <MapPin className="w-8 h-8 text-slate-300" />
-              </div>
-              <span className="text-sm font-medium text-slate-500">
-                T\u00E9rk\u00E9p bet\u00F6lt\u00E9se...
-              </span>
-              <span className="text-xs text-slate-400 mt-1">
-                Leaflet t\u00E9rk\u00E9p hamarosan el\u00E9rhet\u0151
-              </span>
+            <div className="w-full h-full min-h-[400px] rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <ServiceMap
+                markers={mapMarkers}
+                center={mapCenter}
+                selectedId={selectedShopId}
+                onMarkerClick={handleShopClick}
+              />
             </div>
           </div>
         </div>
