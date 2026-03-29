@@ -220,7 +220,7 @@ class TestUpsertVectors:
 class TestSearch:
     @pytest.mark.asyncio
     async def test_search_returns_results(self, service):
-        service.client.search = MagicMock(
+        service.client.search = AsyncMock(
             return_value=[
                 _make_search_result("id1", 0.95, {"code": "P0300"}),
                 _make_search_result("id2", 0.88, {"code": "P0301"}),
@@ -241,7 +241,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_empty_results(self, service):
-        service.client.search = MagicMock(return_value=[])
+        service.client.search = AsyncMock(return_value=[])
 
         results = await service.search(
             collection_name="dtc_embeddings_hu",
@@ -252,7 +252,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_filter_conditions(self, service):
-        service.client.search = MagicMock(return_value=[])
+        service.client.search = AsyncMock(return_value=[])
 
         await service.search(
             collection_name="dtc_embeddings_hu",
@@ -265,7 +265,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_score_threshold(self, service):
-        service.client.search = MagicMock(return_value=[])
+        service.client.search = AsyncMock(return_value=[])
 
         await service.search(
             collection_name="dtc_embeddings_hu",
@@ -277,7 +277,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_model_version(self, service):
-        service.client.search = MagicMock(return_value=[])
+        service.client.search = AsyncMock(return_value=[])
 
         await service.search(
             collection_name="dtc_embeddings_hu",
@@ -289,7 +289,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_connection_error(self, service):
-        service.client.search = MagicMock(side_effect=ConnectionError("timeout"))
+        service.client.search = AsyncMock(side_effect=ConnectionError("timeout"))
 
         with pytest.raises(QdrantConnectionException):
             await service.search(
@@ -299,7 +299,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_generic_error(self, service):
-        service.client.search = MagicMock(side_effect=RuntimeError("internal"))
+        service.client.search = AsyncMock(side_effect=RuntimeError("internal"))
 
         with pytest.raises(QdrantException):
             await service.search(
@@ -431,13 +431,13 @@ class TestSearchRepairs:
 class TestDeleteOperations:
     @pytest.mark.asyncio
     async def test_delete_collection(self, service):
-        service.client.delete_collection = MagicMock()
+        service.client.delete_collection = AsyncMock()
         await service.delete_collection("test_collection")
         service.client.delete_collection.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_by_user_processes_all_collections(self, service):
-        service.client.delete = MagicMock()
+        service.client.delete = AsyncMock()
         result = await service.delete_by_user("user-123")
         assert result == 5  # 5 collections
         assert service.client.delete.call_count == 5
@@ -445,7 +445,9 @@ class TestDeleteOperations:
     @pytest.mark.asyncio
     async def test_delete_by_user_continues_on_error(self, service):
         # First call fails, rest succeed
-        service.client.delete = MagicMock(side_effect=[Exception("fail"), None, None, None, None])
+        service.client.delete = AsyncMock(
+            side_effect=[Exception("fail"), None, None, None, None]
+        )
         result = await service.delete_by_user("user-123")
         assert result == 4  # 4 successful out of 5
 
@@ -459,7 +461,7 @@ class TestGetCollectionInfo:
     @pytest.mark.asyncio
     async def test_get_collection_info(self, service):
         info_obj = _make_collection_info("dtc_embeddings_hu", points_count=1000, vectors_count=1000)
-        service.client.get_collection = MagicMock(return_value=info_obj)
+        service.client.get_collection = AsyncMock(return_value=info_obj)
 
         info = await service.get_collection_info("dtc_embeddings_hu")
         assert info["name"] == "dtc_embeddings_hu"
