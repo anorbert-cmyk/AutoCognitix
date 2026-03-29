@@ -80,7 +80,9 @@ class PasswordResetToken(Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -233,7 +235,9 @@ class DiagnosisSession(Base):
     __tablename__ = "diagnosis_sessions"
 
     id: Mapped[str] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    user_id: Mapped[Optional[str]] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Vehicle info
     vehicle_make: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
