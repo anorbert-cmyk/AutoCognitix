@@ -146,10 +146,10 @@ export function useCompleteReminder() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (reminderId: string) => completeReminder(reminderId),
-    onSuccess: () => {
+    onSuccess: (completed: MaintenanceReminder) => {
       queryClient.invalidateQueries({ queryKey: garageKeys.reminders() })
       queryClient.invalidateQueries({ queryKey: garageKeys.upcomingReminders() })
-      queryClient.invalidateQueries({ queryKey: garageKeys.all })
+      queryClient.invalidateQueries({ queryKey: garageKeys.vehicleHealth(completed.vehicle_id) })
     },
     onError: (error: ApiError) => {
       console.error('Emlékeztető teljesítés sikertelen:', error.message)

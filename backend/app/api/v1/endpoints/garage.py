@@ -120,18 +120,18 @@ async def list_vehicles(
     """List all vehicles belonging to the current user."""
     try:
         service = get_vehicle_garage_service()
-        vehicles = await service.get_vehicles(db, str(current_user.id))
+        vehicles, total = await service.get_vehicles(db, str(current_user.id))
 
         logger.info(
             "Járművek listázva",
             extra={
                 "user_id": sanitize_log(str(current_user.id)),
-                "count": len(vehicles),
+                "count": total,
             },
         )
 
         vehicle_responses = [UserVehicleResponse.model_validate(v) for v in vehicles]
-        return UserVehicleListResponse(vehicles=vehicle_responses, total=len(vehicle_responses))
+        return UserVehicleListResponse(vehicles=vehicle_responses, total=total)
 
     except VehicleGarageServiceError as exc:
         raise HTTPException(
@@ -161,7 +161,7 @@ async def create_vehicle(
     """Create a new vehicle for the current user."""
     try:
         service = get_vehicle_garage_service()
-        vehicle = await service.create_vehicle(db, str(current_user.id), data)
+        vehicle = await service.create_vehicle(db, str(current_user.id), data.model_dump(exclude_none=True))
 
         logger.info(
             "Jármű létrehozva",
@@ -232,7 +232,7 @@ async def update_vehicle(
 
     try:
         service = get_vehicle_garage_service()
-        updated = await service.update_vehicle(db, vehicle_id, str(current_user.id), data)
+        updated = await service.update_vehicle(db, vehicle_id, str(current_user.id), data.model_dump(exclude_none=True))
 
         logger.info(
             "Jármű frissítve",
@@ -414,7 +414,7 @@ async def list_reminders(
     """List all reminders for the current user."""
     try:
         service = get_vehicle_garage_service()
-        reminders = await service.get_reminders(
+        reminders, _ = await service.get_reminders(
             db,
             str(current_user.id),
             vehicle_id=vehicle_id,
@@ -469,7 +469,7 @@ async def create_reminder(
     """Create a new maintenance reminder."""
     try:
         service = get_vehicle_garage_service()
-        reminder = await service.create_reminder(db, str(current_user.id), data)
+        reminder = await service.create_reminder(db, str(current_user.id), data.model_dump(exclude_none=True))
 
         logger.info(
             "Emlékeztető létrehozva",

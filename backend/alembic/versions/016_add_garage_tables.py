@@ -122,6 +122,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Drop indexes explicitly before tables (best practice for Alembic downgrade symmetry)
+    op.drop_index("ix_maintenance_costs_diagnosis_session_id", table_name="maintenance_costs")
+    op.drop_index("ix_maintenance_costs_service_date", table_name="maintenance_costs")
+    op.drop_index("ix_maintenance_costs_user_id", table_name="maintenance_costs")
+    op.drop_index("ix_maintenance_costs_vehicle_id", table_name="maintenance_costs")
     op.drop_table("maintenance_costs")
+
+    op.drop_index("ix_maintenance_reminders_reminder_type", table_name="maintenance_reminders")
+    op.drop_index("ix_maintenance_reminders_is_completed", table_name="maintenance_reminders")
+    op.drop_index("ix_maintenance_reminders_due_date", table_name="maintenance_reminders")
+    op.drop_index("ix_maintenance_reminders_user_id", table_name="maintenance_reminders")
+    op.drop_index("ix_maintenance_reminders_vehicle_id", table_name="maintenance_reminders")
     op.drop_table("maintenance_reminders")
+
+    op.drop_index("ix_user_vehicles_license_plate", table_name="user_vehicles")
+    op.drop_index("ix_user_vehicles_vin", table_name="user_vehicles")
+    op.drop_index("ix_user_vehicles_model", table_name="user_vehicles")
+    op.drop_index("ix_user_vehicles_make", table_name="user_vehicles")
+    op.drop_index("ix_user_vehicles_user_id", table_name="user_vehicles")
     op.drop_table("user_vehicles")
