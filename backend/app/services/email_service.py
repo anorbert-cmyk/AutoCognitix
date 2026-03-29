@@ -254,34 +254,24 @@ class EmailService:
         name: str,
         reset_link: str,
     ) -> bool:
-        """
-        Send password reset email.
+        """Wrapper — delegates to XSS-safe send_password_reset_email.
 
         Args:
             to_email: Recipient email
             name: User name
-            reset_link: Password reset link
+            reset_link: Full password reset URL (token extracted automatically)
 
         Returns:
             True if successful
         """
-        subject = "AutoCognitix - Jelszo visszaallitas"
+        import urllib.parse
 
-        text_content = PASSWORD_RESET_TEMPLATE_HU.format(
-            name=name,
-            reset_link=reset_link,
-        )
-
-        html_content = PASSWORD_RESET_TEMPLATE_HTML.format(
-            name=name,
-            reset_link=reset_link,
-        )
-
-        return await self._send_email(
+        parsed = urllib.parse.urlparse(reset_link)
+        token = urllib.parse.parse_qs(parsed.query).get("token", [""])[0]
+        return await self.send_password_reset_email(
             to_email=to_email,
-            subject=subject,
-            text_content=text_content,
-            html_content=html_content,
+            reset_token=token,
+            username=name,
         )
 
     async def send_password_reset_email(
@@ -446,6 +436,11 @@ AutoCognitix csapat
         Returns:
             True if successful
         """
+        import html as html_lib
+
+        safe_name = html_lib.escape(name)
+        safe_login_link = html_lib.escape(login_link)
+
         subject = "Udvozoljuk az AutoCognitix-en!"
 
         text_content = WELCOME_TEMPLATE_HU.format(
@@ -454,8 +449,8 @@ AutoCognitix csapat
         )
 
         html_content = WELCOME_TEMPLATE_HTML.format(
-            name=name,
-            login_link=login_link,
+            name=safe_name,
+            login_link=safe_login_link,
         )
 
         return await self._send_email(
