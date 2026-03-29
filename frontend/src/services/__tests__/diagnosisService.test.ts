@@ -682,7 +682,7 @@ describe('diagnosisService (api-mocked)', () => {
     });
 
     it('should throw ApiError when validation fails (missing make)', async () => {
-      const { analyzeDiagnosis, ApiError: _ApiError } = await import('../diagnosisService');
+      const { analyzeDiagnosis } = await import('../diagnosisService');
       const { ApiError } = await import('../api');
 
       await expect(
