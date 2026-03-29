@@ -15,6 +15,7 @@ Author: AutoCognitix Team
 import asyncio
 import contextvars
 import hashlib
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -92,7 +93,7 @@ async def _run_neomodel_sync(func, *args, **kwargs):  # type: ignore[no-untyped-
     """
     from functools import partial
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, partial(func, *args, **kwargs))
 
 

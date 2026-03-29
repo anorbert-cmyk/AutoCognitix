@@ -39,6 +39,19 @@ const mockRequest = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+type UseStreamingDiagnosisHook =
+  typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
+
+/** Dynamically import the hook, returning null if the module does not exist. */
+async function importHook(): Promise<UseStreamingDiagnosisHook | null> {
+  try {
+    const mod = await import('../useStreamingDiagnosis')
+    return mod.useStreamingDiagnosis
+  } catch {
+    return null
+  }
+}
+
 /**
  * Build a mock AbortController and capture the callbacks passed to
  * streamDiagnosis so individual tests can fire them.
@@ -76,12 +89,8 @@ describe('useStreamingDiagnosis', () => {
   // 1. Initial (idle) state
   // -------------------------------------------------------------------------
   it('should start with idle state', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return // Skip if not implemented yet
-    }
+    const hook = await importHook()
+    if (!hook) return // Skip if not implemented yet
 
     createStreamMock()
 
@@ -99,12 +108,8 @@ describe('useStreamingDiagnosis', () => {
   // 2. Chunk accumulation + completion
   // -------------------------------------------------------------------------
   it('should accumulate chunks during streaming', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     const { getCallbacks } = createStreamMock()
 
@@ -144,12 +149,8 @@ describe('useStreamingDiagnosis', () => {
   // 3. Error handling
   // -------------------------------------------------------------------------
   it('should handle streaming errors gracefully', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     const { getCallbacks } = createStreamMock()
 
@@ -179,12 +180,8 @@ describe('useStreamingDiagnosis', () => {
   // 4. isStreaming flag is true while streaming
   // -------------------------------------------------------------------------
   it('should set isStreaming to true when startStreaming is called', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     createStreamMock()
 
@@ -202,12 +199,8 @@ describe('useStreamingDiagnosis', () => {
   // 5. stopStreaming calls abort
   // -------------------------------------------------------------------------
   it('should abort the request when stopStreaming is called', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     const { controller } = createStreamMock()
     const abortSpy = vi.spyOn(controller, 'abort')
@@ -232,12 +225,8 @@ describe('useStreamingDiagnosis', () => {
   // 6. State resets between streaming sessions
   // -------------------------------------------------------------------------
   it('should reset state when a new stream is started', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     const { getCallbacks } = createStreamMock()
 
@@ -276,12 +265,8 @@ describe('useStreamingDiagnosis', () => {
   // 7. Progress updates
   // -------------------------------------------------------------------------
   it('should update progress as events arrive', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     const { getCallbacks } = createStreamMock()
 
@@ -309,12 +294,8 @@ describe('useStreamingDiagnosis', () => {
   // 8. streamDiagnosis is called with the form data
   // -------------------------------------------------------------------------
   it('should call streamDiagnosis with the provided form data', async () => {
-    let hook: typeof import('../useStreamingDiagnosis').useStreamingDiagnosis
-    try {
-      ;({ useStreamingDiagnosis: hook } = await import('../useStreamingDiagnosis'))
-    } catch {
-      return
-    }
+    const hook = await importHook()
+    if (!hook) return
 
     createStreamMock()
 
