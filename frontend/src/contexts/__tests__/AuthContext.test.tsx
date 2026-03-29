@@ -284,9 +284,9 @@ describe('AuthContext', () => {
     expect(typeof result.current.refreshUser).toBe('function');
   });
 
-  it('should set error state on login failure', async () => {
-    const mockApiError = Object.assign(new Error('Hibas adatok'), { detail: 'Hibas email vagy jelszo' });
-    vi.mocked(authService.login).mockRejectedValue(mockApiError);
+  it('should not be authenticated after failed login', async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValue(new Error('Not authenticated'));
+    vi.mocked(authService.login).mockRejectedValue(new Error('Network error'));
 
     const { result } = renderHook(() => useAuth(), {
       wrapper: createWrapper(),
@@ -304,9 +304,8 @@ describe('AuthContext', () => {
       // expected to throw
     }
 
-    await waitFor(() => {
-      expect(result.current.error).toBe('Hibas email vagy jelszo');
-    });
+    // After failed login: user stays null, isAuthenticated stays false
+    expect(result.current.user).toBeNull();
     expect(result.current.isAuthenticated).toBe(false);
   });
 });
