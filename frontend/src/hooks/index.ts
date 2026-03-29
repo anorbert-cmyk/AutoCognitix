@@ -24,3 +24,9 @@ export {
 
 // Re-export toast hook for convenience
 export { useToast } from '../contexts/ToastContext'
+
+export {
+  useStreamingDiagnosis,
+  streamDiagnosisGenerator,
+} from './useStreamingDiagnosis'
+export type { StreamChunk } from './useStreamingDiagnosis'

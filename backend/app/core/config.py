@@ -153,11 +153,20 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 768
     HUSPACY_MODEL: str = "hu_core_news_lg"
 
+    # Frontend URL (used for password reset links, etc.)
+    FRONTEND_URL: str = "http://localhost:5173"
+
     # Email (n8n webhook or Resend API)
     N8N_WEBHOOK_URL: Optional[str] = None  # n8n base URL, e.g. https://your-n8n.app/webhook
     RESEND_API_KEY: Optional[str] = None
     EMAIL_FROM: str = "AutoCognitix <noreply@autocognitix.hu>"
     EMAIL_DEMO_MODE: bool = True  # True = csak logolás, nincs tényleges küldés
+
+    # SMTP (optional, fallback email transport)
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
 
     # Landing Page
     LANDING_PAGE_URL: str = "https://autocognitix-landing-production.up.railway.app"
