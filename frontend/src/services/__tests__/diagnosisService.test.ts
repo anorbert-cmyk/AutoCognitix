@@ -641,3 +641,229 @@ describe('diagnosisService', () => {
     });
   });
 });
+
+// =============================================================================
+// Non-streaming service functions — api default export is mocked above
+// =============================================================================
+
+describe('diagnosisService (api-mocked)', () => {
+  let mockApi: { get: ReturnType<typeof vi.fn>; post: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const apiModule = await import('../api');
+    mockApi = apiModule.default as unknown as typeof mockApi;
+  });
+
+  describe('analyzeDiagnosis', () => {
+    const validData = {
+      vehicleMake: 'Volkswagen',
+      vehicleModel: 'Golf',
+      vehicleYear: 2018,
+      vehicleEngine: '1.4 TSI',
+      dtcCodes: ['P0300'],
+      symptoms: 'Motor razkodik es egeszkimaradas tapasztalhato',
+    };
+
+    it('should call api.post with transformed snake_case body', async () => {
+      const mockResponse = { data: { id: 'diag-1', confidence_score: 0.9 } };
+      mockApi.post = vi.fn().mockResolvedValue(mockResponse);
+
+      const { analyzeDiagnosis } = await import('../diagnosisService');
+      const result = await analyzeDiagnosis(validData);
+
+      expect(mockApi.post).toHaveBeenCalledOnce();
+      const [endpoint, body] = (mockApi.post as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(endpoint).toBe('/diagnosis/analyze');
+      expect(body.vehicle_make).toBe('Volkswagen');
+      expect(body.vehicle_model).toBe('Golf');
+      expect(body.dtc_codes).toEqual(['P0300']);
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it('should throw ApiError when validation fails (missing make)', async () => {
+      const { analyzeDiagnosis, ApiError: _ApiError } = await import('../diagnosisService');
+      const { ApiError } = await import('../api');
+
+      await expect(
+        analyzeDiagnosis({ ...validData, vehicleMake: '' }),
+      ).rejects.toBeInstanceOf(ApiError);
+    });
+
+    it('should uppercase DTC codes before sending', async () => {
+      const mockResponse = { data: { id: 'diag-1' } };
+      mockApi.post = vi.fn().mockResolvedValue(mockResponse);
+
+      const { analyzeDiagnosis } = await import('../diagnosisService');
+      await analyzeDiagnosis({ ...validData, dtcCodes: ['p0300', 'p0301'] });
+
+      const [, body] = (mockApi.post as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(body.dtc_codes).toEqual(['P0300', 'P0301']);
+    });
+  });
+
+  describe('getDiagnosisById', () => {
+    it('should call api.get with the correct endpoint', async () => {
+      const mockResponse = { data: { id: 'abc-123', vehicle_make: 'BMW' } };
+      mockApi.get = vi.fn().mockResolvedValue(mockResponse);
+
+      const { getDiagnosisById } = await import('../diagnosisService');
+      const result = await getDiagnosisById('abc-123');
+
+      expect(mockApi.get).toHaveBeenCalledWith('/diagnosis/abc-123');
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it('should throw ApiError when id is empty', async () => {
+      const { getDiagnosisById } = await import('../diagnosisService');
+      const { ApiError } = await import('../api');
+
+      await expect(getDiagnosisById('')).rejects.toBeInstanceOf(ApiError);
+    });
+  });
+
+  describe('deleteDiagnosis', () => {
+    it('should call api.delete with the correct endpoint', async () => {
+      const mockResponse = { data: { success: true, message: 'Deleted' } };
+      mockApi.delete = vi.fn().mockResolvedValue(mockResponse);
+
+      const { deleteDiagnosis } = await import('../diagnosisService');
+      const result = await deleteDiagnosis('diag-999');
+
+      expect(mockApi.delete).toHaveBeenCalledWith('/diagnosis/diag-999');
+      expect(result.success).toBe(true);
+    });
+
+    it('should throw ApiError when id is empty', async () => {
+      const { deleteDiagnosis } = await import('../diagnosisService');
+      const { ApiError } = await import('../api');
+
+      await expect(deleteDiagnosis('')).rejects.toBeInstanceOf(ApiError);
+    });
+  });
+
+  describe('validateDiagnosisRequest', () => {
+    it('should return no errors for valid data', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: 'Ford',
+        vehicleModel: 'Focus',
+        vehicleYear: 2020,
+        dtcCodes: ['P0100'],
+        symptoms: 'Engine stutter at idle speed',
+      });
+      expect(errors).toHaveLength(0);
+    });
+
+    it('should return error when vehicleMake is empty', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: '',
+        vehicleModel: 'Focus',
+        vehicleYear: 2020,
+        dtcCodes: ['P0100'],
+        symptoms: 'Engine stutter at idle speed',
+      });
+      expect(errors.some((e) => e.includes('Gyarto'))).toBe(true);
+    });
+
+    it('should return error when vehicleModel is empty', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: 'Ford',
+        vehicleModel: '',
+        vehicleYear: 2020,
+        dtcCodes: ['P0100'],
+        symptoms: 'Engine stutter at idle speed',
+      });
+      expect(errors.some((e) => e.includes('Modell'))).toBe(true);
+    });
+
+    it('should return error for invalid year', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: 'Ford',
+        vehicleModel: 'Focus',
+        vehicleYear: 1800,
+        dtcCodes: ['P0100'],
+        symptoms: 'Engine stutter at idle speed',
+      });
+      expect(errors.some((e) => e.includes('evjarat'))).toBe(true);
+    });
+
+    it('should return error when symptoms are too short', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: 'Ford',
+        vehicleModel: 'Focus',
+        vehicleYear: 2020,
+        dtcCodes: ['P0100'],
+        symptoms: 'Short',
+      });
+      expect(errors.some((e) => e.includes('tunetleiras'))).toBe(true);
+    });
+
+    it('should return error when no DTC codes provided', async () => {
+      const { validateDiagnosisRequest } = await import('../diagnosisService');
+      const errors = validateDiagnosisRequest({
+        vehicleMake: 'Ford',
+        vehicleModel: 'Focus',
+        vehicleYear: 2020,
+        dtcCodes: [],
+        symptoms: 'Engine stutter at idle speed',
+      });
+      expect(errors.some((e) => e.includes('DTC'))).toBe(true);
+    });
+  });
+
+  describe('formatConfidenceScore', () => {
+    it('should format 0.85 as 85%', async () => {
+      const { formatConfidenceScore } = await import('../diagnosisService');
+      expect(formatConfidenceScore(0.85)).toBe('85%');
+    });
+
+    it('should format 0 as 0%', async () => {
+      const { formatConfidenceScore } = await import('../diagnosisService');
+      expect(formatConfidenceScore(0)).toBe('0%');
+    });
+
+    it('should format 1 as 100%', async () => {
+      const { formatConfidenceScore } = await import('../diagnosisService');
+      expect(formatConfidenceScore(1)).toBe('100%');
+    });
+  });
+
+  describe('getConfidenceLevelHu', () => {
+    it('should return Nagyon magas for score >= 0.8', async () => {
+      const { getConfidenceLevelHu } = await import('../diagnosisService');
+      expect(getConfidenceLevelHu(0.9)).toBe('Nagyon magas');
+    });
+
+    it('should return Alacsony for score between 0.2 and 0.4', async () => {
+      const { getConfidenceLevelHu } = await import('../diagnosisService');
+      expect(getConfidenceLevelHu(0.3)).toBe('Alacsony');
+    });
+  });
+
+  describe('formatTime', () => {
+    it('should format minutes under an hour', async () => {
+      const { formatTime } = await import('../diagnosisService');
+      expect(formatTime(45)).toBe('45 perc');
+    });
+
+    it('should format exactly 60 minutes as 1 hour', async () => {
+      const { formatTime } = await import('../diagnosisService');
+      expect(formatTime(60)).toBe('1 ora');
+    });
+
+    it('should format 90 minutes as 1 ora 30 perc', async () => {
+      const { formatTime } = await import('../diagnosisService');
+      expect(formatTime(90)).toBe('1 ora 30 perc');
+    });
+
+    it('should return Nincs becsles for undefined', async () => {
+      const { formatTime } = await import('../diagnosisService');
+      expect(formatTime(undefined)).toBe('Nincs becslés');
+    });
+  });
+});
