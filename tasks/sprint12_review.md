@@ -231,3 +231,53 @@ The `is_strong` threshold in `check_password_strength()` is `score >= 3` (3 out 
 | `check_password_strength` score vs validator threshold | NOTE | Score≥3 vs all-5 required — UI vs API discrepancy, not a security bug |
 
 **No blocking issues.** The PasswordStrength implementation is solid and correctly integrated into `ResetPasswordRequest`.
+
+---
+
+## PasswordStrength → PasswordReset-DB Review
+
+**Reviewer:** PasswordStrength Lead
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/db/postgres/models.py` (PasswordResetToken model)
+- `backend/alembic/versions/017_add_password_reset_tokens.py` (migration)
+
+---
+
+### PasswordResetToken model — PASS
+
+`PasswordResetToken` model exists in `models.py` with `__tablename__ = "password_reset_tokens"`.
+
+| Requirement | Status | Detail |
+|-------------|--------|--------|
+| Model exists | PASS | `class PasswordResetToken(Base)` defined |
+| `token_hash` unique constraint | PASS | `mapped_column(String(64), nullable=False, unique=True)` |
+| `expires_at` DateTime field | PASS | `mapped_column(DateTime(timezone=True), nullable=False)` — timezone-aware |
+| `used` boolean field | PASS | `mapped_column(Boolean, default=False, nullable=False)` |
+| `user_id` FK with index | PASS | `ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True` |
+| Relationship to User | PASS | `user: Mapped["User"]` backref + `User.reset_tokens` cascade delete-orphan |
+
+---
+
+### Migration 017 — PASS
+
+| Requirement | Status | Detail |
+|-------------|--------|--------|
+| `down_revision` correct (not None) | PASS | `down_revision = "016_add_garage_tables"` — explicit, correct chain |
+| `token_hash` UniqueConstraint | PASS | `sa.UniqueConstraint("token_hash")` in `op.create_table` |
+| `expires_at` column | PASS | `sa.DateTime(timezone=True), nullable=False` |
+| `used` boolean | PASS | `sa.Boolean(), nullable=False, server_default="false"` |
+| Index on `user_id` | PASS | `op.create_index("ix_password_reset_tokens_user_id", ...)` |
+| `downgrade()` drops index before table | PASS | Correct teardown order |
+| Alembic unused-global suppression | PASS | `# lgtm[py/unused-global-variable]` on docstring and `revision`/`down_revision` lines |
+
+---
+
+### Summary
+
+All checklist items pass. The PasswordReset-DB pair's implementation is complete and correct:
+- Model and migration are consistent with each other
+- Security properties (hashed token, expiry, single-use flag) are properly enforced at DB level
+- `token_hash` uniqueness prevents token reuse/collision attacks
+- CASCADE delete on `user_id` ensures no orphaned tokens on user deletion
+- No blocking issues found.
