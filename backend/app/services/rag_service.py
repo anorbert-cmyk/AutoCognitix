@@ -1216,7 +1216,8 @@ class RAGService:
                 sources.append(
                     {
                         "type": item.source.value,
-                        "title": item.content.get("code") or item.content.get("title", source_name),
+                        "title": (item.content or {}).get("code")
+                        or (item.content or {}).get("title", source_name),
                         "relevance_score": item.score,
                     }
                 )

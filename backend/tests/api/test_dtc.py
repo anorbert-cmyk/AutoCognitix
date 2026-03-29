@@ -400,13 +400,13 @@ class TestDTCCreate:
 
     @pytest.mark.asyncio
     async def test_create_dtc_returns_201(
-        self, async_client: AsyncClient, dtc_create_data: dict, auth_headers: dict
+        self, async_client: AsyncClient, dtc_create_data: dict, admin_auth_headers: dict
     ):
         """Test creating DTC returns 201."""
         response = await async_client.post(
             "/api/v1/dtc/",
             json=dtc_create_data,
-            headers=auth_headers,
+            headers=admin_auth_headers,
         )
 
         assert response.status_code == 201
@@ -415,7 +415,7 @@ class TestDTCCreate:
 
     @pytest.mark.asyncio
     async def test_create_dtc_normalizes_code_to_uppercase(
-        self, async_client: AsyncClient, auth_headers: dict
+        self, async_client: AsyncClient, admin_auth_headers: dict
     ):
         """Test that created DTC code is normalized to uppercase."""
         response = await async_client.post(
@@ -426,7 +426,7 @@ class TestDTCCreate:
                 "category": "powertrain",
                 "severity": "medium",
             },
-            headers=auth_headers,
+            headers=admin_auth_headers,
         )
 
         assert response.status_code == 201
@@ -435,7 +435,7 @@ class TestDTCCreate:
 
     @pytest.mark.asyncio
     async def test_create_duplicate_dtc_returns_400(
-        self, async_client: AsyncClient, sample_dtc_codes, auth_headers: dict
+        self, async_client: AsyncClient, sample_dtc_codes, admin_auth_headers: dict
     ):
         """Test creating duplicate DTC returns 400."""
         response = await async_client.post(
@@ -446,20 +446,20 @@ class TestDTCCreate:
                 "category": "powertrain",
                 "severity": "medium",
             },
-            headers=auth_headers,
+            headers=admin_auth_headers,
         )
 
         assert response.status_code == 400
 
     @pytest.mark.asyncio
     async def test_create_dtc_missing_required_fields_returns_422(
-        self, async_client: AsyncClient, auth_headers: dict
+        self, async_client: AsyncClient, admin_auth_headers: dict
     ):
         """Test creating DTC without required fields returns 422."""
         response = await async_client.post(
             "/api/v1/dtc/",
             json={"code": "P9999"},  # Missing description_en, category, severity
-            headers=auth_headers,
+            headers=admin_auth_headers,
         )
 
         assert response.status_code == 422
@@ -469,11 +469,13 @@ class TestDTCBulkImport:
     """Tests for POST /api/v1/dtc/bulk endpoint."""
 
     @pytest.mark.asyncio
-    async def test_bulk_import_returns_201(self, async_client: AsyncClient, auth_headers: dict):
+    async def test_bulk_import_returns_201(
+        self, async_client: AsyncClient, admin_auth_headers: dict
+    ):
         """Test bulk import returns 201."""
         response = await async_client.post(
             "/api/v1/dtc/bulk",
-            headers=auth_headers,
+            headers=admin_auth_headers,
             json={
                 "codes": [
                     {
@@ -502,11 +504,13 @@ class TestDTCBulkImport:
         assert "total" in data
 
     @pytest.mark.asyncio
-    async def test_bulk_import_counts_created(self, async_client: AsyncClient, auth_headers: dict):
+    async def test_bulk_import_counts_created(
+        self, async_client: AsyncClient, admin_auth_headers: dict
+    ):
         """Test that bulk import correctly counts created codes."""
         response = await async_client.post(
             "/api/v1/dtc/bulk",
-            headers=auth_headers,
+            headers=admin_auth_headers,
             json={
                 "codes": [
                     {
@@ -534,12 +538,12 @@ class TestDTCBulkImport:
 
     @pytest.mark.asyncio
     async def test_bulk_import_skips_existing_without_overwrite(
-        self, async_client: AsyncClient, sample_dtc_codes, auth_headers: dict
+        self, async_client: AsyncClient, sample_dtc_codes, admin_auth_headers: dict
     ):
         """Test that bulk import skips existing codes when overwrite=false."""
         response = await async_client.post(
             "/api/v1/dtc/bulk",
-            headers=auth_headers,
+            headers=admin_auth_headers,
             json={
                 "codes": [
                     {
@@ -561,12 +565,12 @@ class TestDTCBulkImport:
 
     @pytest.mark.asyncio
     async def test_bulk_import_updates_existing_with_overwrite(
-        self, async_client: AsyncClient, sample_dtc_codes, auth_headers: dict
+        self, async_client: AsyncClient, sample_dtc_codes, admin_auth_headers: dict
     ):
         """Test that bulk import updates existing codes when overwrite=true."""
         response = await async_client.post(
             "/api/v1/dtc/bulk",
-            headers=auth_headers,
+            headers=admin_auth_headers,
             json={
                 "codes": [
                     {
