@@ -249,6 +249,96 @@ describe('ApiError', () => {
     const error = new ApiError('test');
     expect(error).toBeInstanceOf(Error);
   });
+
+  it('should create ApiError from AxiosError with 400 response using detail', () => {
+    const axiosError = {
+      response: {
+        status: 400,
+        data: { detail: 'Bad request data' },
+      },
+      message: 'Bad Request',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(400);
+    expect(apiError.message).toBe('Bad request data');
+  });
+
+  it('should create ApiError from AxiosError with 404 response using detail', () => {
+    const axiosError = {
+      response: {
+        status: 404,
+        data: { detail: 'Diagnosis not found' },
+      },
+      message: 'Not Found',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(404);
+    expect(apiError.message).toBe('Diagnosis not found');
+  });
+
+  it('should create ApiError from AxiosError with 502 response', () => {
+    const axiosError = {
+      response: {
+        status: 502,
+        data: { detail: 'Service unavailable' },
+      },
+      message: 'Bad Gateway',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(502);
+    expect(apiError.message).toBe('Service unavailable');
+  });
+
+  it('should create ApiError from AxiosError with unknown status using detail fallback', () => {
+    const axiosError = {
+      response: {
+        status: 418,
+        data: { detail: "I'm a teapot" },
+      },
+      message: "I'm a teapot",
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.status).toBe(418);
+    expect(apiError.message).toBe("I'm a teapot");
+  });
+
+  it('should carry field and code information from AxiosError response', () => {
+    const axiosError = {
+      response: {
+        status: 422,
+        data: { detail: 'Invalid field', code: 'VALIDATION_ERROR', field: 'email' },
+      },
+      message: 'Validation Error',
+      isAxiosError: true,
+      config: {},
+      toJSON: () => ({}),
+    } as any;
+
+    const apiError = ApiError.fromAxiosError(axiosError);
+    expect(apiError.code).toBe('VALIDATION_ERROR');
+    expect(apiError.field).toBe('email');
+  });
+
+  it('should be an instance of Error', () => {
+    const error = new ApiError('test');
+    expect(error).toBeInstanceOf(Error);
+  });
 });
 
 describe('createLoadingState', () => {
