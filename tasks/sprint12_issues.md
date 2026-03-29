@@ -152,6 +152,167 @@ The `parseSSEEvents` function only extracts `data:` lines and discards the `even
 | 9 | fullText accumulation | MEDIUM | Issue #3 — `analysis` event uses `stage`/`message`; hook reads `text` → always empty |
 | 10 | Type safety | MEDIUM | Issue #6 — `complete` event sends summary only; `fullResult` contract broken vs `StreamChunk` |
 
+---
+
+## Auth Security Audit
+**Auditor:** Auth-Security Specialist
+**Branch:** `claude/ralph-loop-global-memory-lFEhR`
+**Date:** 2026-03-29
+**Files reviewed:**
+- `backend/app/api/v1/endpoints/auth.py`
+- `backend/app/core/security.py`
+- `backend/app/api/v1/schemas/auth.py`
+- `backend/app/db/postgres/models.py` (User, PasswordResetToken)
+- `backend/app/db/redis_cache.py`
+- `backend/app/core/csrf.py`
+- `backend/app/core/rate_limiter.py`
+- `backend/app/core/config.py`
+- `backend/app/services/email_service.py`
+
+---
+
+### Summary
+
+13 issues found: 2 CRITICAL, 5 HIGH, 5 MEDIUM, 1 LOW.
+
+---
+
+### CRITICAL
+
+#### CRIT-1: Token blacklist fail-open bypasses revocation on Redis outage
+**File:** `backend/app/core/security.py`, lines 262–274
+**Description:** `is_token_blacklisted()` returns `False` (token accepted) when the Redis circuit breaker is open or when any exception occurs. The comment justifies this as "secondary defence; JWTs still have expiry." However, this means a logged-out token — or an explicitly revoked token for a compromised account — will continue to be accepted for the full remaining JWT lifetime (up to 30 minutes for access tokens, 7 days for refresh tokens) during any Redis outage. Contrast with `check_rate_limit()` in the same codebase, which correctly fails closed.
+**Risk:** An attacker who steals a logged-out token gains authenticated access during Redis degradation. This also defeats the emergency-revocation use case.
+**Evidence:**
+```python
+# is_token_blacklisted - line 262
+if cache.is_circuit_open():
+    logger.warning("Redis circuit breaker open - accepting token (fail-open)")
+    return False  # treats blacklisted tokens as valid
+...
+except Exception as e:
+    logger.warning(f"... fail-open): {e}")
+    return False  # same fail-open on any exception
+```
+
+---
+
+#### CRIT-2: Legacy password reset path stores raw JWT in database and leaks it in URL
+**File:** `backend/app/api/v1/endpoints/auth.py`, lines 937–960
+**Description:** When `PasswordResetToken` DB model is unavailable (legacy fallback, triggered by `ImportError` or `AttributeError`), the code calls `create_password_reset_token(user.email)` — a full JWT — and stores it **raw** (not hashed) in `users.password_reset_token` (a plain `String(255)` column). The same raw JWT is then placed in the reset URL as a query parameter (`?token=<jwt>`). Two sub-issues:
+1. **Database exposure:** Anyone with read access to the `users` table (DBA, analytics, backup) can trivially reset any user's password without intercepting email.
+2. **URL/referrer leakage:** Reset tokens in GET query strings appear in server access logs, browser history, and `Referer` headers sent to third-party analytics. The primary strategy (SHA-256 hashed `PasswordResetToken` model) is correct; this fallback is insecure.
+**Evidence:**
+```python
+plain_token = create_password_reset_token(user.email)        # raw JWT
+await repository.set_password_reset_token(user, plain_token)  # stored raw in DB
+...
+reset_link = f"{frontend_url}/reset-password?token={plain_token}"  # JWT in URL
+```
+
+---
+
+### HIGH
+
+#### HIGH-1: JWT decode leeway of 30 seconds is excessively generous
+**File:** `backend/app/core/security.py`, line 176
+**Description:** `decode_token()` sets `leeway=30` (seconds). A token with `exp` up to 30 seconds in the past is still accepted. While small clock-skew accommodation is standard, 30 seconds doubles the effective window of a stolen token that just expired (especially significant for short-lived 30-minute access tokens). The PyJWT default leeway is 0; standard recommendations are 5–10 seconds for clock skew.
+**Evidence:**
+```python
+payload: Dict[str, Any] = jwt.decode(
+    token, settings.JWT_SECRET_KEY,
+    algorithms=[settings.JWT_ALGORITHM],
+    leeway=30,  # 30-second grace window
+)
+```
+
+#### HIGH-2: `change_password` does not invalidate existing tokens/sessions
+**File:** `backend/app/api/v1/endpoints/auth.py`, lines 856–888
+**Description:** After a successful password change, the endpoint only updates the hashed password. It does NOT blacklist the current access token (used to make the request) nor any refresh tokens issued before the change. An attacker with a stolen access or refresh token can continue to use pre-change sessions for up to 30 minutes (access token TTL) or 7 days (refresh token TTL). The `logout` and `reset_password` endpoints do blacklist tokens, making this omission inconsistent.
+
+#### HIGH-3: Legacy password reset does not blacklist the JWT after use
+**File:** `backend/app/api/v1/endpoints/auth.py`, lines 1051–1088
+**Description:** In the JWT fallback strategy (Strategy 2), `blacklist_token(request_data.token)` is called at line 1081 AFTER `update_password()` and `db.commit()`. If `blacklist_token` fails (Redis down), the same JWT reset token can be replayed to reset the password again. Because of the fail-open behaviour in CRIT-1, there is no safety net. The DB-backed strategy (Strategy 1) correctly marks `reset_record.used = True` in the same transaction, so this applies only to the legacy JWT path.
+
+#### HIGH-4: `forgot-password` rate limit window is 1 minute (not 15 minutes)
+**File:** `backend/app/core/rate_limiter.py`, line 224
+**Description:** `forgot-password` is limited to 5 requests per 60 seconds per IP. With a 1-minute window, an attacker can trigger 5 password-reset emails per minute = 300 emails/hour per IP before any blocking, enabling email flooding against registered users. Compare to `reset-password`: `(5, 300)` — 5 per 5 minutes — showing the intent to be stricter. Standard recommendation is 5 requests per 15 minutes.
+**Evidence:**
+```python
+"/api/v1/auth/forgot-password": (5, 60),   # 5 per MINUTE — too loose
+"/api/v1/auth/reset-password": (5, 300),   # 5 per 5 minutes — for reference
+```
+
+#### HIGH-5: `change_password` logs full email without masking (PII leakage)
+**File:** `backend/app/api/v1/endpoints/auth.py`, line 886
+**Description:** `logger.info(f"User changed password: {current_user.email}")` logs the user's full email address without masking or `sanitize_log()`. All other auth endpoints mask email as `{email[:3]}***@***`. If logs are aggregated to a central logging system, this leaks full PII.
+**Evidence:**
+```python
+logger.info(f"User changed password: {current_user.email}")  # full email, not masked
+# Correct pattern used elsewhere:
+logger.info(f"User logged in: {user.email[:3]}***@***")
+```
+
+---
+
+### MEDIUM
+
+#### MED-1: JWT algorithm is HS256 (symmetric) — single secret signs and verifies
+**File:** `backend/app/core/config.py`, line 38; `backend/app/core/security.py`, lines 68/104/140/175
+**Description:** `JWT_ALGORITHM = "HS256"` uses a shared symmetric secret. Any service or process that can verify tokens can also forge them. If `JWT_SECRET_KEY` is ever leaked (e.g., via environment variable exposure), all tokens can be forged indefinitely until the secret is rotated. RS256 (asymmetric) would allow public-key-only verification in downstream services without exposing signing capability. Risk is medium in a monolith; would become HIGH in a microservices deployment.
+
+#### MED-2: Password reset JWT uses email address as `sub` claim (PII in token payload)
+**File:** `backend/app/core/security.py`, lines 128–143
+**Description:** `create_password_reset_token()` sets `"sub": str(subject)` where subject is the user's email. The JWT payload is signed but not encrypted — it is base64-decodable by anyone who sees the token. If this JWT is ever decoded and logged (e.g., in the legacy JWT path), the subject field directly reveals the target email. The preferred `PasswordResetToken` DB strategy avoids this by using opaque random tokens.
+
+#### MED-3: CSRF double-submit cookie not bound to session/user identity
+**File:** `backend/app/core/csrf.py`, lines 86–104
+**Description:** The CSRF cookie (`csrf_token`) is set on any unauthenticated GET request with no user identity binding. An attacker on the same subdomain (subdomain takeover scenario) could inject a known CSRF cookie value and a matching `X-CSRF-Token` header to pass validation. This is an inherent limitation of the basic double-submit pattern without a signed or server-session-bound token.
+
+#### MED-4: `verify_csrf_token()` only checks token length — potential future misuse
+**File:** `backend/app/core/security.py`, lines 396–409
+**Description:** `verify_csrf_token()` validates a CSRF token by checking `len(token) >= 16` only. The actual CSRF enforcement is in `CSRFMiddleware` which correctly uses `hmac.compare_digest`. If `verify_csrf_token()` is ever called elsewhere (future endpoints, decorators), its length-only check would not prevent token substitution. The docstring "validated for presence only" gives future developers a false sense of security.
+
+#### MED-5: `UserCreate` schema allows self-assigning `"mechanic"` role
+**File:** `backend/app/api/v1/schemas/auth.py`, line 31; `backend/app/api/v1/endpoints/auth.py`, line 399
+**Description:** The register endpoint blocks `"admin"` self-registration but allows `"mechanic"` role to be self-assigned: `role = user_data.role if user_data.role != "admin" else "user"`. If the mechanic role carries elevated permissions (access to other users' garage data, special diagnosis routes, etc.), this is a privilege escalation path. Registration should default all new users to `"user"` unconditionally; role elevation should require admin action.
+
+---
+
+### LOW
+
+#### LOW-1: `bcrypt` cost factor not explicitly configured — relies on passlib default
+**File:** `backend/app/core/security.py`, line 25
+**Description:** `CryptContext(schemes=["bcrypt"], deprecated="auto")` uses passlib's default bcrypt cost factor (currently 12 rounds, which meets the minimum threshold). The cost is not explicitly pinned. If passlib changes its default in a future version, the cost factor could silently decrease. Best practice: explicitly set `bcrypt__rounds=12` (or higher, e.g. 13–14 for production) in the `CryptContext` constructor.
+
+#### LOW-2: `full_name` not confirmed to be HTML-escaped in welcome email
+**File:** `backend/app/api/v1/endpoints/auth.py`, lines 421–424
+**Description:** `send_welcome_email(to_email=user.email, name=user.full_name or user.email, ...)` passes unsanitized `full_name`. The `send_password_reset_email` method in `email_service.py` correctly applies `html.escape(username)`. If the welcome email HTML template renders `name` without escaping, a user registering with `<script>alert(1)</script>` as their name could produce an XSS payload in the rendered email. Needs confirmation that `send_welcome_email` escapes its `name` parameter before inserting it into any HTML body.
+
+#### LOW-3: No `Retry-After` header on HTTP 423 account lockout response
+**File:** `backend/app/api/v1/endpoints/auth.py`, lines 502–508
+**Description:** When an account is locked, the 423 response includes a message but no `Retry-After` header telling clients when to retry. This may cause client implementations to poll aggressively. Minor standards compliance gap (RFC 7231).
+
+---
+
+### Checklist Results
+
+| # | Check | Result | Finding |
+|---|-------|--------|---------|
+| 1 | Password reset full chain | FAIL | CRIT-2 legacy path stores raw JWT in DB; HIGH-3 token not invalidated atomically |
+| 2 | JWT expiry/algorithm/claim protection | PASS/WARN | Expiry present; algorithm HS256 (MED-1); claim protection present; leeway=30s (HIGH-1) |
+| 3 | Brute-force: forgot-password rate limiting | WARN | 5/min (HIGH-4) — should be 5/15min |
+| 4 | Token leakage (log/URL) | FAIL | CRIT-2 JWT in URL query string (legacy path); HIGH-5 email in logs |
+| 5 | Timing attacks | PASS | bcrypt dummy hash on unknown email; `hmac.compare_digest` for CSRF |
+| 6 | Account enumeration | PASS | forgot-password always returns 202; minor timing difference on inactive accounts |
+| 7 | Session fixation | N/A | JWT-based, no server session state; new tokens issued on login |
+| 8 | Password hash | WARN | bcrypt used, cost not explicitly pinned (LOW-1) |
+| 9 | CSRF | PASS/WARN | Middleware present with `hmac.compare_digest`; cookie not session-bound (MED-3) |
+| 10 | Email XSS | WARN | `send_password_reset_email` uses `html.escape`; `send_welcome_email` not confirmed (LOW-2) |
+| 11 | Token blacklist fail behaviour | FAIL | CRIT-1 fail-open on Redis outage |
+| 12 | Change-password session invalidation | FAIL | HIGH-2 existing tokens not revoked after password change |
+| 13 | Role self-assignment | FAIL | MED-5 mechanic role self-assignable at registration |
+
 ## Database Audit
 **Auditor:** Database Specialist
 **Date:** 2026-03-29
@@ -846,3 +1007,225 @@ The `drop_console` terser option is configured for production builds (`vite.conf
 | LOW-3 | LOW | `GET /diagnosis/history/list` | date_from > date_to not validated |
 | LOW-4 | LOW | `POST /diagnosis/analyze` | HTTP 201 returned for duplicate submissions (semantic error) |
 | LOW-5 | LOW | `GET /vehicles/{make}/{model}/common-issues` | No result limit; unbounded Neo4j traversal |
+
+---
+
+## Performance Audit
+**Auditor:** Performance Specialist
+**Date:** 2026-03-29
+**Branch:** claude/ralph-loop-global-memory-lFEhR
+**Files reviewed:**
+- `backend/app/db/qdrant_client.py`
+- `backend/app/services/rag_service.py`
+- `backend/app/services/embedding_service.py`
+- `backend/app/db/redis_cache.py`
+- `backend/app/core/rate_limit.py`
+- `backend/app/api/v1/endpoints/diagnosis.py`
+
+---
+
+### PERF-01 — MEDIUM: Thread pool fixed at 4 workers; HuBERT inference saturates it under concurrency
+
+**File:** `backend/app/services/embedding_service.py`, line 57
+
+```python
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+```
+
+`embed_text_async` and `embed_batch_async` both offload to this single module-level
+`ThreadPoolExecutor`. Under concurrent requests (e.g. 5+ simultaneous diagnoses) all
+four slots can be occupied by long-running HuBERT inference calls, causing later callers
+to queue indefinitely inside `loop.run_in_executor`. There is no timeout on
+`run_in_executor` calls, so a single slow inference can block subsequent requests for the
+full duration of the HuBERT forward pass (seconds on CPU).
+
+**Recommendation:** Size the pool relative to available CPUs; wrap `run_in_executor` in
+`asyncio.wait_for` to enforce a timeout.
+
+---
+
+### PERF-02 — MEDIUM: `embed_batch` sync cache path is dead code — always falls through to inference
+
+**File:** `backend/app/services/embedding_service.py`, lines 425–442
+
+```python
+if loop is None:
+    texts_to_embed = [(i, t) for i, t in enumerate(texts)]
+else:
+    texts_to_embed = [(i, t) for i, t in enumerate(texts)]
+```
+
+Both branches produce identical results: every text goes to `texts_to_embed` and nothing
+is fetched from or written to Redis. `cached_embeddings` remains all-`None`. Any code
+path using the sync `embed_batch` directly (warmup, `get_similar_texts`) always
+re-infers even for repeated queries.
+
+---
+
+### PERF-03 — MEDIUM: `embed_batch_async` caches embeddings one-at-a-time (N sequential SETEX calls)
+
+**File:** `backend/app/services/embedding_service.py`, lines 767–775
+
+```python
+for text, emb in zip(uncached_texts, embeddings):
+    await cache.set_embedding(text, emb)
+```
+
+N sequential round-trips to Redis instead of a single pipeline. `RedisCacheService.mset`
+with pipeline support already exists but is not used here. Significant overhead during
+batch indexing workloads.
+
+---
+
+### PERF-04 — LOW: `ContextCache` stores full `List[RetrievedItem]` payloads with no per-entry size cap
+
+**File:** `backend/app/services/rag_service.py`, lines 363–398
+
+`ContextCache` caches full result lists including long description strings and symptom
+arrays. No upper bound on individual entry size; large NHTSA complaint payloads or rich
+Neo4j graph objects can cause unexpected memory spikes.
+
+---
+
+### PERF-05 — LOW: `ContextCache._make_key` serialises full result list on every cache write
+
+**File:** `backend/app/services/rag_service.py`, lines 371–393
+
+```python
+def _make_key(self, *args) -> str:
+    return hashlib.sha256(str(args).encode()).hexdigest()
+```
+
+When `args` contains a `List[RetrievedItem]`, `str(args)` serialises every field of
+every item on each cache write — O(n) temporary allocation for a key that only needs to
+encode the query string and collection name.
+
+---
+
+### PERF-06 — MEDIUM: `HybridRanker._get_item_key` hashes full `str(content)` dict on every item
+
+**File:** `backend/app/services/rag_service.py`, lines 335–338
+
+```python
+def _get_item_key(self, item: RetrievedItem) -> str:
+    content_str = str(item.content)
+    return hashlib.sha256(content_str.encode()).hexdigest()
+```
+
+Every item in every ranked list is hashed by serialising its entire `content` dict. In
+`assemble_context` there can be 25+ items. A structural key (e.g. source + code/title)
+would be both faster and equally collision-resistant.
+
+---
+
+### PERF-07 — HIGH: `quick_analyze` endpoint has an N+1 DB query pattern
+
+**File:** `backend/app/api/v1/endpoints/diagnosis.py`, lines 664–686
+
+```python
+for code in dtc_codes:
+    details = await service.dtc_repository.get_by_code(code)
+```
+
+Up to 10 sequential `SELECT … WHERE code = ?` queries instead of a single
+`SELECT … WHERE code IN (…)`. `retrieve_from_postgres` already demonstrates the correct
+pattern with `DTCCode.code.in_([…])`.
+
+---
+
+### PERF-08 — MEDIUM: `delete_pattern` loads all matching keys into memory before deleting
+
+**File:** `backend/app/db/redis_cache.py`, lines 365–376
+
+```python
+keys = []
+async for key in self._client.scan_iter(match=pattern):
+    keys.append(key)
+if keys:
+    result: int = await self._client.delete(*keys)
+```
+
+All matching keys are collected into a Python list, then passed as a single `DELETE`
+command. A large wildcard match (e.g. full cache wipe) can exhaust memory and produce an
+oversized Redis command. Chunked deletion (batches of 500 via pipeline) is safer.
+
+---
+
+### PERF-09 — LOW: `InMemoryRateLimiter` eviction sorts the entire 10k-entry dict per over-limit request
+
+**File:** `backend/app/core/rate_limit.py`, lines 133–141
+
+O(N log N) full sort of `_minute_windows` on a hot path whenever the cap is exceeded.
+An `OrderedDict` or min-heap would give O(log N) eviction.
+
+---
+
+### PERF-10 — MEDIUM: `RateLimitMiddleware` bypasses Redis — in-memory dicts grow unboundedly per worker
+
+**File:** `backend/app/core/rate_limit.py`, lines 543–574
+
+`RateLimitMiddleware` calls `_rate_limiter.check_rate_limit` / `record_request` directly,
+bypassing `check_rate_limit_with_redis_fallback`. Limits are not shared across workers and
+both the middleware and the dependency-based rate limiter track the same client keys
+separately (in-memory vs Redis), causing inconsistent enforcement and doubling in-memory
+dict growth.
+
+---
+
+### PERF-11 — LOW: `RateLimitMiddleware` uses `ips[-1]` — different key selection from dependency path
+
+**File:** `backend/app/core/rate_limit.py`, lines 533–535
+
+The middleware hard-codes `ips[-1]` while the dependency uses `settings.TRUSTED_PROXY_COUNT`.
+Rate-limit keys differ between the two paths even for the same client.
+
+---
+
+### PERF-12 — LOW: `get_cache_service()` lacks async lock — concurrent coroutines can orphan connection pools
+
+**File:** `backend/app/db/redis_cache.py`, lines 672–682
+
+```python
+async def get_cache_service() -> RedisCacheService:
+    global _cache_service
+    if _cache_service is None:
+        _cache_service = RedisCacheService()
+        await _cache_service.connect()
+    return _cache_service
+```
+
+No lock around `if _cache_service is None`. Two concurrent coroutines can both enter the
+branch before the first `connect()` completes, calling `connect()` twice and creating two
+`ConnectionPool` objects. The second overwrites the class-level `_pool` reference,
+orphaning the first pool and leaking its connections. An `asyncio.Lock` should guard
+initialisation.
+
+---
+
+### PERF-13 — LOW: `_stream_results` inserts `asyncio.sleep(0.02)` between every SSE event
+
+**File:** `backend/app/api/v1/endpoints/diagnosis.py`, lines 731–753
+
+Up to 5 causes + 5 repairs = up to 200 ms of intentional delay per stream. A single
+`await asyncio.sleep(0)` is sufficient to yield control to the event loop; the 20 ms
+granularity adds latency with no benefit.
+
+---
+
+### Performance Audit Summary
+
+| ID | Severity | Area | Issue |
+|----|----------|------|-------|
+| PERF-01 | MEDIUM | CPU / Thread Pool | Fixed 4-worker pool saturates under concurrent HuBERT inference; no timeout on `run_in_executor` |
+| PERF-02 | MEDIUM | Cache / Embedding | `embed_batch` sync cache path dead code — always re-infers |
+| PERF-03 | MEDIUM | Cache / Redis | Batch embedding writes: N sequential SETEX instead of pipeline |
+| PERF-04 | LOW | Memory | `ContextCache` stores full payloads; no per-entry size cap |
+| PERF-05 | LOW | CPU | `ContextCache._make_key` serialises full result list on every write |
+| PERF-06 | MEDIUM | CPU | `HybridRanker._get_item_key` SHA-256s full `str(content)` per item |
+| PERF-07 | HIGH | DB / N+1 | `quick_analyze` issues one SELECT per DTC code instead of IN query |
+| PERF-08 | MEDIUM | Memory / Redis | `delete_pattern` loads all matching keys into memory before bulk delete |
+| PERF-09 | LOW | CPU | `InMemoryRateLimiter` eviction: O(N log N) sort per over-limit request |
+| PERF-10 | MEDIUM | Memory / Rate Limit | `RateLimitMiddleware` bypasses Redis; in-memory dicts grow unboundedly |
+| PERF-11 | LOW | Consistency | Middleware uses `ips[-1]` vs dependency `TRUSTED_PROXY_COUNT` |
+| PERF-12 | LOW | Memory / Redis | `get_cache_service()` lacks async lock; concurrent init can orphan pools |
+| PERF-13 | LOW | Latency / SSE | `asyncio.sleep(0.02)` between SSE events adds ≥200 ms artificial latency |
