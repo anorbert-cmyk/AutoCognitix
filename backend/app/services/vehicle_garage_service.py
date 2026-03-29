@@ -118,7 +118,7 @@ class VehicleGarageService:
                 and_(UserVehicle.id == vehicle_id, UserVehicle.user_id == user_id)
             )
         )
-        return result.scalar_one_or_none()
+        return result.scalar_one_or_none()  # type: ignore[no-any-return]
 
     async def update_vehicle(
         self,
@@ -346,7 +346,7 @@ class VehicleGarageService:
         reminder.updated_at = datetime.now(timezone.utc)
         await db.flush()
         await db.refresh(reminder)
-        return reminder
+        return reminder  # type: ignore[no-any-return]
 
     async def delete_reminder(
         self,

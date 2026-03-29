@@ -175,7 +175,7 @@ async def create_vehicle(
             },
         )
 
-        return UserVehicleResponse.model_validate(vehicle)
+        return UserVehicleResponse.model_validate(vehicle)  # type: ignore[no-any-return]
 
     except VehicleGarageServiceError as exc:
         raise HTTPException(
@@ -213,7 +213,7 @@ async def get_vehicle(
         },
     )
 
-    return UserVehicleResponse.model_validate(vehicle)
+    return UserVehicleResponse.model_validate(vehicle)  # type: ignore[no-any-return]
 
 
 @router.put(
@@ -246,7 +246,7 @@ async def update_vehicle(
             },
         )
 
-        return UserVehicleResponse.model_validate(updated)
+        return UserVehicleResponse.model_validate(updated)  # type: ignore[no-any-return]
 
     except VehicleGarageServiceError as exc:
         raise HTTPException(
@@ -666,7 +666,7 @@ async def create_cost(
             },
         )
 
-        return MaintenanceCostResponse.model_validate(cost)
+        return MaintenanceCostResponse.model_validate(cost)  # type: ignore[no-any-return]
 
     except VehicleGarageServiceError as exc:
         raise HTTPException(
