@@ -41,6 +41,7 @@ from app.core.exceptions import (
     VINValidationException,
 )
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
+from app.core.rate_limit import check_diagnosis_rate_limit
 from app.core.logging import get_logger
 from app.db.postgres.models import User
 from app.db.postgres.repositories import DiagnosisSessionRepository
@@ -58,7 +59,15 @@ logger = get_logger(__name__)
 # Streaming endpoint protection constants
 STREAM_TIMEOUT_SECONDS = 300  # 5-minute max duration per stream
 MAX_CONCURRENT_STREAMS = 10  # Limit concurrent long-running streams
-_stream_semaphore = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
+_stream_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _stream_semaphore
+    if _stream_semaphore is None:
+        _stream_semaphore = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
+    return _stream_semaphore
+
 
 # OpenAPI response examples
 ANALYZE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
@@ -635,6 +644,7 @@ use the `/analyze` endpoint with full vehicle information.
 async def quick_analyze(
     dtc_codes: List[str] = Query(..., min_length=1, max_length=10),
     db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(check_diagnosis_rate_limit),
 ):
     """
     Quick analysis endpoint for single DTC code lookup.
@@ -836,6 +846,7 @@ async def analyze_vehicle_stream(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[User] = Depends(get_optional_current_user),
+    _rate_limit: None = Depends(check_diagnosis_rate_limit),
 ):
     """
     Streaming vehicle analysis endpoint.
@@ -1041,7 +1052,7 @@ async def analyze_vehicle_stream(
         acquired = False
         try:
             try:
-                await asyncio.wait_for(_stream_semaphore.acquire(), timeout=10.0)
+                await asyncio.wait_for(_get_semaphore().acquire(), timeout=10.0)
                 acquired = True
             except asyncio.TimeoutError:
                 yield _format_sse_event(
@@ -1122,7 +1133,7 @@ async def analyze_vehicle_stream(
                 logger.error(f"Failed to send error event for stream {diagnosis_id}")
         finally:
             if acquired:
-                _stream_semaphore.release()
+                _get_semaphore().release()
 
     async def _timeout_wrapper():
         """Enforce stream timeout to prevent Slowloris attacks."""
