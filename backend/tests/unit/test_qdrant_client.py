@@ -1,7 +1,7 @@
 """Unit tests for app.db.qdrant_client module."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -40,7 +40,7 @@ def _make_collection_info(name, points_count, status="green", vectors_count=0):
 def service():
     """Create a QdrantService with the underlying AsyncQdrantClient fully mocked."""
     with patch("app.db.qdrant_client.AsyncQdrantClient") as MockClient:
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         MockClient.return_value = mock_client
 
         from app.db.qdrant_client import QdrantService
