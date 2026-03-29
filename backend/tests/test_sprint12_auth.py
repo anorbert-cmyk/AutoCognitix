@@ -17,7 +17,7 @@ import pytest
 def _import_validate_password_strength():
     """Import validate_password_strength or skip the test."""
     try:
-        from app.core.security import validate_password_strength  # noqa: PLC0415
+        from app.core.security import validate_password_strength
 
         return validate_password_strength
     except (ImportError, AttributeError):
@@ -98,7 +98,7 @@ class TestPasswordResetModel:
     @pytest.fixture(autouse=True)
     def setup(self):
         try:
-            from app.db.postgres import models  # noqa: PLC0415
+            from app.db.postgres import models
 
             self.source = inspect.getsource(models)
         except ImportError:
@@ -140,7 +140,7 @@ class TestForgotPasswordNoEnum:
     @pytest.fixture(autouse=True)
     def setup(self):
         try:
-            from app.api.v1.endpoints.auth import router  # noqa: PLC0415
+            from app.api.v1.endpoints.auth import router
 
             self.router = router
             self.paths = [r.path for r in router.routes]
@@ -163,7 +163,7 @@ class TestForgotPasswordNoEnum:
     def test_forgot_password_route_is_post(self):
         """The forgot-password route must accept POST requests."""
         try:
-            from fastapi.routing import APIRoute  # noqa: PLC0415
+            from fastapi.routing import APIRoute
         except ImportError:
             pytest.skip("fastapi not available")
 
