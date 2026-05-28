@@ -11,7 +11,6 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  CheckCircle,
   BarChart3,
   Zap,
   PlusCircle,
@@ -39,76 +38,6 @@ interface DiagnosisHistoryItem {
   mainSymptom: string;
   status: DiagnosisStatus;
 }
-
-// Mock data for demonstration
-const mockHistoryData: DiagnosisHistoryItem[] = [
-  {
-    id: '1',
-    licensePlate: 'ABC-1234',
-    vehicleMake: 'Toyota',
-    vehicleModel: 'Camry',
-    vehicleYear: 2022,
-    vehicleTrim: 'Hybrid LE',
-    diagnosisDate: '2023-10-25',
-    dtcCode: 'P0300',
-    mainSymptom: 'Égéskimaradás észlelve a 3. hengerben',
-    status: 'fixed',
-  },
-  {
-    id: '2',
-    licensePlate: 'XYZ-9876',
-    vehicleMake: 'Ford',
-    vehicleModel: 'F-150',
-    vehicleYear: 2019,
-    vehicleTrim: 'Lariat EcoBoost',
-    diagnosisDate: '2023-10-24',
-    dtcCode: 'P0420',
-    mainSymptom: 'Katalizátor hatásfoka küszöbérték alatt',
-    status: 'in_progress',
-  },
-  {
-    id: '3',
-    licensePlate: 'DEF-5555',
-    vehicleMake: 'Honda',
-    vehicleModel: 'Civic',
-    vehicleYear: 2021,
-    vehicleTrim: 'Type R',
-    diagnosisDate: '2023-10-22',
-    dtcCode: 'C0021',
-    mainSymptom: 'ABS figyelmeztetés - Jobb első szenzor',
-    status: 'fixed',
-  },
-  {
-    id: '4',
-    licensePlate: 'GHI-1122',
-    vehicleMake: 'Tesla',
-    vehicleModel: 'Model 3',
-    vehicleYear: 2023,
-    vehicleTrim: 'Performance',
-    diagnosisDate: '2023-10-20',
-    dtcCode: 'B1234',
-    mainSymptom: 'Magas 12V akkumulátor merülés parkolás közben',
-    status: 'pending',
-  },
-  {
-    id: '5',
-    licensePlate: 'JKL-4433',
-    vehicleMake: 'BMW',
-    vehicleModel: 'X5',
-    vehicleYear: 2018,
-    vehicleTrim: 'xDrive35i',
-    diagnosisDate: '2023-10-18',
-    dtcCode: 'P0171',
-    mainSymptom: 'Rendszer túl szegény (1. bank)',
-    status: 'fixed',
-  },
-];
-
-const mockStats = {
-  solutionRate: 94.2,
-  totalDiagnoses: 1248,
-  aiAccuracy: 98.8,
-};
 
 function StatusBadge({ status }: { status: DiagnosisStatus }) {
   const styles = {
@@ -145,30 +74,27 @@ export default function HistoryPage() {
 
   const { data: apiStats, isLoading: statsLoading } = useDiagnosisStats();
 
-  // Use mock data if API data is not available
-  const historyData: DiagnosisHistoryItem[] = apiHistoryData?.items
-    ? apiHistoryData.items.map((item) => ({
-        id: item.id,
-        licensePlate: 'N/A',
-        vehicleMake: item.vehicle_make,
-        vehicleModel: item.vehicle_model,
-        vehicleYear: item.vehicle_year,
-        diagnosisDate: item.created_at,
-        dtcCode: item.dtc_codes[0] || 'N/A',
-        mainSymptom: 'Nincs megadva',
-        status: 'fixed' as const,
-      }))
-    : mockHistoryData;
+  const historyData: DiagnosisHistoryItem[] =
+    apiHistoryData?.items?.map((item) => ({
+      id: item.id,
+      licensePlate: 'N/A',
+      vehicleMake: item.vehicle_make,
+      vehicleModel: item.vehicle_model,
+      vehicleYear: item.vehicle_year,
+      diagnosisDate: item.created_at,
+      dtcCode: item.dtc_codes[0] || 'N/A',
+      mainSymptom: 'Nincs megadva',
+      status: 'fixed' as const,
+    })) ?? [];
 
   const stats = apiStats
     ? {
-        solutionRate: 94.2,
         totalDiagnoses: apiStats.total_diagnoses,
         aiAccuracy: apiStats.avg_confidence * 100,
       }
-    : mockStats;
+    : null;
 
-  const totalRecords = apiHistoryData?.total || mockHistoryData.length;
+  const totalRecords = apiHistoryData?.total ?? 0;
 
   // Filter data based on search
   const filteredData = searchQuery
@@ -475,26 +401,7 @@ export default function HistoryPage() {
         </div>
 
         {/* Stats Cards */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Solution Rate */}
-          <div className="bg-white border border-slate-300 p-5 rounded-xl shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-3 mb-3">
-              <CheckCircle className="w-6 h-6 text-green-600" />
-              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
-                Megoldási arány
-              </span>
-            </div>
-            <div className="text-3xl font-black text-slate-900 uppercase italic">
-              {statsLoading ? '...' : `${stats.solutionRate}%`}
-            </div>
-            <div className="mt-2 h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-green-600 transition-all duration-500"
-                style={{ width: `${stats.solutionRate}%` }}
-              />
-            </div>
-          </div>
-
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Total Diagnoses */}
           <div className="bg-white border border-slate-300 p-5 rounded-xl shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center gap-3 mb-3">
@@ -504,26 +411,23 @@ export default function HistoryPage() {
               </span>
             </div>
             <div className="text-3xl font-black text-slate-900 uppercase italic">
-              {statsLoading ? '...' : stats.totalDiagnoses.toLocaleString()}
-            </div>
-            <div className="mt-2 text-xs font-bold text-slate-600">
-              +12% az előző hónaphoz képest
+              {statsLoading ? '...' : (stats?.totalDiagnoses.toLocaleString() ?? '—')}
             </div>
           </div>
 
-          {/* AI Accuracy */}
+          {/* AI Confidence */}
           <div className="bg-white border border-slate-300 p-5 rounded-xl shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center gap-3 mb-3">
               <Zap className="w-6 h-6 text-yellow-600" />
               <span className="text-xs font-black uppercase tracking-widest text-slate-500">
-                MI pontosság
+                Átlagos AI konfidencia
               </span>
             </div>
             <div className="text-3xl font-black text-slate-900 uppercase italic">
-              {statsLoading ? '...' : `${stats.aiAccuracy.toFixed(1)}%`}
+              {statsLoading ? '...' : (stats ? `${stats.aiAccuracy.toFixed(1)}%` : '—')}
             </div>
             <div className="mt-2 text-xs font-bold text-slate-600">
-              Ellenőrzött javítások alapján
+              Korábbi diagnózisok alapján
             </div>
           </div>
         </div>

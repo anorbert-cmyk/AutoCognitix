@@ -133,11 +133,10 @@ export default function NewDiagnosisPage() {
           symptoms: data.ownerComplaints,
           additionalContext: data.mechanicNotes || undefined,
         });
-        setDiagnosisId(result.id);
+        setDiagnosisId(result.id ?? null);
       } catch (error) {
         console.error('Diagnosis creation failed:', error);
-        // Still navigate to mock result for demo
-        setDiagnosisId('mock-id');
+        setDiagnosisId(null);
       }
     },
     [analyzeDiagnosis, runAnalysis]

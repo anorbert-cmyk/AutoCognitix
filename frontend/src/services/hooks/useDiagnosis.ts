@@ -42,8 +42,10 @@ export function useAnalyzeDiagnosis() {
     onSuccess: (data) => {
       // Invalidate only history (not all queries) to include new diagnosis
       queryClient.invalidateQueries({ queryKey: diagnosisKeys.history() })
-      // Cache the new diagnosis detail
-      queryClient.setQueryData(diagnosisKeys.detail(data.id), data)
+      // Cache the new diagnosis detail — id may be missing if persistence failed
+      if (data.id) {
+        queryClient.setQueryData(diagnosisKeys.detail(data.id), data)
+      }
     },
     onError: (error: ApiError) => {
       console.error('Diagnosis analysis failed:', error.message)
