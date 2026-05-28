@@ -236,6 +236,22 @@ class TestNHTSAEUMarketGuard:
             "won't match the EU filter otherwise"
         )
 
+    def test_acronym_brands_have_self_alias(self):
+        """All-caps acronym brands (BMW/GMC/MG) must self-alias to survive .title() fallback."""
+        # Without these aliases, _normalize_make("BMW") falls into the
+        # Title-case branch and yields "Bmw" → 0 NHTSA recalls.
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        # Find the BRAND_ALIASES dict block
+        aliases_section = content[content.find("BRAND_ALIASES:") :]
+        aliases_section = aliases_section[: aliases_section.find("\n    }") + 6]
+        for brand_lower, brand_canonical in (("bmw", "BMW"), ("gmc", "GMC"), ("mg", "MG")):
+            entry = f'"{brand_lower}": "{brand_canonical}"'
+            assert entry in aliases_section, (
+                f"BRAND_ALIASES missing self-alias for {brand_canonical!r} "
+                f"(.title() would corrupt {brand_canonical!r} → {brand_canonical.title()!r})"
+            )
+
     def test_get_recalls_short_circuits_for_eu_only(self):
         """get_recalls should early-return [] before making HTTP request for EU-only brands."""
         nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
@@ -258,6 +274,36 @@ class TestNHTSAEUMarketGuard:
         assert 0 < eu_guard_pos < cache_key_pos, (
             "EU_ONLY_MAKES guard must run before cache/HTTP work in get_complaints"
         )
+
+
+class TestMigration019Safety:
+    """Verify migration 019 has the TOCTOU + audit-trail protections."""
+
+    MIG = (
+        Path(__file__).parent.parent
+        / "alembic"
+        / "versions"
+        / "019_fix_diagnosis_archive_indexes_and_fk.py"
+    )
+
+    def test_share_lock_before_purge(self):
+        """SHARE LOCK must precede the orphan DELETE to close the TOCTOU race."""
+        content = self.MIG.read_text()
+        lock_pos = content.find("LOCK TABLE diagnosis_archive IN SHARE MODE")
+        delete_pos = content.find("DELETE FROM diagnosis_archive")
+        assert 0 < lock_pos < delete_pos, (
+            "LOCK TABLE must appear before the DELETE to prevent new orphan inserts "
+            "between purge and FK validation"
+        )
+
+    def test_delete_returns_audit_ids(self):
+        """Purge must RETURNING ids so the CI/CD log keeps a GDPR audit trail."""
+        content = self.MIG.read_text()
+        assert "RETURNING id" in content, (
+            "Orphan DELETE must RETURN id values for the audit trail (GDPR)"
+        )
+        # And those ids must be surfaced to stdout
+        assert "print(" in content, "Purged row count + ids must be printed to Alembic stdout"
 
 
 class TestEmbeddingCacheKeyVersioning:
@@ -339,6 +385,18 @@ class TestSentryExplicitCapture:
         generic = generic[: generic.find("\n\nasync def") or len(generic)]
         assert "_capture_to_sentry(" in generic, (
             "generic_exception_handler should delegate to _capture_to_sentry"
+        )
+
+    def test_raw_path_is_pii_redacted(self):
+        """Sentry raw_path extra must strip UUIDs and VINs before sending."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        assert "def _redact_pii" in content, (
+            "error_handlers.py should define _redact_pii to strip UUIDs/VINs"
+        )
+        # The helper must be invoked when populating set_extra
+        assert "_redact_pii(request.url.path)" in content, (
+            "_capture_to_sentry must call _redact_pii on raw_path before set_extra"
         )
 
     def test_5xx_handlers_capture(self):

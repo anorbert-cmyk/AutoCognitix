@@ -282,9 +282,13 @@ class NHTSAService:
     )
 
     # Common user-typed make variants → canonical NHTSA make spelling.
-    # Without this, "VW" or "Mercedes" returns 0 recalls because NHTSA expects
-    # "Volkswagen" and "Mercedes-Benz" exactly.
+    # Two purposes:
+    #  1) Resolve typos/short forms ("vw" → "Volkswagen", "chevy" → "Chevrolet").
+    #  2) Protect 2-3 letter ALL-CAPS acronyms from the Title-case fallback —
+    #     e.g. "BMW".title() yields "Bmw" which returns 0 NHTSA recalls.
+    #     Every all-caps brand below MUST be aliased to itself.
     BRAND_ALIASES: Dict[str, str] = {
+        # Aliases / typos
         "vw": "Volkswagen",
         "volkswagen ag": "Volkswagen",
         "mercedes": "Mercedes-Benz",
@@ -293,7 +297,6 @@ class NHTSAService:
         "chevy": "Chevrolet",
         "gm": "General Motors",
         "gmc truck": "GMC",
-        "bmw ag": "BMW",
         "audi ag": "Audi",
         "rolls royce": "Rolls-Royce",
         "mini cooper": "MINI",
@@ -304,6 +307,15 @@ class NHTSAService:
         "rangerover": "Land Rover",
         "alfa-romeo": "Alfa Romeo",
         "porsche ag": "Porsche",
+        # Acronym/all-caps brands — explicit self-aliases prevent .title() corruption
+        "bmw": "BMW",
+        "bmw ag": "BMW",
+        "gmc": "GMC",
+        "mg": "MG",
+        "ds": "DS",
+        "fca": "FCA",
+        "kia": "Kia",
+        "smart": "smart",
     }
 
     @classmethod

@@ -9,13 +9,15 @@ to `users.id`, while the ORM model declares
 enforce the integrity contract the ORM assumes.
 
 Production safety notes:
-- The FK is created with `NOT VALID` and validated separately so the ALTER
-  TABLE takes only a brief ACCESS EXCLUSIVE lock for catalog update.
+- The table is briefly locked in SHARE mode to prevent concurrent INSERTs
+  from creating new orphan rows between the purge and the FK validation
+  (TOCTOU race that would crash the deploy).
 - Orphan rows (user_id pointing to a since-deleted user) are deleted BEFORE
-  the FK constraint is added — otherwise the validation step would crash
-  every production deploy.
-- Indexes are created CONCURRENTLY to avoid blocking writes on a
-  potentially large archive table.
+  the FK constraint is added; their IDs are RETURNINGed and printed to the
+  Alembic stdout so the deploy log preserves an audit trail (GDPR).
+- The archive table is small in practice, so the SHARE lock for the duration
+  of the migration is acceptable. For very large tables a separate online
+  pattern (NOT VALID + VALIDATE in two transactions) would be required.
 
 Revision ID: 019_fix_archive_drift
 Revises: 018_fix_diagnosis_fk
@@ -36,20 +38,31 @@ __all__ = ["revision", "down_revision", "upgrade", "downgrade"]
 
 
 def upgrade() -> None:
-    # 1) Purge orphan rows BEFORE adding the FK; otherwise the validation step
-    #    crashes the deploy when historical user deletions left dangling refs.
-    op.execute(
+    bind = op.get_bind()
+
+    # 1) Lock the table briefly to prevent concurrent INSERTs from creating
+    #    new orphan rows in the window between purge and FK validation.
+    #    SHARE mode blocks writes but allows other concurrent reads.
+    op.execute(sa.text("LOCK TABLE diagnosis_archive IN SHARE MODE"))
+
+    # 2) Purge orphan rows and audit-log their IDs (GDPR / forensics).
+    #    `NOT IN` is NULL-safe here thanks to the explicit `IS NOT NULL`
+    #    guard — without it, any NULL in the users subquery would make
+    #    the whole NOT IN return UNKNOWN and skip the purge entirely.
+    result = bind.execute(
         sa.text(
             "DELETE FROM diagnosis_archive "
             "WHERE user_id IS NOT NULL "
-            "AND user_id NOT IN (SELECT id FROM users)"
+            "AND user_id NOT IN (SELECT id FROM users) "
+            "RETURNING id"
         )
     )
+    purged = [str(row[0]) for row in result]
+    if purged:
+        # Alembic stdout is captured by CI/CD logs — keeps a trail.
+        print(f"[migration 019] purged {len(purged)} orphan diagnosis_archive rows: {purged}")
 
-    # 2) Indexes — CONCURRENTLY needs an autocommit block (no DDL transaction).
-    #    Alembic >= 1.10 supports this via op.execute with `COMMIT;` markers.
-    #    Use plain create_index here; the archive table is small in practice,
-    #    so the brief lock is acceptable.
+    # 3) Explicit indexes (idempotent on retry).
     op.create_index(
         "ix_diagnosis_archive_original_id",
         "diagnosis_archive",
@@ -63,22 +76,23 @@ def upgrade() -> None:
         if_not_exists=True,
     )
 
-    # 3) FK with NOT VALID → only catalog update, no full-table scan. Then
-    #    VALIDATE in a separate statement (only takes SHARE UPDATE EXCLUSIVE).
-    op.execute(
-        sa.text(
-            "ALTER TABLE diagnosis_archive "
-            "ADD CONSTRAINT diagnosis_archive_user_id_fkey "
-            "FOREIGN KEY (user_id) REFERENCES users(id) "
-            "ON DELETE CASCADE NOT VALID"
-        )
-    )
-    op.execute(
-        sa.text("ALTER TABLE diagnosis_archive VALIDATE CONSTRAINT diagnosis_archive_user_id_fkey")
+    # 4) FK with cascade delete (matches the ORM contract for GDPR).
+    #    Under the SHARE lock no new orphans can land between purge and
+    #    constraint creation, so a plain ADD CONSTRAINT is safe — we do
+    #    not need the NOT VALID/VALIDATE split.
+    op.create_foreign_key(
+        "diagnosis_archive_user_id_fkey",
+        "diagnosis_archive",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="CASCADE",
     )
 
 
 def downgrade() -> None:
+    # NOTE: downgrade leaves the table without FK enforcement; a subsequent
+    # re-upgrade WILL silently purge any new orphans created in the interim.
     op.drop_constraint(
         "diagnosis_archive_user_id_fkey",
         "diagnosis_archive",
