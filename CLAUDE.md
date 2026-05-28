@@ -194,6 +194,34 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
+## Pre-Push Review Protocol - KÖTELEZŐ MINDEN PUSH ELŐTT
+
+### Mikor: Minden `git push` ELŐTT, kivétel nélkül (.md-only push is).
+
+### Folyamat:
+
+**Minimum 5 lead agent párhuzamosan**, mindegyik a STAGED + COMMITTED diff-en dolgozik (`git diff origin/<branch>...HEAD`). Rövid, fókuszált scope (max 3 szekció / agent, max 200 sor riport), hogy ne timeout-oljon.
+
+#### Standard 5 lead role:
+
+1. **Security Lead** — OWASP Top 10, auth bypass, injection (SQL/log/cmd), secrets exposure, GDPR boundary, CSRF, IDOR
+2. **Logic/Correctness Lead** — off-by-one, null/undefined, edge case, fallback path, idempotency, contract drift
+3. **Concurrency/Async Lead** — race condition, thread pool starvation, deadlock, await missing, event loop blocking
+4. **Data/Migration Lead** — DB schema drift, missing FK/index, transaction boundary, alembic forward+downgrade, cache key versioning
+5. **Operational/Observability Lead** — Sentry capture coverage, structured logging, retry/timeout config, rollback strategy
+
+#### Eredmény:
+- Mind az 5 agent ad CRITICAL/HIGH/MEDIUM/LOW besorolást
+- CRITICAL/HIGH → push BLOKKOLVA, javítás kötelező, újra audit
+- MEDIUM → engedélyezett push + új issue/TODO felvétele
+- LOW → dokumentálandó, nem blokkoló
+
+#### Szabály:
+- A push BLOKKOLT, amíg legalább 5 lead agent végzett és nincs CRITICAL/HIGH találat
+- `git push --no-verify` használata TILOS
+
+---
+
 ## Post-Sprint Review Protocol - KÖTELEZŐ MINDEN SPRINT UTÁN
 
 ### Mikor: Minden sprint befejezése után, a következő sprint indítása ELŐTT.
