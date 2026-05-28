@@ -40,7 +40,7 @@ from app.db.postgres.repositories import (
     DTCCodeBatchRepository,
     DTCCodeRepository,
 )
-from app.services.embedding_service import preprocess_hungarian
+from app.services.embedding_service import _thread_pool, preprocess_hungarian
 from app.services.nhtsa_service import (
     Complaint,
     NHTSAError,
@@ -424,7 +424,9 @@ class DiagnosisService:
         """
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, preprocess_hungarian, symptoms)
+            # Use the dedicated NLP thread pool to avoid starving the default
+            # executor (also shared with other run_in_executor callers like DNS).
+            return await loop.run_in_executor(_thread_pool, preprocess_hungarian, symptoms)
         except Exception as e:
             logger.warning(f"Symptom preprocessing failed: {sanitize_log(str(e))}, using raw text")
             return symptoms

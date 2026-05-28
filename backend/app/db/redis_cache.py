@@ -562,24 +562,34 @@ class RedisCacheService:
     # Embedding Caching
     # =========================================================================
 
+    @staticmethod
+    def _embedding_cache_key(text: str) -> str:
+        """Build cache key from text + active HuBERT model and revision.
+
+        Including the model identifier in the hash prevents stale vectors from
+        previous model versions from poisoning queries when HUBERT_MODEL or
+        HUBERT_REVISION changes.
+        """
+        from app.core.config import settings
+
+        salt = f"{settings.HUBERT_MODEL}@{settings.HUBERT_REVISION}|"
+        digest = hashlib.sha256((salt + text).encode()).hexdigest()
+        return f"{CachePrefix.EMBEDDING}{digest}"
+
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Get cached embedding vector."""
-        text_hash = hashlib.sha256(text.encode()).hexdigest()
-        key = f"{CachePrefix.EMBEDDING}{text_hash}"
-        return await self.get(key)
+        return await self.get(self._embedding_cache_key(text))
 
     async def set_embedding(self, text: str, embedding: List[float]) -> bool:
         """Cache embedding vector."""
-        text_hash = hashlib.sha256(text.encode()).hexdigest()
-        key = f"{CachePrefix.EMBEDDING}{text_hash}"
-        return await self.set(key, embedding, CacheTTL.EMBEDDINGS)
+        return await self.set(self._embedding_cache_key(text), embedding, CacheTTL.EMBEDDINGS)
 
     async def get_embeddings_batch(
         self,
         texts: List[str],
     ) -> List[Optional[List[float]]]:
         """Get multiple cached embeddings."""
-        keys = [f"{CachePrefix.EMBEDDING}{hashlib.sha256(t.encode()).hexdigest()}" for t in texts]
+        keys = [self._embedding_cache_key(t) for t in texts]
         return await self.mget(keys)
 
     # =========================================================================

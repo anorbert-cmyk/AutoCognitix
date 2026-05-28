@@ -551,6 +551,15 @@ class TestNHTSACache:
 
 
 class TestEmbeddingCache:
+    @staticmethod
+    def _expected_key(text: str) -> str:
+        """Mirror RedisCacheService._embedding_cache_key for assertions."""
+        from app.core.config import settings
+
+        salt = f"{settings.HUBERT_MODEL}@{settings.HUBERT_REVISION}|"
+        digest = hashlib.sha256((salt + text).encode()).hexdigest()
+        return f"embed:{digest}"
+
     @pytest.mark.asyncio
     async def test_get_embedding(self, service):
         with patch.object(
@@ -558,15 +567,30 @@ class TestEmbeddingCache:
         ) as mock_get:
             result = await service.get_embedding("motor hibakod")
             assert result == [0.1, 0.2]
-            expected_hash = hashlib.sha256(b"motor hibakod").hexdigest()
-            mock_get.assert_awaited_once_with(f"embed:{expected_hash}")
+            mock_get.assert_awaited_once_with(self._expected_key("motor hibakod"))
 
     @pytest.mark.asyncio
     async def test_set_embedding(self, service):
         with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
             await service.set_embedding("test", [0.1])
-            expected_hash = hashlib.sha256(b"test").hexdigest()
-            mock_set.assert_awaited_once_with(f"embed:{expected_hash}", [0.1], CacheTTL.EMBEDDINGS)
+            mock_set.assert_awaited_once_with(
+                self._expected_key("test"), [0.1], CacheTTL.EMBEDDINGS
+            )
+
+    @pytest.mark.asyncio
+    async def test_embedding_key_changes_with_revision(self, service):
+        """A different HUBERT_REVISION must produce a different cache key."""
+        from app.core.config import settings
+
+        original = settings.HUBERT_REVISION
+        try:
+            settings.HUBERT_REVISION = "v1-abc"
+            key_a = service._embedding_cache_key("hello")
+            settings.HUBERT_REVISION = "v2-xyz"
+            key_b = service._embedding_cache_key("hello")
+            assert key_a != key_b, "Cache key must invalidate when revision changes"
+        finally:
+            settings.HUBERT_REVISION = original
 
     @pytest.mark.asyncio
     async def test_get_embeddings_batch(self, service):

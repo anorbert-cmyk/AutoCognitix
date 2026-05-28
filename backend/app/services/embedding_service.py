@@ -211,12 +211,14 @@ class HungarianEmbeddingService:
             # Load tokenizer with fast implementation
             self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B614 B615
                 settings.HUBERT_MODEL,
+                revision=settings.HUBERT_REVISION,
                 use_fast=True,  # Use fast tokenizer implementation
             )
 
             # Load model with optimizations
             self._model = AutoModel.from_pretrained(  # nosec B614 B615
                 settings.HUBERT_MODEL,
+                revision=settings.HUBERT_REVISION,
                 torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
             )
             if self._model is None:

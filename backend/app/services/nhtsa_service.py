@@ -281,6 +281,62 @@ class NHTSAService:
         }
     )
 
+    # Common user-typed make variants → canonical NHTSA make spelling.
+    # Two purposes:
+    #  1) Resolve typos/short forms ("vw" → "Volkswagen", "chevy" → "Chevrolet").
+    #  2) Protect 2-3 letter ALL-CAPS acronyms from the Title-case fallback —
+    #     e.g. "BMW".title() yields "Bmw" which returns 0 NHTSA recalls.
+    #     Every all-caps brand below MUST be aliased to itself.
+    BRAND_ALIASES: Dict[str, str] = {
+        # Aliases / typos
+        "vw": "Volkswagen",
+        "volkswagen ag": "Volkswagen",
+        "mercedes": "Mercedes-Benz",
+        "mercedes benz": "Mercedes-Benz",
+        "mb": "Mercedes-Benz",
+        "chevy": "Chevrolet",
+        "gm": "General Motors",
+        "gmc truck": "GMC",
+        "audi ag": "Audi",
+        "rolls royce": "Rolls-Royce",
+        "mini cooper": "MINI",
+        "mini": "MINI",
+        "land-rover": "Land Rover",
+        "landrover": "Land Rover",
+        "range rover": "Land Rover",
+        "rangerover": "Land Rover",
+        "alfa-romeo": "Alfa Romeo",
+        "porsche ag": "Porsche",
+        # Acronym/all-caps brands — explicit self-aliases prevent .title() corruption
+        "bmw": "BMW",
+        "bmw ag": "BMW",
+        "gmc": "GMC",
+        "mg": "MG",
+        "ds": "DS",
+        "fca": "FCA",
+        "kia": "Kia",
+        "smart": "smart",
+    }
+
+    @classmethod
+    def _normalize_make(cls, make: str) -> str:
+        """Return the canonical NHTSA make spelling for known aliases.
+
+        NHTSA's recall API is case-sensitive: "Volkswagen" returns hits but
+        "VOLKSWAGEN" or "volkswagen" returns 0. For inputs not covered by the
+        alias dict we apply a Title-Case fallback so common typing variants
+        ("VOLKSWAGEN", "land rover") still resolve.
+        """
+        cleaned = make.strip()
+        if not cleaned:
+            return cleaned
+        key = cleaned.lower()
+        if key in cls.BRAND_ALIASES:
+            return cls.BRAND_ALIASES[key]
+        # Title-case fallback: "land rover" → "Land Rover", "VOLKSWAGEN" → "Volkswagen".
+        # str.title() is safe here because we're producing a single-line proper noun.
+        return cleaned.title()
+
     # Rate limiting settings
     REQUESTS_PER_SECOND = 5
     RATE_LIMIT_WINDOW = 1.0  # seconds
@@ -528,7 +584,7 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = make.strip()
+        make = self._normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — saves a round-trip
@@ -626,7 +682,7 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = make.strip()
+        make = self._normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — same rationale as get_recalls.

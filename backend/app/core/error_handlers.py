@@ -8,6 +8,7 @@ This module provides:
 - Error logging with context
 """
 
+import re
 import traceback
 import uuid
 from collections.abc import Callable
@@ -153,6 +154,10 @@ async def autocognitix_exception_handler(
         },
     )
 
+    # 5xx custom exceptions are real outages — capture them in Sentry.
+    if exc.status_code >= 500:
+        _capture_to_sentry(request, exc, request_id)
+
     return build_error_response(
         request_id=request_id,
         code=exc.code,
@@ -284,6 +289,11 @@ async def sqlalchemy_exception_handler(
 
     logger.error(f"Database error: {type(exc).__name__}", extra=log_details)
 
+    # 5xx DB errors (connection/timeout/dbapi) are infrastructure outages.
+    # 409 IntegrityError is a user-caused conflict — don't spam Sentry with it.
+    if status_code >= 500:
+        _capture_to_sentry(request, exc, request_id)
+
     # Only include error details in debug mode
     details = {}
     if settings.DEBUG:
@@ -298,6 +308,60 @@ async def sqlalchemy_exception_handler(
         details=details,
         status_code=status_code,
     )
+
+
+# UUID v4 pattern; matches the format SQLAlchemy/Pydantic produce.
+_UUID_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+# VIN: exactly 17 alphanumeric chars excluding I, O, Q (ISO 3779).
+_VIN_RE = re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b")
+
+
+def _redact_pii(path: str) -> str:
+    """Strip UUIDs and VINs from a URL path before sending to Sentry.
+
+    Even though `raw_path` lives in unindexed `set_extra` (not searchable),
+    the value still appears verbatim in the Sentry event JSON viewable in
+    the UI. UUIDs are correlatable to user_id, VINs to natural persons.
+    """
+    path = _UUID_RE.sub("<redacted-uuid>", path)
+    path = _VIN_RE.sub("<redacted-vin>", path)
+    return path
+
+
+def _capture_to_sentry(request: Request, exc: Exception, request_id: str) -> None:
+    """Forward exception to Sentry with PII-safe tags.
+
+    - Tag the route TEMPLATE (e.g. `/users/{id}`), not the raw path which
+      contains UUIDs/VINs — both for GDPR data minimization and to keep
+      Sentry's tag cardinality bounded.
+    - Raw URL goes into `set_extra`, but UUIDs/VINs are stripped first.
+    - Any failure inside this function must be swallowed; the handler must
+      always return a response.
+    """
+    try:
+        import sentry_sdk
+
+        if sentry_sdk.Hub.current.client is None:
+            return
+
+        # Prefer the route template (no PII) when FastAPI matched a route.
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", None) or "<no-route>"
+
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("request_id", request_id)
+            scope.set_tag("route", route_template)
+            scope.set_tag("method", request.method)
+            scope.set_extra("raw_path", _redact_pii(request.url.path))
+            sentry_sdk.capture_exception(exc)
+    except ImportError:
+        # Sentry not installed — logging is the only sink.
+        pass
+    except Exception as sentry_err:
+        # Sentry must never propagate an error out of the error handler.
+        logger.debug(f"Sentry capture_exception failed: {sentry_err}")
 
 
 async def generic_exception_handler(
@@ -324,6 +388,11 @@ async def generic_exception_handler(
         extra=log_details,
         exc_info=True,
     )
+
+    # Forward to Sentry explicitly. LoggingIntegration usually catches these
+    # via logger.error(exc_info=True), but custom logging handlers can break
+    # that chain — capturing here guarantees the report.
+    _capture_to_sentry(request, exc, request_id)
 
     # Only include error details in debug mode
     details = {}

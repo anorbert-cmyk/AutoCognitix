@@ -217,6 +217,41 @@ class TestNHTSAEUMarketGuard:
                 f"EU_ONLY_MAKES should include {brand!r} — sold in EU only, no NHTSA recalls"
             )
 
+    def test_brand_aliases_normalize_common_typos(self):
+        """nhtsa_service should map VW/Mercedes/Chevy to canonical NHTSA spellings."""
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        assert "BRAND_ALIASES" in content, (
+            "nhtsa_service should declare BRAND_ALIASES to avoid 0 recalls on common typos"
+        )
+        assert "_normalize_make" in content, (
+            "nhtsa_service should expose _normalize_make for canonical lookup"
+        )
+        # Sanity: get_recalls must apply the normalizer before the EU guard.
+        get_recalls = content[content.find("async def get_recalls") :]
+        normalize_pos = get_recalls.find("_normalize_make")
+        eu_pos = get_recalls.find("EU_ONLY_MAKES")
+        assert 0 < normalize_pos < eu_pos, (
+            "_normalize_make must run before EU_ONLY_MAKES guard — aliases like 'VW' "
+            "won't match the EU filter otherwise"
+        )
+
+    def test_acronym_brands_have_self_alias(self):
+        """All-caps acronym brands (BMW/GMC/MG) must self-alias to survive .title() fallback."""
+        # Without these aliases, _normalize_make("BMW") falls into the
+        # Title-case branch and yields "Bmw" → 0 NHTSA recalls.
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        # Find the BRAND_ALIASES dict block
+        aliases_section = content[content.find("BRAND_ALIASES:") :]
+        aliases_section = aliases_section[: aliases_section.find("\n    }") + 6]
+        for brand_lower, brand_canonical in (("bmw", "BMW"), ("gmc", "GMC"), ("mg", "MG")):
+            entry = f'"{brand_lower}": "{brand_canonical}"'
+            assert entry in aliases_section, (
+                f"BRAND_ALIASES missing self-alias for {brand_canonical!r} "
+                f"(.title() would corrupt {brand_canonical!r} → {brand_canonical.title()!r})"
+            )
+
     def test_get_recalls_short_circuits_for_eu_only(self):
         """get_recalls should early-return [] before making HTTP request for EU-only brands."""
         nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
@@ -238,4 +273,146 @@ class TestNHTSAEUMarketGuard:
         eu_guard_pos = complaints_section.find("EU_ONLY_MAKES")
         assert 0 < eu_guard_pos < cache_key_pos, (
             "EU_ONLY_MAKES guard must run before cache/HTTP work in get_complaints"
+        )
+
+
+class TestMigration019Safety:
+    """Verify migration 019 has the TOCTOU + audit-trail protections."""
+
+    MIG = (
+        Path(__file__).parent.parent
+        / "alembic"
+        / "versions"
+        / "019_fix_diagnosis_archive_indexes_and_fk.py"
+    )
+
+    def test_share_lock_before_purge(self):
+        """SHARE LOCK must precede the orphan DELETE to close the TOCTOU race."""
+        content = self.MIG.read_text()
+        lock_pos = content.find("LOCK TABLE diagnosis_archive IN SHARE MODE")
+        delete_pos = content.find("DELETE FROM diagnosis_archive")
+        assert 0 < lock_pos < delete_pos, (
+            "LOCK TABLE must appear before the DELETE to prevent new orphan inserts "
+            "between purge and FK validation"
+        )
+
+    def test_delete_returns_audit_ids(self):
+        """Purge must RETURNING ids so the CI/CD log keeps a GDPR audit trail."""
+        content = self.MIG.read_text()
+        assert "RETURNING id" in content, (
+            "Orphan DELETE must RETURN id values for the audit trail (GDPR)"
+        )
+        # And those ids must be surfaced to stdout
+        assert "print(" in content, "Purged row count + ids must be printed to Alembic stdout"
+
+
+class TestEmbeddingCacheKeyVersioning:
+    """Verify embedding cache keys include model + revision so old vectors don't poison new models."""
+
+    def test_cache_key_includes_model_and_revision(self):
+        """redis_cache.py should fold HUBERT_MODEL + HUBERT_REVISION into the cache key."""
+        cache_file = BACKEND_DIR / "db" / "redis_cache.py"
+        content = cache_file.read_text()
+        # The helper that builds the key
+        assert "_embedding_cache_key" in content, (
+            "redis_cache.py should centralize embedding key construction"
+        )
+        # Both identifiers must influence the hash
+        assert "HUBERT_MODEL" in content, "cache key must include HUBERT_MODEL"
+        assert "HUBERT_REVISION" in content, "cache key must include HUBERT_REVISION"
+
+
+class TestHuBERTRevisionPinning:
+    """Verify HuBERT model loads with explicit revision to prevent silent drift."""
+
+    def test_revision_setting_exists(self):
+        """config.py should expose HUBERT_REVISION."""
+        cfg = BACKEND_DIR / "core" / "config.py"
+        assert "HUBERT_REVISION" in cfg.read_text(), (
+            "config.py should declare HUBERT_REVISION to pin the model version"
+        )
+
+    def test_embedding_service_passes_revision(self):
+        """embedding_service.py should pass revision= to both tokenizer + model loaders."""
+        es = BACKEND_DIR / "services" / "embedding_service.py"
+        content = es.read_text()
+        # Both calls inside _load_hubert_model must include revision=
+        load_section = content[content.find("def _load_hubert_model") :]
+        load_section = load_section[: load_section.find("def ", 50)]
+        revision_count = load_section.count("revision=")
+        assert revision_count >= 2, (
+            "Both AutoTokenizer.from_pretrained and AutoModel.from_pretrained "
+            f"must pass revision= (found {revision_count})"
+        )
+
+
+class TestSentryExplicitCapture:
+    """Verify Sentry forwarding is present and PII-safe across 5xx handlers."""
+
+    def test_capture_helper_exists(self):
+        """error_handlers.py should expose a single _capture_to_sentry helper."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        assert "def _capture_to_sentry" in content, (
+            "error_handlers.py should define a centralized Sentry helper"
+        )
+        helper = content[content.find("def _capture_to_sentry") :]
+        helper = helper[: helper.find("\n\nasync def")]
+        assert "sentry_sdk.capture_exception" in helper, (
+            "_capture_to_sentry must actually call sentry_sdk.capture_exception"
+        )
+        assert "except ImportError" in helper, (
+            "Sentry import must be guarded (it may not be installed)"
+        )
+
+    def test_helper_uses_route_template_not_raw_path(self):
+        """PII-safe tagging: route template tag, raw path only in extras."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        helper = eh.read_text()
+        helper = helper[helper.find("def _capture_to_sentry") :]
+        helper = helper[: helper.find("\n\nasync def")]
+        assert 'set_tag("route"' in helper, (
+            "Sentry tag should be the route template (no UUIDs), not raw URL"
+        )
+        assert 'set_extra("raw_path"' in helper, (
+            "Raw path belongs in set_extra (unindexed), not set_tag"
+        )
+
+    def test_generic_handler_invokes_helper(self):
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        generic = content[content.find("async def generic_exception_handler") :]
+        generic = generic[: generic.find("\n\nasync def") or len(generic)]
+        assert "_capture_to_sentry(" in generic, (
+            "generic_exception_handler should delegate to _capture_to_sentry"
+        )
+
+    def test_raw_path_is_pii_redacted(self):
+        """Sentry raw_path extra must strip UUIDs and VINs before sending."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        assert "def _redact_pii" in content, (
+            "error_handlers.py should define _redact_pii to strip UUIDs/VINs"
+        )
+        # The helper must be invoked when populating set_extra
+        assert "_redact_pii(request.url.path)" in content, (
+            "_capture_to_sentry must call _redact_pii on raw_path before set_extra"
+        )
+
+    def test_5xx_handlers_capture(self):
+        """sqlalchemy_exception_handler and autocognitix_exception_handler should
+        forward to Sentry for 5xx status codes."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        # SQLAlchemy handler
+        sa_section = content[content.find("async def sqlalchemy_exception_handler") :]
+        sa_section = sa_section[: sa_section.find("\n\nasync def") or len(sa_section)]
+        assert "_capture_to_sentry(" in sa_section, (
+            "sqlalchemy_exception_handler should call _capture_to_sentry for 5xx"
+        )
+        # AutoCognitix handler
+        ac_section = content[content.find("async def autocognitix_exception_handler") :]
+        ac_section = ac_section[: ac_section.find("\n\nasync def") or len(ac_section)]
+        assert "_capture_to_sentry(" in ac_section, (
+            "autocognitix_exception_handler should call _capture_to_sentry for 5xx"
         )
