@@ -217,6 +217,25 @@ class TestNHTSAEUMarketGuard:
                 f"EU_ONLY_MAKES should include {brand!r} — sold in EU only, no NHTSA recalls"
             )
 
+    def test_brand_aliases_normalize_common_typos(self):
+        """nhtsa_service should map VW/Mercedes/Chevy to canonical NHTSA spellings."""
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        assert "BRAND_ALIASES" in content, (
+            "nhtsa_service should declare BRAND_ALIASES to avoid 0 recalls on common typos"
+        )
+        assert "_normalize_make" in content, (
+            "nhtsa_service should expose _normalize_make for canonical lookup"
+        )
+        # Sanity: get_recalls must apply the normalizer before the EU guard.
+        get_recalls = content[content.find("async def get_recalls") :]
+        normalize_pos = get_recalls.find("_normalize_make")
+        eu_pos = get_recalls.find("EU_ONLY_MAKES")
+        assert 0 < normalize_pos < eu_pos, (
+            "_normalize_make must run before EU_ONLY_MAKES guard — aliases like 'VW' "
+            "won't match the EU filter otherwise"
+        )
+
     def test_get_recalls_short_circuits_for_eu_only(self):
         """get_recalls should early-return [] before making HTTP request for EU-only brands."""
         nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
@@ -238,4 +257,60 @@ class TestNHTSAEUMarketGuard:
         eu_guard_pos = complaints_section.find("EU_ONLY_MAKES")
         assert 0 < eu_guard_pos < cache_key_pos, (
             "EU_ONLY_MAKES guard must run before cache/HTTP work in get_complaints"
+        )
+
+
+class TestEmbeddingCacheKeyVersioning:
+    """Verify embedding cache keys include model + revision so old vectors don't poison new models."""
+
+    def test_cache_key_includes_model_and_revision(self):
+        """redis_cache.py should fold HUBERT_MODEL + HUBERT_REVISION into the cache key."""
+        cache_file = BACKEND_DIR / "db" / "redis_cache.py"
+        content = cache_file.read_text()
+        # The helper that builds the key
+        assert "_embedding_cache_key" in content, (
+            "redis_cache.py should centralize embedding key construction"
+        )
+        # Both identifiers must influence the hash
+        assert "HUBERT_MODEL" in content, "cache key must include HUBERT_MODEL"
+        assert "HUBERT_REVISION" in content, "cache key must include HUBERT_REVISION"
+
+
+class TestHuBERTRevisionPinning:
+    """Verify HuBERT model loads with explicit revision to prevent silent drift."""
+
+    def test_revision_setting_exists(self):
+        """config.py should expose HUBERT_REVISION."""
+        cfg = BACKEND_DIR / "core" / "config.py"
+        assert "HUBERT_REVISION" in cfg.read_text(), (
+            "config.py should declare HUBERT_REVISION to pin the model version"
+        )
+
+    def test_embedding_service_passes_revision(self):
+        """embedding_service.py should pass revision= to both tokenizer + model loaders."""
+        es = BACKEND_DIR / "services" / "embedding_service.py"
+        content = es.read_text()
+        # Both calls inside _load_hubert_model must include revision=
+        load_section = content[content.find("def _load_hubert_model") :]
+        load_section = load_section[: load_section.find("def ", 50)]
+        revision_count = load_section.count("revision=")
+        assert revision_count >= 2, (
+            "Both AutoTokenizer.from_pretrained and AutoModel.from_pretrained "
+            f"must pass revision= (found {revision_count})"
+        )
+
+
+class TestSentryExplicitCapture:
+    """Verify generic_exception_handler explicitly forwards to Sentry."""
+
+    def test_generic_handler_calls_capture_exception(self):
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        generic = content[content.find("async def generic_exception_handler") :]
+        assert "sentry_sdk.capture_exception" in generic, (
+            "generic_exception_handler should call sentry_sdk.capture_exception explicitly"
+        )
+        # Must not let Sentry errors crash the handler
+        assert "except ImportError" in generic, (
+            "Sentry import must be guarded (it may not be installed)"
         )

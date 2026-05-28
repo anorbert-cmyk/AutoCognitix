@@ -150,6 +150,10 @@ class Settings(BaseSettings):
 
     # Hungarian NLP
     HUBERT_MODEL: str = "SZTAKI-HLT/hubert-base-cc"
+    # Pin a specific revision so HuggingFace can't silently push a new model
+    # under us. Override in prod with a verified commit hash; "main" means
+    # "follow the branch tip" (acceptable for local dev, dangerous in prod).
+    HUBERT_REVISION: str = "main"
     EMBEDDING_DIMENSION: int = 768
     HUSPACY_MODEL: str = "hu_core_news_lg"
 

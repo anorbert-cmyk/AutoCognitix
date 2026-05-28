@@ -281,6 +281,37 @@ class NHTSAService:
         }
     )
 
+    # Common user-typed make variants → canonical NHTSA make spelling.
+    # Without this, "VW" or "Mercedes" returns 0 recalls because NHTSA expects
+    # "Volkswagen" and "Mercedes-Benz" exactly.
+    BRAND_ALIASES: Dict[str, str] = {
+        "vw": "Volkswagen",
+        "volkswagen ag": "Volkswagen",
+        "mercedes": "Mercedes-Benz",
+        "mercedes benz": "Mercedes-Benz",
+        "mb": "Mercedes-Benz",
+        "chevy": "Chevrolet",
+        "gm": "General Motors",
+        "gmc truck": "GMC",
+        "bmw ag": "BMW",
+        "audi ag": "Audi",
+        "rolls royce": "Rolls-Royce",
+        "mini cooper": "MINI",
+        "mini": "MINI",
+        "land-rover": "Land Rover",
+        "landrover": "Land Rover",
+        "range rover": "Land Rover",
+        "rangerover": "Land Rover",
+        "alfa-romeo": "Alfa Romeo",
+        "porsche ag": "Porsche",
+    }
+
+    @classmethod
+    def _normalize_make(cls, make: str) -> str:
+        """Return the canonical NHTSA make spelling for known aliases."""
+        key = make.strip().lower()
+        return cls.BRAND_ALIASES.get(key, make.strip())
+
     # Rate limiting settings
     REQUESTS_PER_SECOND = 5
     RATE_LIMIT_WINDOW = 1.0  # seconds
@@ -528,7 +559,7 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = make.strip()
+        make = self._normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — saves a round-trip
@@ -626,7 +657,7 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = make.strip()
+        make = self._normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — same rationale as get_recalls.

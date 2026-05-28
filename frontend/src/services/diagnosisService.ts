@@ -159,7 +159,11 @@ export async function analyzeDiagnosis(data: DiagnosisFormData): Promise<Diagnos
     additional_context: data.additionalContext?.trim(),
   }
 
-  const response = await api.post<DiagnosisResponse>('/diagnosis/analyze', request)
+  // LLM + RAG pipeline can legitimately run 60-90s on cold caches; the global
+  // 30s axios timeout would surface this as a fake network error.
+  const response = await api.post<DiagnosisResponse>('/diagnosis/analyze', request, {
+    timeout: 120000,
+  })
   return response.data
 }
 

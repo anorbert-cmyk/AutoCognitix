@@ -325,6 +325,25 @@ async def generic_exception_handler(
         exc_info=True,
     )
 
+    # Forward to Sentry explicitly. LoggingIntegration usually catches these
+    # via logger.error(exc_info=True), but custom logging handlers can break
+    # that chain — capturing here guarantees the report.
+    try:
+        import sentry_sdk
+
+        if sentry_sdk.Hub.current.client is not None:
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("request_id", request_id)
+                scope.set_tag("path", request.url.path)
+                scope.set_tag("method", request.method)
+                sentry_sdk.capture_exception(exc)
+    except ImportError:
+        # Sentry not installed — logging is the only sink.
+        pass
+    except Exception as sentry_err:
+        # Sentry must never propagate an error out of the error handler.
+        logger.debug(f"Sentry capture_exception failed: {sentry_err}")
+
     # Only include error details in debug mode
     details = {}
     if settings.DEBUG:
