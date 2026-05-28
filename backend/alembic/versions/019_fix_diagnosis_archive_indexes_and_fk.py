@@ -40,7 +40,13 @@ __all__ = ["revision", "down_revision", "upgrade", "downgrade"]
 def upgrade() -> None:
     bind = op.get_bind()
 
-    # 1) Lock the table briefly to prevent concurrent INSERTs from creating
+    # 1) Cap the lock acquisition time so a pathologically slow migration
+    #    can't starve the app's connection pool on production. 30s is well
+    #    above expected migration time for this small table; tune up if the
+    #    archive grows past millions of rows.
+    op.execute(sa.text("SET lock_timeout = '30s'"))
+
+    # 2) Lock the table briefly to prevent concurrent INSERTs from creating
     #    new orphan rows in the window between purge and FK validation.
     #    SHARE mode blocks writes but allows other concurrent reads.
     op.execute(sa.text("LOCK TABLE diagnosis_archive IN SHARE MODE"))
@@ -59,8 +65,18 @@ def upgrade() -> None:
     )
     purged = [str(row[0]) for row in result]
     if purged:
-        # Alembic stdout is captured by CI/CD logs — keeps a trail.
-        print(f"[migration 019] purged {len(purged)} orphan diagnosis_archive rows: {purged}")
+        # Alembic stdout is captured by CI/CD logs — keeps a trail. Print the
+        # full count plus head/tail samples; dumping all IDs blows past per-line
+        # log limits (~4-64 KB on Railway / GitHub Actions) and ironically
+        # truncates the audit trail we're trying to preserve.
+        sample_head = purged[:25]
+        sample_tail = purged[-25:] if len(purged) > 50 else []
+        print(
+            f"[migration 019] purged {len(purged)} orphan diagnosis_archive rows "
+            f"(first 25: {sample_head}"
+            + (f", last 25: {sample_tail}" if sample_tail else "")
+            + ")"
+        )
 
     # 3) Explicit indexes (idempotent on retry).
     op.create_index(
@@ -93,10 +109,15 @@ def upgrade() -> None:
 def downgrade() -> None:
     # NOTE: downgrade leaves the table without FK enforcement; a subsequent
     # re-upgrade WILL silently purge any new orphans created in the interim.
-    op.drop_constraint(
-        "diagnosis_archive_user_id_fkey",
-        "diagnosis_archive",
-        type_="foreignkey",
+    #
+    # Alembic's op.drop_constraint doesn't accept an if_exists flag, so we use
+    # raw SQL with IF EXISTS to stay idempotent (matches the indexes below and
+    # tolerates a partial-upgrade rollback where the constraint never landed).
+    op.execute(
+        sa.text(
+            "ALTER TABLE diagnosis_archive "
+            "DROP CONSTRAINT IF EXISTS diagnosis_archive_user_id_fkey"
+        )
     )
     op.drop_index("ix_diagnosis_archive_user_id", table_name="diagnosis_archive", if_exists=True)
     op.drop_index(
