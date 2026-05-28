@@ -308,9 +308,22 @@ class NHTSAService:
 
     @classmethod
     def _normalize_make(cls, make: str) -> str:
-        """Return the canonical NHTSA make spelling for known aliases."""
-        key = make.strip().lower()
-        return cls.BRAND_ALIASES.get(key, make.strip())
+        """Return the canonical NHTSA make spelling for known aliases.
+
+        NHTSA's recall API is case-sensitive: "Volkswagen" returns hits but
+        "VOLKSWAGEN" or "volkswagen" returns 0. For inputs not covered by the
+        alias dict we apply a Title-Case fallback so common typing variants
+        ("VOLKSWAGEN", "land rover") still resolve.
+        """
+        cleaned = make.strip()
+        if not cleaned:
+            return cleaned
+        key = cleaned.lower()
+        if key in cls.BRAND_ALIASES:
+            return cls.BRAND_ALIASES[key]
+        # Title-case fallback: "land rover" → "Land Rover", "VOLKSWAGEN" → "Volkswagen".
+        # str.title() is safe here because we're producing a single-line proper noun.
+        return cleaned.title()
 
     # Rate limiting settings
     REQUESTS_PER_SECOND = 5

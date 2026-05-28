@@ -301,16 +301,60 @@ class TestHuBERTRevisionPinning:
 
 
 class TestSentryExplicitCapture:
-    """Verify generic_exception_handler explicitly forwards to Sentry."""
+    """Verify Sentry forwarding is present and PII-safe across 5xx handlers."""
 
-    def test_generic_handler_calls_capture_exception(self):
+    def test_capture_helper_exists(self):
+        """error_handlers.py should expose a single _capture_to_sentry helper."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        assert "def _capture_to_sentry" in content, (
+            "error_handlers.py should define a centralized Sentry helper"
+        )
+        helper = content[content.find("def _capture_to_sentry") :]
+        helper = helper[: helper.find("\n\nasync def")]
+        assert "sentry_sdk.capture_exception" in helper, (
+            "_capture_to_sentry must actually call sentry_sdk.capture_exception"
+        )
+        assert "except ImportError" in helper, (
+            "Sentry import must be guarded (it may not be installed)"
+        )
+
+    def test_helper_uses_route_template_not_raw_path(self):
+        """PII-safe tagging: route template tag, raw path only in extras."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        helper = eh.read_text()
+        helper = helper[helper.find("def _capture_to_sentry") :]
+        helper = helper[: helper.find("\n\nasync def")]
+        assert 'set_tag("route"' in helper, (
+            "Sentry tag should be the route template (no UUIDs), not raw URL"
+        )
+        assert 'set_extra("raw_path"' in helper, (
+            "Raw path belongs in set_extra (unindexed), not set_tag"
+        )
+
+    def test_generic_handler_invokes_helper(self):
         eh = BACKEND_DIR / "core" / "error_handlers.py"
         content = eh.read_text()
         generic = content[content.find("async def generic_exception_handler") :]
-        assert "sentry_sdk.capture_exception" in generic, (
-            "generic_exception_handler should call sentry_sdk.capture_exception explicitly"
+        generic = generic[: generic.find("\n\nasync def") or len(generic)]
+        assert "_capture_to_sentry(" in generic, (
+            "generic_exception_handler should delegate to _capture_to_sentry"
         )
-        # Must not let Sentry errors crash the handler
-        assert "except ImportError" in generic, (
-            "Sentry import must be guarded (it may not be installed)"
+
+    def test_5xx_handlers_capture(self):
+        """sqlalchemy_exception_handler and autocognitix_exception_handler should
+        forward to Sentry for 5xx status codes."""
+        eh = BACKEND_DIR / "core" / "error_handlers.py"
+        content = eh.read_text()
+        # SQLAlchemy handler
+        sa_section = content[content.find("async def sqlalchemy_exception_handler") :]
+        sa_section = sa_section[: sa_section.find("\n\nasync def") or len(sa_section)]
+        assert "_capture_to_sentry(" in sa_section, (
+            "sqlalchemy_exception_handler should call _capture_to_sentry for 5xx"
+        )
+        # AutoCognitix handler
+        ac_section = content[content.find("async def autocognitix_exception_handler") :]
+        ac_section = ac_section[: ac_section.find("\n\nasync def") or len(ac_section)]
+        assert "_capture_to_sentry(" in ac_section, (
+            "autocognitix_exception_handler should call _capture_to_sentry for 5xx"
         )
