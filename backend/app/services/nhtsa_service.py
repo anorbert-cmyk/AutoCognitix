@@ -536,7 +536,7 @@ class NHTSAService:
         if make.lower() in self.EU_ONLY_MAKES:
             logger.info(
                 f"Skipping NHTSA recalls lookup for EU-only make {sanitize_log(make)} "
-                f"{sanitize_log(model)} {year}"
+                f"{sanitize_log(model)} {sanitize_log(str(year))}"
             )
             return []
 
@@ -633,7 +633,7 @@ class NHTSAService:
         if make.lower() in self.EU_ONLY_MAKES:
             logger.info(
                 f"Skipping NHTSA complaints lookup for EU-only make {sanitize_log(make)} "
-                f"{sanitize_log(model)} {year}"
+                f"{sanitize_log(model)} {sanitize_log(str(year))}"
             )
             return []
 
