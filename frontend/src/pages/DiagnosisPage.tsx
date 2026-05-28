@@ -158,6 +158,11 @@ export default function DiagnosisPage() {
         additionalContext: request.additional_context,
       });
 
+      if (!result.id) {
+        toast.error('A diagnózis elmentése nem sikerült. Próbáld újra.');
+        setCurrentStep('input');
+        return;
+      }
       setDiagnosisId(result.id);
       navigate(`/diagnosis/${result.id}`);
     } catch (err) {

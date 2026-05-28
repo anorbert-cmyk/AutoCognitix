@@ -256,6 +256,31 @@ class NHTSAService:
     RECALLS_BASE_URL = "https://api.nhtsa.gov/recalls"
     COMPLAINTS_BASE_URL = "https://api.nhtsa.gov/complaints"
 
+    # Brands not sold in the US — NHTSA recall lookups will always be empty.
+    # Skip the network round-trip and let callers display an EU-specific empty state.
+    EU_ONLY_MAKES = frozenset(
+        {
+            "skoda",
+            "škoda",
+            "seat",
+            "cupra",
+            "opel",
+            "vauxhall",
+            "peugeot",
+            "citroen",
+            "citroën",
+            "ds",
+            "ds automobiles",
+            "dacia",
+            "lancia",
+            "alfa romeo",
+            "lada",
+            "trabant",
+            "wartburg",
+            "moskvich",
+        }
+    )
+
     # Rate limiting settings
     REQUESTS_PER_SECOND = 5
     RATE_LIMIT_WINDOW = 1.0  # seconds
@@ -506,6 +531,15 @@ class NHTSAService:
         make = make.strip()
         model = model.strip()
 
+        # Skip NHTSA call for brands never sold in the US — saves a round-trip
+        # and avoids misleading "0 recalls" when the dataset simply doesn't cover them.
+        if make.lower() in self.EU_ONLY_MAKES:
+            logger.info(
+                f"Skipping NHTSA recalls lookup for EU-only make {sanitize_log(make)} "
+                f"{sanitize_log(model)} {sanitize_log(str(year))}"
+            )
+            return []
+
         # Check cache
         cache_key = self._generate_cache_key("recalls", make, model, year)
         if use_cache:
@@ -594,6 +628,14 @@ class NHTSAService:
         """
         make = make.strip()
         model = model.strip()
+
+        # Skip NHTSA call for brands never sold in the US — same rationale as get_recalls.
+        if make.lower() in self.EU_ONLY_MAKES:
+            logger.info(
+                f"Skipping NHTSA complaints lookup for EU-only make {sanitize_log(make)} "
+                f"{sanitize_log(model)} {sanitize_log(str(year))}"
+            )
+            return []
 
         # Check cache
         cache_key = self._generate_cache_key("complaints", make, model, year)

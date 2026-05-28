@@ -229,6 +229,25 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
             {/* AI Disclaimer - GDPR/EU AI Act compliance */}
             <AIDisclaimerBadge />
 
+            {/* Degradált üzemmód jelzés — RAG/Qdrant/NHTSA/PartsPriceService kiesett */}
+            {result.used_fallback && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 flex items-start gap-3"
+              >
+                <MaterialIcon name="warning_amber" className="text-2xl text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-bold text-amber-900 mb-1">
+                    Degradált AI üzemmód
+                  </h4>
+                  <p className="text-sm text-amber-800 leading-relaxed">
+                    Az AI egyik háttérszolgáltatása (szemantikus keresés, alkatrész árak vagy visszahívások) nem elérhető. Az eredmény csak tájékoztató jellegű — kérjük, ellenőrizze szakemberrel.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* AI Analysis Section */}
             <SectionErrorBoundary sectionName="AI elemzés">
             <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
@@ -415,15 +434,19 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
             {/* NHTSA Recalls Section */}
             {result.related_recalls && result.related_recalls.length > 0 && (
               <SectionErrorBoundary sectionName="NHTSA visszahívások">
-              <section>
+              <section
+                role="alert"
+                aria-live="polite"
+                aria-labelledby="nhtsa-recall-heading"
+              >
                 <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-6">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-100">
-                      <MaterialIcon name="warning" className="text-xl text-red-600" />
+                      <MaterialIcon name="warning" className="text-xl text-red-600" aria-hidden="true" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-bold text-red-900">NHTSA Visszahívások</h3>
+                        <h3 id="nhtsa-recall-heading" className="text-lg font-bold text-red-900">NHTSA Visszahívások</h3>
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
                           {result.related_recalls.length} aktív
                         </span>

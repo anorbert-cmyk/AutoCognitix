@@ -200,3 +200,42 @@ class TestRateLimiterMemoryManagement:
         assert "= defaultdict(" not in init_section, (
             "InMemoryRateLimiter should use regular dict to prevent phantom entries"
         )
+
+
+class TestNHTSAEUMarketGuard:
+    """Verify NHTSA service skips API calls for brands not sold in the US market."""
+
+    def test_eu_only_makes_constant_defined(self):
+        """nhtsa_service.py should expose an EU_ONLY_MAKES set."""
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        assert "EU_ONLY_MAKES" in content, (
+            "nhtsa_service.py should declare EU_ONLY_MAKES to avoid useless NHTSA round-trips"
+        )
+        for brand in ("skoda", "seat", "opel", "peugeot", "dacia"):
+            assert brand in content.lower(), (
+                f"EU_ONLY_MAKES should include {brand!r} — sold in EU only, no NHTSA recalls"
+            )
+
+    def test_get_recalls_short_circuits_for_eu_only(self):
+        """get_recalls should early-return [] before making HTTP request for EU-only brands."""
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        recalls_section = content[content.find("async def get_recalls") :]
+        # The EU guard must precede the cache_key generation / HTTP call
+        cache_key_pos = recalls_section.find("_generate_cache_key")
+        eu_guard_pos = recalls_section.find("EU_ONLY_MAKES")
+        assert 0 < eu_guard_pos < cache_key_pos, (
+            "EU_ONLY_MAKES guard must run before cache/HTTP work in get_recalls"
+        )
+
+    def test_get_complaints_short_circuits_for_eu_only(self):
+        """get_complaints should also short-circuit for EU-only brands."""
+        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
+        content = nhtsa_file.read_text()
+        complaints_section = content[content.find("async def get_complaints") :]
+        cache_key_pos = complaints_section.find("_generate_cache_key")
+        eu_guard_pos = complaints_section.find("EU_ONLY_MAKES")
+        assert 0 < eu_guard_pos < cache_key_pos, (
+            "EU_ONLY_MAKES guard must run before cache/HTTP work in get_complaints"
+        )

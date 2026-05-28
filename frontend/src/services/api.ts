@@ -282,14 +282,16 @@ export interface RelatedRecall {
 }
 
 export interface RelatedComplaint {
-  complaint_id?: string
-  summary?: string
-  incident_date?: string
-  severity?: string
+  odi_number?: string
+  components: string
+  summary: string
+  crash: boolean
+  fire: boolean
+  similarity_score: number
 }
 
 export interface DiagnosisResponse {
-  id: string
+  id?: string
   vehicle_make: string
   vehicle_model: string
   vehicle_year: number
@@ -304,7 +306,7 @@ export interface DiagnosisResponse {
   total_cost_estimate?: TotalCostEstimate
   root_cause_analysis?: string
   related_recalls?: RelatedRecall[]
-  similar_complaints?: RelatedComplaint[] | string[]
+  similar_complaints?: RelatedComplaint[]
   // Extended fields
   urgency_level?: string
   safety_warnings?: string[]
