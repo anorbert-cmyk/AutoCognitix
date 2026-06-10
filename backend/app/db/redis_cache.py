@@ -68,7 +68,6 @@ class CacheTTL:
     API_RESPONSE = 300
 
     # NHTSA data - cache for 6 hours (external API)
-    NHTSA_DATA = 21600
 
     # Embedding vectors - cache for 1 hour
     EMBEDDINGS = 3600
@@ -91,9 +90,6 @@ class CachePrefix:
     KNOWN_ISSUES = "issues:"
     VEHICLE_MAKE = "vehicle:make:"
     VEHICLE_MODEL = "vehicle:model:"
-    NHTSA_RECALLS = "nhtsa:recalls:"
-    NHTSA_COMPLAINTS = "nhtsa:complaints:"
-    NHTSA_VIN = "nhtsa:vin:"
     EMBEDDING = "embed:"
     API_RESPONSE = "api:"
     RATE_LIMIT = "ratelimit:"
@@ -501,62 +497,6 @@ class RedisCacheService:
         """Cache related DTC codes."""
         key = f"{CachePrefix.DTC_RELATED}{code.upper()}"
         return await self.set(key, related, CacheTTL.DTC_CODE)
-
-    # =========================================================================
-    # NHTSA Data Caching
-    # =========================================================================
-
-    async def get_nhtsa_recalls(
-        self,
-        make: str,
-        model: str,
-        year: int,
-    ) -> Optional[List[dict]]:
-        """Get cached NHTSA recalls."""
-        key = f"{CachePrefix.NHTSA_RECALLS}{make}:{model}:{year}"
-        return await self.get(key)
-
-    async def set_nhtsa_recalls(
-        self,
-        make: str,
-        model: str,
-        year: int,
-        recalls: List[dict],
-    ) -> bool:
-        """Cache NHTSA recalls."""
-        key = f"{CachePrefix.NHTSA_RECALLS}{make}:{model}:{year}"
-        return await self.set(key, recalls, CacheTTL.NHTSA_DATA)
-
-    async def get_nhtsa_complaints(
-        self,
-        make: str,
-        model: str,
-        year: int,
-    ) -> Optional[List[dict]]:
-        """Get cached NHTSA complaints."""
-        key = f"{CachePrefix.NHTSA_COMPLAINTS}{make}:{model}:{year}"
-        return await self.get(key)
-
-    async def set_nhtsa_complaints(
-        self,
-        make: str,
-        model: str,
-        year: int,
-        complaints: List[dict],
-    ) -> bool:
-        """Cache NHTSA complaints."""
-        key = f"{CachePrefix.NHTSA_COMPLAINTS}{make}:{model}:{year}"
-        return await self.set(key, complaints, CacheTTL.NHTSA_DATA)
-
-    async def get_vin_decode(self, vin: str) -> Optional[dict]:
-        """Get cached VIN decode result."""
-        key = f"{CachePrefix.NHTSA_VIN}{vin.upper()}"
-        return await self.get(key)
-
-    async def set_vin_decode(self, vin: str, data: dict) -> bool:
-        """Cache VIN decode result."""
-        key = f"{CachePrefix.NHTSA_VIN}{vin.upper()}"
-        return await self.set(key, data, CacheTTL.NHTSA_DATA)
 
     # =========================================================================
     # Embedding Caching

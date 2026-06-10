@@ -24,7 +24,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-import numpy as np
 import torch
 from transformers import AutoModel, AutoTokenizer
 from tqdm import tqdm
@@ -42,6 +41,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 HUBERT_MODEL = os.getenv("HUBERT_MODEL", "SZTAKI-HLT/hubert-base-cc")
+HUBERT_REVISION = os.getenv("HUBERT_REVISION", "main")
 EMBEDDING_DIMENSION = 768  # huBERT output dimension
 
 # Configure logging
@@ -92,8 +92,12 @@ class HuBERTEmbedder:
             return
 
         logger.info(f"Loading huBERT model: {self.model_name}")
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModel.from_pretrained(self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
+        self._model = AutoModel.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
         self._model.to(self.device)
         self._model.eval()
         logger.info("huBERT model loaded successfully")
@@ -131,7 +135,9 @@ class HuBERTEmbedder:
                     non_empty_texts.append(text)
 
             # Initialize batch embeddings with zeros
-            batch_embeddings = [[0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))]
+            batch_embeddings = [
+                [0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))
+            ]
 
             if non_empty_texts:
                 # Tokenize batch
@@ -223,7 +229,9 @@ class QdrantIndexer:
                     logger.info(f"Deleting existing collection: {collection_name}")
                     self.client.delete_collection(collection_name=collection_name)
                 else:
-                    logger.info(f"Collection '{collection_name}' already exists, skipping creation")
+                    logger.info(
+                        f"Collection '{collection_name}' already exists, skipping creation"
+                    )
                     return
 
             self.client.create_collection(
@@ -370,19 +378,21 @@ def index_dtc_codes(
 
         ids.append(f"dtc_{code}")
         texts.append(description_hu)
-        payloads.append({
-            "code": code,
-            "description_hu": description_hu,
-            "description_en": dtc.get("description_en", ""),
-            "category": dtc.get("category", "unknown"),
-            "severity": dtc.get("severity", "unknown"),
-            "system": dtc.get("system", ""),
-            "symptoms": dtc.get("symptoms", []),
-            "possible_causes": dtc.get("possible_causes", []),
-            "diagnostic_steps": dtc.get("diagnostic_steps", []),
-            "related_codes": dtc.get("related_codes", []),
-            "is_generic": dtc.get("is_generic", True),
-        })
+        payloads.append(
+            {
+                "code": code,
+                "description_hu": description_hu,
+                "description_en": dtc.get("description_en", ""),
+                "category": dtc.get("category", "unknown"),
+                "severity": dtc.get("severity", "unknown"),
+                "system": dtc.get("system", ""),
+                "symptoms": dtc.get("symptoms", []),
+                "possible_causes": dtc.get("possible_causes", []),
+                "diagnostic_steps": dtc.get("diagnostic_steps", []),
+                "related_codes": dtc.get("related_codes", []),
+                "is_generic": dtc.get("is_generic", True),
+            }
+        )
 
     if not ids:
         logger.warning("No valid DTC codes to index")
@@ -393,7 +403,7 @@ def index_dtc_codes(
     all_embeddings: List[List[float]] = []
 
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding DTC codes"):
-        batch_texts = texts[i:i + batch_size]
+        batch_texts = texts[i : i + batch_size]
         batch_embeddings = embed_batch(batch_texts, preprocess=False)
         all_embeddings.extend(batch_embeddings)
 
@@ -401,9 +411,9 @@ def index_dtc_codes(
     logger.info(f"Upserting {len(ids)} vectors to Qdrant...")
 
     for i in tqdm(range(0, len(ids), batch_size), desc="Indexing DTC codes"):
-        batch_ids = ids[i:i + batch_size]
-        batch_vectors = all_embeddings[i:i + batch_size]
-        batch_payloads = payloads[i:i + batch_size]
+        batch_ids = ids[i : i + batch_size]
+        batch_vectors = all_embeddings[i : i + batch_size]
+        batch_payloads = payloads[i : i + batch_size]
 
         indexer.upsert_batch(
             collection_name=DTC_COLLECTION,
@@ -456,18 +466,20 @@ def index_symptoms(
         symptom_id = f"symptom_{hash(symptom_text) % 10**10}"
         ids.append(symptom_id)
         texts.append(symptom_text)
-        payloads.append({
-            "symptom_text": symptom_text,
-            "related_dtc_codes": sorted(list(related_codes)),
-            "related_codes_count": len(related_codes),
-        })
+        payloads.append(
+            {
+                "symptom_text": symptom_text,
+                "related_dtc_codes": sorted(list(related_codes)),
+                "related_codes_count": len(related_codes),
+            }
+        )
 
     # Generate embeddings with progress bar
     logger.info(f"Generating embeddings for {len(texts)} symptoms...")
     all_embeddings: List[List[float]] = []
 
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding symptoms"):
-        batch_texts = texts[i:i + batch_size]
+        batch_texts = texts[i : i + batch_size]
         batch_embeddings = embed_batch(batch_texts, preprocess=False)
         all_embeddings.extend(batch_embeddings)
 
@@ -475,9 +487,9 @@ def index_symptoms(
     logger.info(f"Upserting {len(ids)} symptom vectors to Qdrant...")
 
     for i in tqdm(range(0, len(ids), batch_size), desc="Indexing symptoms"):
-        batch_ids = ids[i:i + batch_size]
-        batch_vectors = all_embeddings[i:i + batch_size]
-        batch_payloads = payloads[i:i + batch_size]
+        batch_ids = ids[i : i + batch_size]
+        batch_vectors = all_embeddings[i : i + batch_size]
+        batch_payloads = payloads[i : i + batch_size]
 
         indexer.upsert_batch(
             collection_name=SYMPTOM_COLLECTION,
@@ -496,7 +508,12 @@ def print_summary(indexer: QdrantIndexer) -> None:
     print("INDEXING SUMMARY")
     print("=" * 60)
 
-    for collection_name in [DTC_COLLECTION, SYMPTOM_COLLECTION, DTC_COLLECTION_LEGACY, SYMPTOM_COLLECTION_LEGACY]:
+    for collection_name in [
+        DTC_COLLECTION,
+        SYMPTOM_COLLECTION,
+        DTC_COLLECTION_LEGACY,
+        SYMPTOM_COLLECTION_LEGACY,
+    ]:
         info = indexer.get_collection_info(collection_name)
         print(f"\nCollection: {info['name']}")
         if info.get("status") == "not_found":
@@ -561,7 +578,9 @@ Examples:
     # Validate arguments
     if not (args.dtc or args.symptoms or args.all):
         parser.print_help()
-        print("\nError: Please specify at least one indexing option: --dtc, --symptoms, or --all")
+        print(
+            "\nError: Please specify at least one indexing option: --dtc, --symptoms, or --all"
+        )
         sys.exit(1)
 
     # Determine what to index

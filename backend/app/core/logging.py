@@ -30,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.config import settings
+from app.core.pii import redact_pii
 
 # Context variables for request correlation and distributed tracing
 request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
@@ -579,6 +580,59 @@ LOGGER_CONFIG: Dict[str, int] = {
 }
 
 
+def _redact_str_values(mapping: Any, keys: Optional[tuple] = None) -> None:
+    """Redact PII in-place on a dict's string values (optionally only `keys`)."""
+    if not isinstance(mapping, dict):
+        return
+    for key in keys if keys is not None else list(mapping.keys()):
+        value = mapping.get(key)
+        if isinstance(value, str):
+            mapping[key] = redact_pii(value)
+
+
+def _redact_exception_and_breadcrumbs(event: Dict[str, Any]) -> None:
+    """Redact PII from exception values and breadcrumb trails in-place.
+
+    Exception messages routinely embed the offending value (e.g. a VIN from a
+    failed lookup); breadcrumbs replay the request trail (URLs, log lines)
+    leading up to the error — same exposure as the request URL itself.
+    """
+    exception = event.get("exception")
+    if isinstance(exception, dict):
+        for exc_value in exception.get("values") or []:
+            _redact_str_values(exc_value, keys=("value",))
+
+    breadcrumbs = event.get("breadcrumbs")
+    if isinstance(breadcrumbs, dict):
+        for crumb in breadcrumbs.get("values") or []:
+            if not isinstance(crumb, dict):
+                continue
+            _redact_str_values(crumb, keys=("message",))
+            _redact_str_values(crumb.get("data"))
+
+
+def _sentry_before_send(event: Dict[str, Any], hint: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Redact PII from every Sentry event at the source.
+
+    All events — LoggingIntegration, FastApiIntegration and manual captures —
+    pass through this hook, so UUIDs/VINs are stripped from the request URL,
+    query string, message, extras, exception values and breadcrumbs regardless
+    of which integration produced the event. Redaction failures must never
+    drop the event.
+    """
+    try:
+        _redact_str_values(event.get("request"), keys=("url", "query_string"))
+        _redact_str_values(event.get("extra"))
+        _redact_str_values(event, keys=("message",))
+        # LoggingIntegration events carry the log message in `logentry`.
+        _redact_str_values(event.get("logentry"), keys=("message",))
+        _redact_exception_and_breadcrumbs(event)
+    except Exception:
+        # Redaction must never block event delivery.
+        pass
+    return event
+
+
 def setup_logging() -> None:
     """
     Configure application logging with structured JSON output.
@@ -632,6 +686,7 @@ def setup_logging() -> None:
                 dsn=settings.SENTRY_DSN,
                 environment=settings.ENVIRONMENT,
                 release="autocognitix@0.1.0",
+                before_send=_sentry_before_send,
                 integrations=[
                     FastApiIntegration(),
                     SqlalchemyIntegration(),

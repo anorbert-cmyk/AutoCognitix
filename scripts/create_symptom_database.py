@@ -25,9 +25,8 @@ import logging
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 from tqdm import tqdm
@@ -42,6 +41,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_URL = os.getenv("QDRANT_URL", None)  # For cloud deployment
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 HUBERT_MODEL = os.getenv("HUBERT_MODEL", "SZTAKI-HLT/hubert-base-cc")
+HUBERT_REVISION = os.getenv("HUBERT_REVISION", "main")
 EMBEDDING_DIMENSION = 768
 
 # Collection names
@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Embedding Service (standalone for script usage)
 # =============================================================================
+
 
 class HuBERTEmbedder:
     """Handles Hungarian text embedding using huBERT model."""
@@ -95,8 +96,12 @@ class HuBERTEmbedder:
         from transformers import AutoModel, AutoTokenizer
 
         logger.info(f"Loading huBERT model: {self.model_name}")
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModel.from_pretrained(self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
+        self._model = AutoModel.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
         self._model.to(self.device)
         self._model.eval()
         logger.info("huBERT model loaded successfully")
@@ -147,7 +152,7 @@ class HuBERTEmbedder:
         all_embeddings = []
 
         for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
+            batch_texts = texts[i : i + batch_size]
 
             # Handle empty texts
             non_empty_indices = []
@@ -158,7 +163,9 @@ class HuBERTEmbedder:
                     non_empty_texts.append(text)
 
             # Initialize batch embeddings with zeros
-            batch_embeddings = [[0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))]
+            batch_embeddings = [
+                [0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))
+            ]
 
             if non_empty_texts:
                 encoded = self._tokenizer(
@@ -201,6 +208,7 @@ def get_embedder() -> HuBERTEmbedder:
 # Data Loading
 # =============================================================================
 
+
 def load_symptoms(file_path: Path = SYMPTOMS_FILE) -> Dict[str, Any]:
     """
     Load symptoms from JSON file.
@@ -218,7 +226,6 @@ def load_symptoms(file_path: Path = SYMPTOMS_FILE) -> Dict[str, Any]:
 
     symptoms = data.get("symptoms", [])
     categories = data.get("categories", [])
-    metadata = data.get("metadata", {})
 
     logger.info(f"Loaded {len(symptoms)} symptoms in {len(categories)} categories")
     return data
@@ -242,6 +249,7 @@ def load_dtc_codes() -> List[Dict[str, Any]]:
 # Neo4j Integration
 # =============================================================================
 
+
 def create_neo4j_symptom_nodes(symptoms_data: Dict[str, Any]) -> Dict[str, int]:
     """
     Create Symptom nodes in Neo4j with full metadata.
@@ -255,7 +263,6 @@ def create_neo4j_symptom_nodes(symptoms_data: Dict[str, Any]) -> Dict[str, int]:
     from backend.app.db.neo4j_models import DTCNode, SymptomNode
 
     symptoms = symptoms_data.get("symptoms", [])
-    categories = {cat["id"]: cat for cat in symptoms_data.get("categories", [])}
 
     counts = {
         "symptoms_created": 0,
@@ -325,10 +332,10 @@ def create_neo4j_symptom_nodes(symptoms_data: Dict[str, Any]) -> Dict[str, int]:
                 # Check if relationship already exists
                 if not dtc_node.causes.is_connected(symptom_node):
                     # Create relationship with confidence based on symptom data
-                    dtc_node.causes.connect(symptom_node, {
-                        "confidence": 0.75,
-                        "data_source": "symptom_database"
-                    })
+                    dtc_node.causes.connect(
+                        symptom_node,
+                        {"confidence": 0.75, "data_source": "symptom_database"},
+                    )
                     counts["dtc_relationships"] += 1
 
     logger.info("Creating related symptom relationships...")
@@ -367,10 +374,19 @@ def create_neo4j_symptom_nodes(symptoms_data: Dict[str, Any]) -> Dict[str, int]:
         # Create relationships for symptoms with strong DTC overlap
         for other_id in related_symptoms_set:
             other_node = symptom_nodes.get(other_id)
-            if other_node and not symptom_node.related_symptoms.is_connected(other_node):
+            if other_node and not symptom_node.related_symptoms.is_connected(
+                other_node
+            ):
                 # Only link if they share 2+ DTC codes
                 shared_dtcs = set(symptom.get("related_dtc_codes", [])) & set(
-                    next((s.get("related_dtc_codes", []) for s in symptoms if s["id"] == other_id), [])
+                    next(
+                        (
+                            s.get("related_dtc_codes", [])
+                            for s in symptoms
+                            if s["id"] == other_id
+                        ),
+                        [],
+                    )
                 )
                 if len(shared_dtcs) >= 2:
                     symptom_node.related_symptoms.connect(other_node)
@@ -402,6 +418,7 @@ def create_neo4j_category_stats(symptoms_data: Dict[str, Any]) -> Dict[str, int]
 # =============================================================================
 # Qdrant Integration
 # =============================================================================
+
 
 def create_qdrant_client():
     """Create Qdrant client with appropriate connection settings."""
@@ -436,7 +453,9 @@ def create_symptom_collection(client, recreate: bool = False) -> None:
                 logger.info(f"Deleting existing collection: {SYMPTOM_COLLECTION}")
                 client.delete_collection(collection_name=SYMPTOM_COLLECTION)
             else:
-                logger.info(f"Collection '{SYMPTOM_COLLECTION}' already exists, skipping creation")
+                logger.info(
+                    f"Collection '{SYMPTOM_COLLECTION}' already exists, skipping creation"
+                )
                 return
 
         client.create_collection(
@@ -509,28 +528,30 @@ def index_symptoms_in_qdrant(
         category_id = symptom.get("category", "unknown")
         category_info = categories.get(category_id, {})
 
-        payloads.append({
-            "symptom_id": symptom_id,
-            "name_hu": name_hu,
-            "name_en": symptom.get("name_en", ""),
-            "description_hu": desc_hu,
-            "description_en": symptom.get("description_en", ""),
-            "category": category_id,
-            "category_name_hu": category_info.get("name_hu", ""),
-            "category_name_en": category_info.get("name_en", ""),
-            "severity": symptom.get("severity", "medium"),
-            "related_dtc_codes": symptom.get("related_dtc_codes", []),
-            "possible_causes": symptom.get("possible_causes", []),
-            "diagnostic_steps": symptom.get("diagnostic_steps", []),
-            "keywords": symptom.get("keywords", []),
-        })
+        payloads.append(
+            {
+                "symptom_id": symptom_id,
+                "name_hu": name_hu,
+                "name_en": symptom.get("name_en", ""),
+                "description_hu": desc_hu,
+                "description_en": symptom.get("description_en", ""),
+                "category": category_id,
+                "category_name_hu": category_info.get("name_hu", ""),
+                "category_name_en": category_info.get("name_en", ""),
+                "severity": symptom.get("severity", "medium"),
+                "related_dtc_codes": symptom.get("related_dtc_codes", []),
+                "possible_causes": symptom.get("possible_causes", []),
+                "diagnostic_steps": symptom.get("diagnostic_steps", []),
+                "keywords": symptom.get("keywords", []),
+            }
+        )
 
     # Generate embeddings with progress bar
     logger.info(f"Generating embeddings for {len(texts)} symptoms...")
     all_embeddings: List[List[float]] = []
 
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding symptoms"):
-        batch_texts = texts[i:i + batch_size]
+        batch_texts = texts[i : i + batch_size]
         batch_embeddings = embedder.embed_batch(batch_texts, batch_size=batch_size)
         all_embeddings.extend(batch_embeddings)
 
@@ -538,9 +559,9 @@ def index_symptoms_in_qdrant(
     logger.info(f"Upserting {len(ids)} symptom vectors to Qdrant...")
 
     for i in tqdm(range(0, len(ids), batch_size), desc="Indexing symptoms"):
-        batch_ids = ids[i:i + batch_size]
-        batch_vectors = all_embeddings[i:i + batch_size]
-        batch_payloads = payloads[i:i + batch_size]
+        batch_ids = ids[i : i + batch_size]
+        batch_vectors = all_embeddings[i : i + batch_size]
+        batch_payloads = payloads[i : i + batch_size]
 
         points = [
             qdrant_models.PointStruct(
@@ -587,17 +608,19 @@ def search_symptoms(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     # Format results
     formatted_results = []
     for result in results:
-        formatted_results.append({
-            "score": result.score,
-            "symptom_id": result.payload.get("symptom_id"),
-            "name_hu": result.payload.get("name_hu"),
-            "name_en": result.payload.get("name_en"),
-            "description_hu": result.payload.get("description_hu"),
-            "category": result.payload.get("category"),
-            "severity": result.payload.get("severity"),
-            "related_dtc_codes": result.payload.get("related_dtc_codes"),
-            "possible_causes": result.payload.get("possible_causes"),
-        })
+        formatted_results.append(
+            {
+                "score": result.score,
+                "symptom_id": result.payload.get("symptom_id"),
+                "name_hu": result.payload.get("name_hu"),
+                "name_en": result.payload.get("name_en"),
+                "description_hu": result.payload.get("description_hu"),
+                "category": result.payload.get("category"),
+                "severity": result.payload.get("severity"),
+                "related_dtc_codes": result.payload.get("related_dtc_codes"),
+                "possible_causes": result.payload.get("possible_causes"),
+            }
+        )
 
     return formatted_results
 
@@ -605,6 +628,7 @@ def search_symptoms(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
 # =============================================================================
 # Reporting
 # =============================================================================
+
 
 def print_summary(
     symptoms_data: Dict[str, Any],
@@ -655,7 +679,7 @@ def print_summary(
 
     # Qdrant summary
     if qdrant_count is not None:
-        print(f"\nQdrant Vector Database:")
+        print("\nQdrant Vector Database:")
         print(f"  Symptoms indexed: {qdrant_count}")
 
     print("\n" + "=" * 70)
@@ -683,9 +707,13 @@ def demo_search() -> None:
             results = search_symptoms(query, top_k=3)
             for i, result in enumerate(results, 1):
                 print(f"  {i}. {result['name_hu']} (score: {result['score']:.3f})")
-                print(f"     Category: {result['category']}, Severity: {result['severity']}")
-                if result['related_dtc_codes']:
-                    print(f"     Related DTCs: {', '.join(result['related_dtc_codes'][:3])}")
+                print(
+                    f"     Category: {result['category']}, Severity: {result['severity']}"
+                )
+                if result["related_dtc_codes"]:
+                    print(
+                        f"     Related DTCs: {', '.join(result['related_dtc_codes'][:3])}"
+                    )
         except Exception as e:
             print(f"  Error: {e}")
 
@@ -693,6 +721,7 @@ def demo_search() -> None:
 # =============================================================================
 # Main Entry Point
 # =============================================================================
+
 
 def main():
     """Main entry point."""
@@ -755,7 +784,9 @@ Examples:
     # Validate arguments
     if not (args.neo4j or args.qdrant or args.all or args.demo):
         parser.print_help()
-        print("\nError: Please specify at least one option: --neo4j, --qdrant, --all, or --demo")
+        print(
+            "\nError: Please specify at least one option: --neo4j, --qdrant, --all, or --demo"
+        )
         sys.exit(1)
 
     # Load symptoms data

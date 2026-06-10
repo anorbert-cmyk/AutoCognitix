@@ -53,8 +53,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Thread pool for CPU-bound preprocessing
+# Thread pool for heavy CPU/GPU-bound model inference (HuBERT embeddings)
 _thread_pool = ThreadPoolExecutor(max_workers=4)
+
+# Separate small pool for lightweight NLP work (e.g. HuSpaCy preprocessing) so
+# fast preprocessing calls never queue behind multi-second model inference.
+_nlp_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nlp")
 
 
 class HungarianEmbeddingService:
@@ -849,6 +853,21 @@ def preprocess_hungarian(text: str) -> str:
     return get_embedding_service().preprocess_hungarian(text)
 
 
+def shutdown_thread_pools() -> None:
+    """
+    Shut down both module-level thread pools (inference + NLP).
+
+    Call this at application shutdown. After shutdown, async wrappers that
+    submit work to these pools will raise RuntimeError.
+    """
+    try:
+        _thread_pool.shutdown(wait=True)
+    finally:
+        # The NLP pool must stop even if the inference pool shutdown raises.
+        _nlp_pool.shutdown(wait=True)
+    logger.info("Embedding service thread pools shut down (inference + nlp)")
+
+
 def get_similar_texts(
     query: str, candidates: List[str], top_k: int = 5, preprocess: bool = False
 ) -> List[Tuple[str, float]]:
@@ -870,6 +889,26 @@ def get_similar_texts(
 # =============================================================================
 # Async Convenience Functions
 # =============================================================================
+
+
+async def preprocess_hungarian_async(text: str) -> str:
+    """
+    Async Hungarian text preprocessing.
+
+    Runs in the dedicated lightweight NLP pool so it never queues behind
+    multi-second HuBERT inference in the main thread pool.
+
+    Args:
+        text: Input text to preprocess.
+
+    Returns:
+        str: Preprocessed text with lemmatized tokens.
+
+    Raises:
+        RuntimeError: If the NLP pool has already been shut down.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_nlp_pool, preprocess_hungarian, text)
 
 
 async def embed_text_async(

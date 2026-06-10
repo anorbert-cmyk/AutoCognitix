@@ -31,7 +31,9 @@ from tqdm import tqdm
 try:
     SCRIPT_DIR = Path(__file__).parent
 except NameError:
-    SCRIPT_DIR = Path("/Users/norbertbarna/Library/CloudStorage/ProtonDrive-anorbert@proton.me-folder/Munka/AutoCognitix/scripts")
+    SCRIPT_DIR = Path(
+        "/Users/norbertbarna/Library/CloudStorage/ProtonDrive-anorbert@proton.me-folder/Munka/AutoCognitix/scripts"
+    )
 PROJECT_DIR = SCRIPT_DIR.parent
 
 # Configuration from environment
@@ -46,6 +48,7 @@ if not QDRANT_URL or not QDRANT_API_KEY:
 COLLECTION_NAME = "autocognitix"
 EMBEDDING_DIM = 768
 HUBERT_MODEL = "SZTAKI-HLT/hubert-base-cc"
+HUBERT_REVISION = os.getenv("HUBERT_REVISION", "main")
 BATCH_SIZE = 32
 QDRANT_UPLOAD_BATCH = 100
 
@@ -57,7 +60,7 @@ CHECKPOINT_FILE = SCRIPT_DIR / "checkpoints" / "new_data_checkpoint.json"
 def generate_stable_id(content: str) -> int:
     """Generate a stable numeric ID from content using MD5 hash."""
     hash_bytes = hashlib.md5(content.encode()).digest()
-    return int.from_bytes(hash_bytes[:8], byteorder='big') & 0x7FFFFFFFFFFFFFFF
+    return int.from_bytes(hash_bytes[:8], byteorder="big") & 0x7FFFFFFFFFFFFFFF
 
 
 class StandaloneHuBERTService:
@@ -87,11 +90,14 @@ class StandaloneHuBERTService:
     def warmup(self):
         """Load model and warm up with a test embedding."""
         print(f"Loading HuBERT model: {HUBERT_MODEL}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(HUBERT_MODEL, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            HUBERT_MODEL, revision=HUBERT_REVISION, use_fast=True
+        )
 
         use_fp16 = self.device.type == "cuda"
         self.model = AutoModel.from_pretrained(
             HUBERT_MODEL,
+            revision=HUBERT_REVISION,
             torch_dtype=torch.float16 if use_fp16 else torch.float32,
         )
         self.model.to(self.device)
@@ -114,7 +120,7 @@ class StandaloneHuBERTService:
 
         # Process in optimal batches
         for i in range(0, len(texts), self._optimal_batch_size):
-            batch = texts[i:i + self._optimal_batch_size]
+            batch = texts[i : i + self._optimal_batch_size]
 
             # Tokenize
             inputs = self.tokenizer(
@@ -122,7 +128,7 @@ class StandaloneHuBERTService:
                 return_tensors="pt",
                 padding=True,
                 truncation=True,
-                max_length=512
+                max_length=512,
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -134,13 +140,17 @@ class StandaloneHuBERTService:
                 token_embeddings = outputs.last_hidden_state
 
                 # Mask padding tokens
-                mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+                mask = (
+                    attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+                )
                 sum_embeddings = torch.sum(token_embeddings * mask, dim=1)
                 sum_mask = torch.clamp(mask.sum(dim=1), min=1e-9)
                 batch_embeddings = sum_embeddings / sum_mask
 
                 # Normalize
-                batch_embeddings = torch.nn.functional.normalize(batch_embeddings, p=2, dim=1)
+                batch_embeddings = torch.nn.functional.normalize(
+                    batch_embeddings, p=2, dim=1
+                )
 
                 embeddings.extend(batch_embeddings.cpu().numpy().tolist())
 
@@ -168,7 +178,7 @@ class CheckpointManager:
             "uci_vehicles_indexed": [],
             "obdb_signals_indexed": [],
             "last_updated": None,
-            "total_indexed": 0
+            "total_indexed": 0,
         }
 
     def save(self):
@@ -202,7 +212,7 @@ class NewDataQdrantIndexer:
             "obdb_signals": 0,
             "errors": 0,
             "duplicates_skipped": 0,
-            "start_time": None
+            "start_time": None,
         }
 
     def connect(self):
@@ -215,7 +225,9 @@ class NewDataQdrantIndexer:
         if COLLECTION_NAME not in [c.name for c in collections.collections]:
             self.qdrant.create_collection(
                 collection_name=COLLECTION_NAME,
-                vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
+                vectors_config=VectorParams(
+                    size=EMBEDDING_DIM, distance=Distance.COSINE
+                ),
             )
             print(f"Created collection: {COLLECTION_NAME}")
         else:
@@ -233,7 +245,7 @@ class NewDataQdrantIndexer:
     def _upload_points(self, points: List[PointStruct]):
         """Upload points to Qdrant in batches."""
         for i in range(0, len(points), QDRANT_UPLOAD_BATCH):
-            batch = points[i:i + QDRANT_UPLOAD_BATCH]
+            batch = points[i : i + QDRANT_UPLOAD_BATCH]
             self.qdrant.upsert(collection_name=COLLECTION_NAME, points=batch)
 
     def _check_existing_ids(self, ids: List[int]) -> set:
@@ -241,12 +253,12 @@ class NewDataQdrantIndexer:
         existing = set()
         try:
             for i in range(0, len(ids), 100):
-                batch_ids = ids[i:i + 100]
+                batch_ids = ids[i : i + 100]
                 results = self.qdrant.retrieve(
                     collection_name=COLLECTION_NAME,
                     ids=batch_ids,
                     with_payload=False,
-                    with_vectors=False
+                    with_vectors=False,
                 )
                 existing.update(p.id for p in results)
         except Exception as e:
@@ -298,7 +310,9 @@ class NewDataQdrantIndexer:
             code_data.append(c)
 
         # Check for existing IDs
-        ids_to_check = [generate_stable_id(f"python_obd_{c.get('code', '')}") for c in code_data]
+        ids_to_check = [
+            generate_stable_id(f"python_obd_{c.get('code', '')}") for c in code_data
+        ]
         existing_ids = self._check_existing_ids(ids_to_check)
         print(f"Found {len(existing_ids)} existing entries, will skip duplicates")
 
@@ -306,8 +320,8 @@ class NewDataQdrantIndexer:
         points = []
         with tqdm(total=len(texts), desc="Python-OBD Embeddings") as pbar:
             for i in range(0, len(texts), BATCH_SIZE):
-                batch_texts = texts[i:i + BATCH_SIZE]
-                batch_codes = code_data[i:i + BATCH_SIZE]
+                batch_texts = texts[i : i + BATCH_SIZE]
+                batch_codes = code_data[i : i + BATCH_SIZE]
 
                 try:
                     embeddings = self._embed_batch(batch_texts)
@@ -321,20 +335,22 @@ class NewDataQdrantIndexer:
                             self.checkpoint.mark_indexed("python_obd", code)
                             continue
 
-                        points.append(PointStruct(
-                            id=point_id,
-                            vector=embedding,
-                            payload={
-                                "type": "dtc",
-                                "source": "python_obd",
-                                "code": code,
-                                "description_en": c.get("description_en", ""),
-                                "description_hu": c.get("description_hu_hint", ""),
-                                "category": c.get("category", ""),
-                                "severity": c.get("severity", ""),
-                                "is_generic": c.get("is_generic", False)
-                            }
-                        ))
+                        points.append(
+                            PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload={
+                                    "type": "dtc",
+                                    "source": "python_obd",
+                                    "code": code,
+                                    "description_en": c.get("description_en", ""),
+                                    "description_hu": c.get("description_hu_hint", ""),
+                                    "category": c.get("category", ""),
+                                    "severity": c.get("severity", ""),
+                                    "is_generic": c.get("is_generic", False),
+                                },
+                            )
+                        )
                         self.checkpoint.mark_indexed("python_obd", code)
                         self.stats["python_obd"] += 1
 
@@ -401,21 +417,25 @@ class NewDataQdrantIndexer:
 
             trans = v.get("translations", {}).get("hu", {})
             if trans:
-                text += f" | HU: {trans.get('body_style', '')} {trans.get('fuel_type', '')}"
+                text += (
+                    f" | HU: {trans.get('body_style', '')} {trans.get('fuel_type', '')}"
+                )
 
             texts.append(text)
             vehicle_data.append(v)
 
         # Check for existing IDs
-        ids_to_check = [generate_stable_id(f"uci_{v.get('id', '')}") for v in vehicle_data]
+        ids_to_check = [
+            generate_stable_id(f"uci_{v.get('id', '')}") for v in vehicle_data
+        ]
         existing_ids = self._check_existing_ids(ids_to_check)
 
         # Process in batches
         points = []
         with tqdm(total=len(texts), desc="UCI Vehicle Embeddings") as pbar:
             for i in range(0, len(texts), BATCH_SIZE):
-                batch_texts = texts[i:i + BATCH_SIZE]
-                batch_vehicles = vehicle_data[i:i + BATCH_SIZE]
+                batch_texts = texts[i : i + BATCH_SIZE]
+                batch_vehicles = vehicle_data[i : i + BATCH_SIZE]
 
                 try:
                     embeddings = self._embed_batch(batch_texts)
@@ -429,24 +449,26 @@ class NewDataQdrantIndexer:
                             self.checkpoint.mark_indexed("uci_vehicles", vid)
                             continue
 
-                        points.append(PointStruct(
-                            id=point_id,
-                            vector=embedding,
-                            payload={
-                                "type": "vehicle_spec",
-                                "source": "uci",
-                                "vehicle_id": vid,
-                                "make": v.get("make", ""),
-                                "body_style": v.get("body_style", ""),
-                                "fuel_type": v.get("fuel_type", ""),
-                                "engine_type": v.get("engine_type", ""),
-                                "num_of_cylinders": v.get("num_of_cylinders"),
-                                "horsepower": v.get("horsepower"),
-                                "drive_wheels": v.get("drive_wheels", ""),
-                                "engine_size": v.get("engine_size"),
-                                "price": v.get("price")
-                            }
-                        ))
+                        points.append(
+                            PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload={
+                                    "type": "vehicle_spec",
+                                    "source": "uci",
+                                    "vehicle_id": vid,
+                                    "make": v.get("make", ""),
+                                    "body_style": v.get("body_style", ""),
+                                    "fuel_type": v.get("fuel_type", ""),
+                                    "engine_type": v.get("engine_type", ""),
+                                    "num_of_cylinders": v.get("num_of_cylinders"),
+                                    "horsepower": v.get("horsepower"),
+                                    "drive_wheels": v.get("drive_wheels", ""),
+                                    "engine_size": v.get("engine_size"),
+                                    "price": v.get("price"),
+                                },
+                            )
+                        )
                         self.checkpoint.mark_indexed("uci_vehicles", vid)
                         self.stats["uci_vehicles"] += 1
 
@@ -498,16 +520,20 @@ class NewDataQdrantIndexer:
                         signal_id = sig.get("id", sig.get("name", ""))
                         if signal_id:
                             unique_key = f"{make}_{model}_{signal_id}"
-                            if not self.checkpoint.is_indexed("obdb_signals", unique_key):
-                                all_signals.append({
-                                    "make": make,
-                                    "model": model,
-                                    "signal_id": signal_id,
-                                    "signal_name": sig.get("name", ""),
-                                    "description": sig.get("description", ""),
-                                    "unit": sig.get("fmt", {}).get("unit", ""),
-                                    "unique_key": unique_key
-                                })
+                            if not self.checkpoint.is_indexed(
+                                "obdb_signals", unique_key
+                            ):
+                                all_signals.append(
+                                    {
+                                        "make": make,
+                                        "model": model,
+                                        "signal_id": signal_id,
+                                        "signal_name": sig.get("name", ""),
+                                        "description": sig.get("description", ""),
+                                        "unit": sig.get("fmt", {}).get("unit", ""),
+                                        "unique_key": unique_key,
+                                    }
+                                )
 
             except Exception as e:
                 print(f"Warning: Error reading {file_path.name}: {e}")
@@ -522,22 +548,24 @@ class NewDataQdrantIndexer:
         texts = []
         for sig in all_signals:
             text = f"{sig['make']} {sig['model']} - {sig['signal_name'] or sig['signal_id']}"
-            if sig['description']:
+            if sig["description"]:
                 text += f": {sig['description']}"
-            if sig['unit']:
+            if sig["unit"]:
                 text += f" ({sig['unit']})"
             texts.append(text)
 
         # Check for existing IDs (sample)
-        ids_to_check = [generate_stable_id(f"obdb_{s['unique_key']}") for s in all_signals[:1000]]
+        ids_to_check = [
+            generate_stable_id(f"obdb_{s['unique_key']}") for s in all_signals[:1000]
+        ]
         existing_ids = self._check_existing_ids(ids_to_check)
 
         # Process in batches
         points = []
         with tqdm(total=len(texts), desc="OBDb Signal Embeddings") as pbar:
             for i in range(0, len(texts), BATCH_SIZE):
-                batch_texts = texts[i:i + BATCH_SIZE]
-                batch_signals = all_signals[i:i + BATCH_SIZE]
+                batch_texts = texts[i : i + BATCH_SIZE]
+                batch_signals = all_signals[i : i + BATCH_SIZE]
 
                 try:
                     embeddings = self._embed_batch(batch_texts)
@@ -547,23 +575,29 @@ class NewDataQdrantIndexer:
 
                         if point_id in existing_ids:
                             self.stats["duplicates_skipped"] += 1
-                            self.checkpoint.mark_indexed("obdb_signals", sig["unique_key"])
+                            self.checkpoint.mark_indexed(
+                                "obdb_signals", sig["unique_key"]
+                            )
                             continue
 
-                        points.append(PointStruct(
-                            id=point_id,
-                            vector=embedding,
-                            payload={
-                                "type": "vehicle_signal",
-                                "source": "obdb",
-                                "make": sig["make"],
-                                "model": sig["model"],
-                                "signal_id": sig["signal_id"],
-                                "signal_name": sig["signal_name"],
-                                "description": sig["description"][:500] if sig["description"] else "",
-                                "unit": sig["unit"]
-                            }
-                        ))
+                        points.append(
+                            PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload={
+                                    "type": "vehicle_signal",
+                                    "source": "obdb",
+                                    "make": sig["make"],
+                                    "model": sig["model"],
+                                    "signal_id": sig["signal_id"],
+                                    "signal_name": sig["signal_name"],
+                                    "description": sig["description"][:500]
+                                    if sig["description"]
+                                    else "",
+                                    "unit": sig["unit"],
+                                },
+                            )
+                        )
                         self.checkpoint.mark_indexed("obdb_signals", sig["unique_key"])
                         self.stats["obdb_signals"] += 1
 
@@ -607,7 +641,7 @@ class NewDataQdrantIndexer:
                 results = self.qdrant.search(
                     collection_name=COLLECTION_NAME,
                     query_vector=query_embedding,
-                    limit=3
+                    limit=3,
                 )
 
                 print(f"\nQuery: '{query}' (expecting: {expected_type})")
@@ -618,14 +652,24 @@ class NewDataQdrantIndexer:
                     source = payload.get("source", "")
 
                     if ptype == "dtc":
-                        desc = payload.get("description_en", payload.get("description", ""))[:50]
-                        print(f"  {i}. [{ptype}/{source}] {payload.get('code', '')} - {desc}... (score: {score:.3f})")
+                        desc = payload.get(
+                            "description_en", payload.get("description", "")
+                        )[:50]
+                        print(
+                            f"  {i}. [{ptype}/{source}] {payload.get('code', '')} - {desc}... (score: {score:.3f})"
+                        )
                     elif ptype == "vehicle_spec":
-                        print(f"  {i}. [{ptype}] {payload.get('make', '')} {payload.get('body_style', '')} (score: {score:.3f})")
+                        print(
+                            f"  {i}. [{ptype}] {payload.get('make', '')} {payload.get('body_style', '')} (score: {score:.3f})"
+                        )
                     elif ptype == "vehicle_signal":
-                        print(f"  {i}. [{ptype}] {payload.get('make', '')} {payload.get('model', '')} - {payload.get('signal_name', '')[:30]} (score: {score:.3f})")
+                        print(
+                            f"  {i}. [{ptype}] {payload.get('make', '')} {payload.get('model', '')} - {payload.get('signal_name', '')[:30]} (score: {score:.3f})"
+                        )
                     else:
-                        print(f"  {i}. [{ptype}] {str(payload)[:50]}... (score: {score:.3f})")
+                        print(
+                            f"  {i}. [{ptype}] {str(payload)[:50]}... (score: {score:.3f})"
+                        )
 
             except Exception as e:
                 print(f"\nQuery: '{query}' - Error: {e}")
@@ -666,9 +710,13 @@ class NewDataQdrantIndexer:
             print(f"Duplicates Skipped: {self.stats['duplicates_skipped']:,}")
             print(f"Errors: {self.stats['errors']:,}")
             print(f"Total in collection: {info.points_count:,}")
-            print(f"Time elapsed: {elapsed/60:.1f} minutes")
+            print(f"Time elapsed: {elapsed / 60:.1f} minutes")
 
-            total_new = self.stats['python_obd'] + self.stats['uci_vehicles'] + self.stats['obdb_signals']
+            total_new = (
+                self.stats["python_obd"]
+                + self.stats["uci_vehicles"]
+                + self.stats["obdb_signals"]
+            )
             if elapsed > 0 and total_new > 0:
                 print(f"Speed: {total_new / elapsed:.1f} items/sec")
 
@@ -676,14 +724,20 @@ class NewDataQdrantIndexer:
             print(f"\nError: {e}")
             print("Progress saved to checkpoint. Run again to continue.")
             import traceback
+
             traceback.print_exc()
             raise
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Index new data to Qdrant using HuBERT embeddings")
-    parser.add_argument("--fresh", action="store_true", help="Start fresh, ignore checkpoint")
+
+    parser = argparse.ArgumentParser(
+        description="Index new data to Qdrant using HuBERT embeddings"
+    )
+    parser.add_argument(
+        "--fresh", action="store_true", help="Start fresh, ignore checkpoint"
+    )
     args = parser.parse_args()
 
     if args.fresh:

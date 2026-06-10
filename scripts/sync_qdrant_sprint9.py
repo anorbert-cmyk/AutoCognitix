@@ -52,6 +52,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 COLLECTION_NAME = "autocognitix"
 EMBEDDING_DIM = 768
 HUBERT_MODEL = "SZTAKI-HLT/hubert-base-cc"
+HUBERT_REVISION = os.getenv("HUBERT_REVISION", "main")
 BATCH_SIZE = 32  # Embedding batch
 QDRANT_UPLOAD_BATCH = 100  # Upload batch
 CHECKPOINT_FILE = SCRIPT_DIR / "checkpoints" / "qdrant_sprint9.json"
@@ -144,11 +145,14 @@ class StandaloneHuBERTService:
     def warmup(self) -> None:
         """Load model and warm up with a test embedding."""
         print(f"Loading HuBERT model: {HUBERT_MODEL}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(HUBERT_MODEL, use_fast=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            HUBERT_MODEL, revision=HUBERT_REVISION, use_fast=True
+        )
 
         use_fp16 = self.device.type == "cuda"
         self.model = AutoModel.from_pretrained(
             HUBERT_MODEL,
+            revision=HUBERT_REVISION,
             torch_dtype=torch.float16 if use_fp16 else torch.float32,
         )
         self.model.to(self.device)

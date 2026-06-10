@@ -8,7 +8,6 @@ This module provides:
 - Error logging with context
 """
 
-import re
 import traceback
 import uuid
 from collections.abc import Callable
@@ -144,19 +143,25 @@ async def autocognitix_exception_handler(
     """Handle AutoCognitix custom exceptions."""
     request_id = get_request_id(request)
 
-    logger.warning(
-        f"AutoCognitix exception: {exc.message}",
-        extra={
-            "request_id": request_id,
-            "error_code": exc.code.value,
-            "details": exc.details,
-            "path": request.url.path,
-        },
-    )
+    log_extra = {
+        "request_id": request_id,
+        "error_code": exc.code.value,
+        "details": exc.details,
+        "path": request.url.path,
+    }
 
-    # 5xx custom exceptions are real outages — capture them in Sentry.
     if exc.status_code >= 500:
-        _capture_to_sentry(request, exc, request_id)
+        # 5xx custom exceptions are real outages. logger.error(exc_info=True)
+        # is THE single Sentry signal path: the LoggingIntegration turns it
+        # into exactly one exception event with a stack trace.
+        logger.error(
+            f"AutoCognitix exception: {exc.message}",
+            extra=log_extra,
+            exc_info=True,
+        )
+    else:
+        # 4xx is client-caused — warning level keeps it out of Sentry.
+        logger.warning(f"AutoCognitix exception: {exc.message}", extra=log_extra)
 
     return build_error_response(
         request_id=request_id,
@@ -287,12 +292,19 @@ async def sqlalchemy_exception_handler(
         log_details["error_message"] = str(exc)
         log_details["traceback"] = traceback.format_exc()
 
-    logger.error(f"Database error: {type(exc).__name__}", extra=log_details)
-
-    # 5xx DB errors (connection/timeout/dbapi) are infrastructure outages.
-    # 409 IntegrityError is a user-caused conflict — don't spam Sentry with it.
     if status_code >= 500:
-        _capture_to_sentry(request, exc, request_id)
+        # 5xx DB errors (connection/timeout/dbapi) are infrastructure outages.
+        # logger.error(exc_info=True) produces a single Sentry exception event
+        # via the LoggingIntegration — no manual capture needed.
+        logger.error(
+            f"Database error: {type(exc).__name__}",
+            extra=log_details,
+            exc_info=True,
+        )
+    else:
+        # 409 IntegrityError is a user-caused conflict — warning level keeps
+        # it out of Sentry.
+        logger.warning(f"Database error: {type(exc).__name__}", extra=log_details)
 
     # Only include error details in debug mode
     details = {}
@@ -308,60 +320,6 @@ async def sqlalchemy_exception_handler(
         details=details,
         status_code=status_code,
     )
-
-
-# UUID v4 pattern; matches the format SQLAlchemy/Pydantic produce.
-_UUID_RE = re.compile(
-    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-)
-# VIN: exactly 17 alphanumeric chars excluding I, O, Q (ISO 3779).
-_VIN_RE = re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b")
-
-
-def _redact_pii(path: str) -> str:
-    """Strip UUIDs and VINs from a URL path before sending to Sentry.
-
-    Even though `raw_path` lives in unindexed `set_extra` (not searchable),
-    the value still appears verbatim in the Sentry event JSON viewable in
-    the UI. UUIDs are correlatable to user_id, VINs to natural persons.
-    """
-    path = _UUID_RE.sub("<redacted-uuid>", path)
-    path = _VIN_RE.sub("<redacted-vin>", path)
-    return path
-
-
-def _capture_to_sentry(request: Request, exc: Exception, request_id: str) -> None:
-    """Forward exception to Sentry with PII-safe tags.
-
-    - Tag the route TEMPLATE (e.g. `/users/{id}`), not the raw path which
-      contains UUIDs/VINs — both for GDPR data minimization and to keep
-      Sentry's tag cardinality bounded.
-    - Raw URL goes into `set_extra`, but UUIDs/VINs are stripped first.
-    - Any failure inside this function must be swallowed; the handler must
-      always return a response.
-    """
-    try:
-        import sentry_sdk
-
-        if sentry_sdk.Hub.current.client is None:
-            return
-
-        # Prefer the route template (no PII) when FastAPI matched a route.
-        route = request.scope.get("route")
-        route_template = getattr(route, "path", None) or "<no-route>"
-
-        with sentry_sdk.push_scope() as scope:
-            scope.set_tag("request_id", request_id)
-            scope.set_tag("route", route_template)
-            scope.set_tag("method", request.method)
-            scope.set_extra("raw_path", _redact_pii(request.url.path))
-            sentry_sdk.capture_exception(exc)
-    except ImportError:
-        # Sentry not installed — logging is the only sink.
-        pass
-    except Exception as sentry_err:
-        # Sentry must never propagate an error out of the error handler.
-        logger.debug(f"Sentry capture_exception failed: {sentry_err}")
 
 
 async def generic_exception_handler(
@@ -383,16 +341,15 @@ async def generic_exception_handler(
     if settings.DEBUG:
         log_details["traceback"] = traceback.format_exc()
 
+    # logger.error(exc_info=True) is the single Sentry signal path: the
+    # LoggingIntegration converts it into one exception event with the
+    # stack trace. PII redaction happens centrally in the before_send hook
+    # (see app.core.logging._sentry_before_send).
     logger.error(
         f"Unhandled exception: {type(exc).__name__}: {exc}",
         extra=log_details,
         exc_info=True,
     )
-
-    # Forward to Sentry explicitly. LoggingIntegration usually catches these
-    # via logger.error(exc_info=True), but custom logging handlers can break
-    # that chain — capturing here guarantees the report.
-    _capture_to_sentry(request, exc, request_id)
 
     # Only include error details in debug mode
     details = {}
@@ -482,6 +439,8 @@ def setup_neo4j_exception_handler(app: FastAPI) -> None:
                 message = "Neo4j error"
                 message_hu = "Neo4j grafadatbazis hiba."
 
+            # 503 — infrastructure outage; exc_info=True makes the
+            # LoggingIntegration emit a single Sentry exception event.
             logger.error(
                 f"Neo4j error: {type(exc).__name__}",
                 extra={
@@ -490,6 +449,7 @@ def setup_neo4j_exception_handler(app: FastAPI) -> None:
                     "error_message": str(exc),
                     "path": request.url.path,
                 },
+                exc_info=True,
             )
 
             details = {}
@@ -529,6 +489,8 @@ def setup_qdrant_exception_handler(app: FastAPI) -> None:
             """Handle Qdrant vector database errors."""
             request_id = get_request_id(request)
 
+            # 503 — infrastructure outage; exc_info=True makes the
+            # LoggingIntegration emit a single Sentry exception event.
             logger.error(
                 f"Qdrant error: {type(exc).__name__}",
                 extra={
@@ -537,6 +499,7 @@ def setup_qdrant_exception_handler(app: FastAPI) -> None:
                     "error_message": str(exc),
                     "path": request.url.path,
                 },
+                exc_info=True,
             )
 
             details = {}
@@ -588,6 +551,8 @@ def setup_httpx_exception_handler(app: FastAPI) -> None:
                 message_hu = "Kulso szolgaltatas hiba."
                 status_code = status.HTTP_502_BAD_GATEWAY
 
+            # 502/504 — upstream failure; exc_info=True makes the
+            # LoggingIntegration emit a single Sentry exception event.
             logger.error(
                 f"HTTPX error: {type(exc).__name__}",
                 extra={
@@ -596,6 +561,7 @@ def setup_httpx_exception_handler(app: FastAPI) -> None:
                     "error_message": str(exc),
                     "path": request.url.path,
                 },
+                exc_info=True,
             )
 
             return build_error_response(

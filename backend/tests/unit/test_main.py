@@ -270,6 +270,7 @@ class TestLifespan:
         mock_cache.disconnect = AsyncMock()
 
         mock_thread_pool = MagicMock()
+        mock_nlp_pool = MagicMock()
 
         with (
             patch("app.main.setup_logging") as mock_setup_logging,
@@ -282,6 +283,7 @@ class TestLifespan:
             ),
             patch("app.main.engine") as mock_engine,
             patch("app.services.embedding_service._thread_pool", mock_thread_pool),
+            patch("app.services.embedding_service._nlp_pool", mock_nlp_pool),
             patch("app.db.redis_cache._cache_service", mock_cache),
         ):
             mock_qdrant.initialize_collections = AsyncMock()
@@ -293,8 +295,9 @@ class TestLifespan:
                 mock_qdrant.initialize_collections.assert_awaited_once()
                 mock_seed.assert_awaited_once()
 
-            # Shutdown assertions
+            # Shutdown assertions: shutdown_thread_pools() must stop BOTH pools
             mock_thread_pool.shutdown.assert_called_once_with(wait=True)
+            mock_nlp_pool.shutdown.assert_called_once_with(wait=True)
             mock_engine.dispose.assert_awaited_once()
 
     async def test_lifespan_qdrant_failure_does_not_crash(self):
@@ -314,6 +317,7 @@ class TestLifespan:
             ),
             patch("app.main.engine") as mock_engine,
             patch("app.services.embedding_service._thread_pool", MagicMock()),
+            patch("app.services.embedding_service._nlp_pool", MagicMock()),
             patch("app.db.redis_cache._cache_service", None),
         ):
             mock_qdrant.initialize_collections = AsyncMock(side_effect=Exception("no qdrant"))
@@ -343,6 +347,7 @@ class TestLifespan:
             ),
             patch("app.main.engine") as mock_engine,
             patch("app.services.embedding_service._thread_pool", mock_thread_pool),
+            patch("app.services.embedding_service._nlp_pool", MagicMock()),
             patch("app.db.redis_cache._cache_service", None),
         ):
             mock_qdrant.initialize_collections = AsyncMock(side_effect=Exception("skip"))
@@ -372,6 +377,7 @@ class TestLifespan:
             ),
             patch("app.main.engine") as mock_engine,
             patch("app.services.embedding_service._thread_pool", MagicMock()),
+            patch("app.services.embedding_service._nlp_pool", MagicMock()),
             patch("app.db.redis_cache._cache_service", mock_cache),
         ):
             mock_qdrant.initialize_collections = AsyncMock(side_effect=Exception("skip"))
@@ -401,6 +407,7 @@ class TestLifespan:
             ),
             patch("app.main.engine") as mock_engine,
             patch("app.services.embedding_service._thread_pool", MagicMock()),
+            patch("app.services.embedding_service._nlp_pool", MagicMock()),
             patch("app.db.redis_cache._cache_service", None),
         ):
             mock_qdrant.initialize_collections = AsyncMock(side_effect=Exception("skip"))

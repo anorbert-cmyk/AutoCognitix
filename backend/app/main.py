@@ -161,12 +161,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     except Exception as e:
         logger.warning(f"Neo4j driver close error: {e}")
 
-    # Shut down embedding service thread pool
+    # Shut down embedding service thread pools (inference + NLP)
     try:
-        from app.services.embedding_service import _thread_pool
+        from app.services.embedding_service import shutdown_thread_pools
 
-        _thread_pool.shutdown(wait=True)
-        logger.info("Embedding service thread pool shut down")
+        shutdown_thread_pools()
+        logger.info("Embedding service thread pools shut down")
     except Exception as e:
         logger.warning(f"Embedding thread pool shutdown error: {e}")
 

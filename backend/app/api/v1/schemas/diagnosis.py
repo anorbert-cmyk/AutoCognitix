@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.vehicle_makes import normalize_make
+
 
 class DiagnosisRequest(BaseModel):
     """Request schema for vehicle diagnosis."""
@@ -28,6 +30,23 @@ class DiagnosisRequest(BaseModel):
     additional_context: Optional[str] = Field(
         None, max_length=1000, description="Additional context"
     )
+
+    @field_validator("vehicle_make")
+    @classmethod
+    def normalize_vehicle_make(cls, v: str) -> str:
+        """Canonicalize the make once at the API boundary.
+
+        Every downstream consumer (Qdrant filter, PostgreSQL KnownIssue
+        filter, LLM prompt, NHTSA API, diagnosis history) receives the same
+        canonical NHTSA spelling ("vw" -> "Volkswagen", "bmw" -> "BMW").
+        Unknown makes pass through unchanged.
+        """
+        normalized = normalize_make(v)
+        if not normalized:
+            # Whitespace-only input passes min_length=1 before this validator
+            # runs; an empty make would silently disable every make filter.
+            raise ValueError("vehicle_make must not be blank")
+        return normalized
 
     class Config:
         json_schema_extra = {
@@ -466,6 +485,15 @@ class DiagnosisStreamRequest(BaseModel):
     # Streaming options
     include_context: bool = Field(True, description="Include retrieved context in stream")
     include_progress: bool = Field(True, description="Include progress updates")
+
+    @field_validator("vehicle_make")
+    @classmethod
+    def normalize_vehicle_make(cls, v: str) -> str:
+        """Canonicalize the make once at the API boundary (see DiagnosisRequest)."""
+        normalized = normalize_make(v)
+        if not normalized:
+            raise ValueError("vehicle_make must not be blank")
+        return normalized
 
     class Config:
         json_schema_extra = {
