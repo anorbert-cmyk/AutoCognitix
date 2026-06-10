@@ -9,6 +9,18 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).parent.parent / "app"
 
 
+def _section(content: str, start_marker: str, end_marker: str = "\n\nasync def") -> str:
+    """Slice *content* from start_marker to the next end_marker.
+
+    Safe replacement for the ``content.find(x) or len(content)`` anti-pattern:
+    ``find()`` returns -1 (truthy!) on miss, silently truncating the slice.
+    """
+    start = content.find(start_marker)
+    assert start >= 0, f"marker not found: {start_marker}"
+    end = content.find(end_marker, start + 1)
+    return content[start : end if end >= 0 else len(content)]
+
+
 class TestGDPRDeletionOrder:
     """Verify GDPR deletion performs external cleanups before PostgreSQL commit."""
 
@@ -206,73 +218,64 @@ class TestNHTSAEUMarketGuard:
     """Verify NHTSA service skips API calls for brands not sold in the US market."""
 
     def test_eu_only_makes_constant_defined(self):
-        """nhtsa_service.py should expose an EU_ONLY_MAKES set."""
-        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
-        content = nhtsa_file.read_text()
-        assert "EU_ONLY_MAKES" in content, (
-            "nhtsa_service.py should declare EU_ONLY_MAKES to avoid useless NHTSA round-trips"
-        )
+        """vehicle_makes.py should expose an EU_ONLY_MAKES set with the key EU brands."""
+        from app.core.vehicle_makes import EU_ONLY_MAKES
+
         for brand in ("skoda", "seat", "opel", "peugeot", "dacia"):
-            assert brand in content.lower(), (
+            assert brand in EU_ONLY_MAKES, (
                 f"EU_ONLY_MAKES should include {brand!r} — sold in EU only, no NHTSA recalls"
             )
 
     def test_brand_aliases_normalize_common_typos(self):
-        """nhtsa_service should map VW/Mercedes/Chevy to canonical NHTSA spellings."""
-        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
-        content = nhtsa_file.read_text()
-        assert "BRAND_ALIASES" in content, (
-            "nhtsa_service should declare BRAND_ALIASES to avoid 0 recalls on common typos"
-        )
-        assert "_normalize_make" in content, (
-            "nhtsa_service should expose _normalize_make for canonical lookup"
-        )
-        # Sanity: get_recalls must apply the normalizer before the EU guard.
-        get_recalls = content[content.find("async def get_recalls") :]
-        normalize_pos = get_recalls.find("_normalize_make")
-        eu_pos = get_recalls.find("EU_ONLY_MAKES")
-        assert 0 < normalize_pos < eu_pos, (
-            "_normalize_make must run before EU_ONLY_MAKES guard — aliases like 'VW' "
-            "won't match the EU filter otherwise"
-        )
+        """normalize_make should map VW/Mercedes/Chevy to canonical NHTSA spellings."""
+        from app.core.vehicle_makes import normalize_make
+
+        assert normalize_make("vw") == "Volkswagen"
+        assert normalize_make("mercedes") == "Mercedes-Benz"
+        assert normalize_make("chevy") == "Chevrolet"
 
     def test_acronym_brands_have_self_alias(self):
-        """All-caps acronym brands (BMW/GMC/MG) must self-alias to survive .title() fallback."""
-        # Without these aliases, _normalize_make("BMW") falls into the
-        # Title-case branch and yields "Bmw" → 0 NHTSA recalls.
-        nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
-        content = nhtsa_file.read_text()
-        # Find the BRAND_ALIASES dict block
-        aliases_section = content[content.find("BRAND_ALIASES:") :]
-        aliases_section = aliases_section[: aliases_section.find("\n    }") + 6]
-        for brand_lower, brand_canonical in (("bmw", "BMW"), ("gmc", "GMC"), ("mg", "MG")):
-            entry = f'"{brand_lower}": "{brand_canonical}"'
-            assert entry in aliases_section, (
-                f"BRAND_ALIASES missing self-alias for {brand_canonical!r} "
-                f"(.title() would corrupt {brand_canonical!r} → {brand_canonical.title()!r})"
-            )
+        """Acronym/CamelCase brands keep their canonical spelling; unknowns pass through."""
+        from app.core.vehicle_makes import normalize_make
+
+        assert normalize_make("BMW") == "BMW"
+        assert normalize_make("bmw") == "BMW"
+        assert normalize_make("McLaren") == "McLaren"
+        assert normalize_make("RAM") == "RAM"
+        # Unknown makes must pass through UNCHANGED (no Title-case corruption)
+        assert normalize_make("UnknownBrand") == "UnknownBrand"
+        # Idempotency: normalizing an already-normalized make is a no-op
+        assert normalize_make(normalize_make("vw")) == "Volkswagen"
+
+    def test_is_eu_only_behavior(self):
+        """is_eu_only resolves aliases first: Skoda is EU-only, VW is not."""
+        from app.core.vehicle_makes import is_eu_only
+
+        assert is_eu_only("Skoda") is True
+        assert is_eu_only("vw") is False, "Volkswagen IS sold in the US — must not be EU-only"
 
     def test_get_recalls_short_circuits_for_eu_only(self):
-        """get_recalls should early-return [] before making HTTP request for EU-only brands."""
+        """get_recalls should early-return [] before making cache/HTTP work for EU-only brands."""
         nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
         content = nhtsa_file.read_text()
-        recalls_section = content[content.find("async def get_recalls") :]
-        # The EU guard must precede the cache_key generation / HTTP call
+        recalls_section = _section(
+            content, "async def get_recalls", end_marker="async def get_complaints"
+        )
         cache_key_pos = recalls_section.find("_generate_cache_key")
-        eu_guard_pos = recalls_section.find("EU_ONLY_MAKES")
+        eu_guard_pos = recalls_section.find("is_eu_only")
         assert 0 < eu_guard_pos < cache_key_pos, (
-            "EU_ONLY_MAKES guard must run before cache/HTTP work in get_recalls"
+            "is_eu_only guard must run before cache/HTTP work in get_recalls"
         )
 
     def test_get_complaints_short_circuits_for_eu_only(self):
         """get_complaints should also short-circuit for EU-only brands."""
         nhtsa_file = BACKEND_DIR / "services" / "nhtsa_service.py"
         content = nhtsa_file.read_text()
-        complaints_section = content[content.find("async def get_complaints") :]
+        complaints_section = _section(content, "async def get_complaints", end_marker="\n\ndef ")
         cache_key_pos = complaints_section.find("_generate_cache_key")
-        eu_guard_pos = complaints_section.find("EU_ONLY_MAKES")
+        eu_guard_pos = complaints_section.find("is_eu_only")
         assert 0 < eu_guard_pos < cache_key_pos, (
-            "EU_ONLY_MAKES guard must run before cache/HTTP work in get_complaints"
+            "is_eu_only guard must run before cache/HTTP work in get_complaints"
         )
 
 
@@ -347,72 +350,57 @@ class TestHuBERTRevisionPinning:
 
 
 class TestSentryExplicitCapture:
-    """Verify Sentry forwarding is present and PII-safe across 5xx handlers."""
+    """Verify Sentry reporting is PII-safe and flows through before_send + logging."""
 
-    def test_capture_helper_exists(self):
-        """error_handlers.py should expose a single _capture_to_sentry helper."""
+    def test_pii_redaction_behavior(self):
+        """redact_pii must strip VINs (any case) and UUIDs (any case)."""
+        from app.core.pii import redact_pii
+
+        assert redact_pii("/x/WVWZZZ1KZAW123456") == "/x/<vin>"
+        assert redact_pii("/x/wvwzzz1kzaw123456") == "/x/<vin>", "lowercase VINs must match too"
+        assert redact_pii("id=550e8400-e29b-41d4-a716-446655440000") == "id=<uuid>"
+        assert redact_pii("id=550E8400-E29B-41D4-A716-446655440000") == "id=<uuid>", (
+            "uppercase UUIDs must match too"
+        )
+
+    def test_before_send_wired(self):
+        """logging.py must define _sentry_before_send and wire it into sentry_sdk.init."""
+        log_file = BACKEND_DIR / "core" / "logging.py"
+        content = log_file.read_text()
+        assert "def _sentry_before_send" in content, (
+            "logging.py should define the _sentry_before_send PII-redaction hook"
+        )
+        assert "before_send=" in content, (
+            "sentry_sdk.init must pass before_send= so every event is PII-redacted"
+        )
+
+    def test_no_manual_capture_remains(self):
+        """The manual _capture_to_sentry helper was removed — before_send covers all events."""
         eh = BACKEND_DIR / "core" / "error_handlers.py"
         content = eh.read_text()
-        assert "def _capture_to_sentry" in content, (
-            "error_handlers.py should define a centralized Sentry helper"
-        )
-        helper = content[content.find("def _capture_to_sentry") :]
-        helper = helper[: helper.find("\n\nasync def")]
-        assert "sentry_sdk.capture_exception" in helper, (
-            "_capture_to_sentry must actually call sentry_sdk.capture_exception"
-        )
-        assert "except ImportError" in helper, (
-            "Sentry import must be guarded (it may not be installed)"
+        assert "_capture_to_sentry" not in content, (
+            "error_handlers.py must not contain _capture_to_sentry — manual capture "
+            "duplicated the LoggingIntegration event; before_send handles redaction"
         )
 
-    def test_helper_uses_route_template_not_raw_path(self):
-        """PII-safe tagging: route template tag, raw path only in extras."""
-        eh = BACKEND_DIR / "core" / "error_handlers.py"
-        helper = eh.read_text()
-        helper = helper[helper.find("def _capture_to_sentry") :]
-        helper = helper[: helper.find("\n\nasync def")]
-        assert 'set_tag("route"' in helper, (
-            "Sentry tag should be the route template (no UUIDs), not raw URL"
-        )
-        assert 'set_extra("raw_path"' in helper, (
-            "Raw path belongs in set_extra (unindexed), not set_tag"
-        )
-
-    def test_generic_handler_invokes_helper(self):
+    def test_5xx_handlers_log_with_exc_info(self):
+        """5xx handlers must log with exc_info=True so LoggingIntegration sends one event."""
         eh = BACKEND_DIR / "core" / "error_handlers.py"
         content = eh.read_text()
-        generic = content[content.find("async def generic_exception_handler") :]
-        generic = generic[: generic.find("\n\nasync def") or len(generic)]
-        assert "_capture_to_sentry(" in generic, (
-            "generic_exception_handler should delegate to _capture_to_sentry"
-        )
-
-    def test_raw_path_is_pii_redacted(self):
-        """Sentry raw_path extra must strip UUIDs and VINs before sending."""
-        eh = BACKEND_DIR / "core" / "error_handlers.py"
-        content = eh.read_text()
-        assert "def _redact_pii" in content, (
-            "error_handlers.py should define _redact_pii to strip UUIDs/VINs"
-        )
-        # The helper must be invoked when populating set_extra
-        assert "_redact_pii(request.url.path)" in content, (
-            "_capture_to_sentry must call _redact_pii on raw_path before set_extra"
-        )
-
-    def test_5xx_handlers_capture(self):
-        """sqlalchemy_exception_handler and autocognitix_exception_handler should
-        forward to Sentry for 5xx status codes."""
-        eh = BACKEND_DIR / "core" / "error_handlers.py"
-        content = eh.read_text()
-        # SQLAlchemy handler
-        sa_section = content[content.find("async def sqlalchemy_exception_handler") :]
-        sa_section = sa_section[: sa_section.find("\n\nasync def") or len(sa_section)]
-        assert "_capture_to_sentry(" in sa_section, (
-            "sqlalchemy_exception_handler should call _capture_to_sentry for 5xx"
-        )
-        # AutoCognitix handler
-        ac_section = content[content.find("async def autocognitix_exception_handler") :]
-        ac_section = ac_section[: ac_section.find("\n\nasync def") or len(ac_section)]
-        assert "_capture_to_sentry(" in ac_section, (
-            "autocognitix_exception_handler should call _capture_to_sentry for 5xx"
-        )
+        sections = {
+            "sqlalchemy": _section(content, "async def sqlalchemy_exception_handler"),
+            "neo4j": _section(
+                content, "async def neo4j_exception_handler", end_marker="\n\ndef setup_qdrant"
+            ),
+            "qdrant": _section(
+                content, "async def qdrant_exception_handler", end_marker="\n\ndef setup_httpx"
+            ),
+            "httpx": _section(
+                content, "async def httpx_exception_handler", end_marker="\n\ndef setup_all"
+            ),
+        }
+        for name, section in sections.items():
+            assert "exc_info=True" in section, (
+                f"{name} exception handler must log with exc_info=True — without it "
+                "Sentry's LoggingIntegration sends a message-only event with no stacktrace"
+            )

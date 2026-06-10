@@ -55,6 +55,7 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_URL = os.getenv("QDRANT_URL")  # For Qdrant Cloud
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")  # For Qdrant Cloud
 HUBERT_MODEL = os.getenv("HUBERT_MODEL", "SZTAKI-HLT/hubert-base-cc")
+HUBERT_REVISION = os.getenv("HUBERT_REVISION", "main")
 EMBEDDING_DIMENSION = 768  # huBERT output dimension
 
 # Collection names - Hungarian versions with huBERT embeddings (768-dim)
@@ -106,8 +107,12 @@ class HuBERTEmbedder:
             return
 
         logger.info(f"Loading huBERT model: {self.model_name}")
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModel.from_pretrained(self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
+        self._model = AutoModel.from_pretrained(
+            self.model_name, revision=HUBERT_REVISION
+        )
         self._model.to(self.device)
         self._model.eval()
         logger.info("huBERT model loaded successfully")
@@ -165,7 +170,9 @@ class HuBERTEmbedder:
                     non_empty_texts.append(text.strip())
 
             # Initialize batch embeddings with zeros
-            batch_embeddings = [[0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))]
+            batch_embeddings = [
+                [0.0] * EMBEDDING_DIMENSION for _ in range(len(batch_texts))
+            ]
 
             if non_empty_texts:
                 try:
@@ -186,7 +193,9 @@ class HuBERTEmbedder:
                         model_output = self._model(**encoded)
 
                     # Apply mean pooling
-                    embeddings = self._mean_pooling(model_output, encoded["attention_mask"])
+                    embeddings = self._mean_pooling(
+                        model_output, encoded["attention_mask"]
+                    )
 
                     # Normalize embeddings
                     embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
@@ -197,7 +206,9 @@ class HuBERTEmbedder:
                         if self._validate_embedding(embedding):
                             batch_embeddings[orig_idx] = embedding
                         else:
-                            logger.warning(f"Invalid embedding generated for text at index {orig_idx}")
+                            logger.warning(
+                                f"Invalid embedding generated for text at index {orig_idx}"
+                            )
 
                 except Exception as e:
                     logger.error(f"Error generating embeddings for batch: {e}")
@@ -264,7 +275,9 @@ class QdrantIndexer:
                     logger.info(f"Deleting existing collection: {collection_name}")
                     self.client.delete_collection(collection_name=collection_name)
                 else:
-                    logger.info(f"Collection '{collection_name}' already exists, skipping creation")
+                    logger.info(
+                        f"Collection '{collection_name}' already exists, skipping creation"
+                    )
                     return
 
             self.client.create_collection(
@@ -274,7 +287,9 @@ class QdrantIndexer:
                     distance=qdrant_models.Distance.COSINE,
                 ),
             )
-            logger.info(f"Created collection: {collection_name} (dim={self.vector_size})")
+            logger.info(
+                f"Created collection: {collection_name} (dim={self.vector_size})"
+            )
 
         except Exception as e:
             logger.error(f"Error creating collection {collection_name}: {e}")
@@ -354,7 +369,8 @@ class QdrantIndexer:
             elif isinstance(value, list):
                 # Ensure list elements are JSON-serializable
                 sanitized[key] = [
-                    v for v in value
+                    v
+                    for v in value
                     if isinstance(v, (str, int, float, bool, type(None)))
                 ]
             elif isinstance(value, dict):
@@ -447,37 +463,43 @@ def load_neo4j_data() -> Tuple[List[Dict], List[Dict], List[Dict]]:
         # Load symptoms
         logger.info("Loading symptoms from Neo4j...")
         for symptom in SymptomNode.nodes.all():
-            symptoms.append({
-                "name": symptom.name,
-                "description": symptom.description,
-                "description_hu": symptom.description_hu,
-                "severity": symptom.severity,
-            })
+            symptoms.append(
+                {
+                    "name": symptom.name,
+                    "description": symptom.description,
+                    "description_hu": symptom.description_hu,
+                    "severity": symptom.severity,
+                }
+            )
         logger.info(f"Loaded {len(symptoms)} symptoms from Neo4j")
 
         # Load components
         logger.info("Loading components from Neo4j...")
         for component in ComponentNode.nodes.all():
-            components.append({
-                "name": component.name,
-                "name_hu": component.name_hu,
-                "system": component.system,
-                "part_number": component.part_number,
-            })
+            components.append(
+                {
+                    "name": component.name,
+                    "name_hu": component.name_hu,
+                    "system": component.system,
+                    "part_number": component.part_number,
+                }
+            )
         logger.info(f"Loaded {len(components)} components from Neo4j")
 
         # Load repairs
         logger.info("Loading repairs from Neo4j...")
         for repair in RepairNode.nodes.all():
-            repairs.append({
-                "name": repair.name,
-                "description": repair.description,
-                "description_hu": repair.description_hu,
-                "difficulty": repair.difficulty,
-                "estimated_time_minutes": repair.estimated_time_minutes,
-                "estimated_cost_min": repair.estimated_cost_min,
-                "estimated_cost_max": repair.estimated_cost_max,
-            })
+            repairs.append(
+                {
+                    "name": repair.name,
+                    "description": repair.description,
+                    "description_hu": repair.description_hu,
+                    "difficulty": repair.difficulty,
+                    "estimated_time_minutes": repair.estimated_time_minutes,
+                    "estimated_cost_min": repair.estimated_cost_min,
+                    "estimated_cost_max": repair.estimated_cost_max,
+                }
+            )
         logger.info(f"Loaded {len(repairs)} repairs from Neo4j")
 
     except Exception as e:
@@ -490,7 +512,9 @@ def load_neo4j_data() -> Tuple[List[Dict], List[Dict], List[Dict]]:
         components = COMPONENTS
         repairs = REPAIRS
 
-        logger.info(f"Using {len(components)} components and {len(repairs)} repairs from fallback data")
+        logger.info(
+            f"Using {len(components)} components and {len(repairs)} repairs from fallback data"
+        )
 
     return symptoms, components, repairs
 
@@ -566,21 +590,23 @@ def index_dtc_codes(
 
         ids.append(f"dtc_{code}")
         texts.append(text_to_embed)
-        payloads.append({
-            "code": code,
-            "description_hu": description_hu,
-            "description_en": description_en,
-            "category": dtc.get("category", "unknown"),
-            "severity": dtc.get("severity", "unknown"),
-            "system": dtc.get("system", ""),
-            "symptoms": dtc.get("symptoms", []),
-            "possible_causes": dtc.get("possible_causes", []),
-            "diagnostic_steps": dtc.get("diagnostic_steps", []),
-            "related_codes": dtc.get("related_codes", []),
-            "is_generic": dtc.get("is_generic", True),
-            "sources": dtc.get("sources", []),
-            "manufacturer": dtc.get("manufacturer"),
-        })
+        payloads.append(
+            {
+                "code": code,
+                "description_hu": description_hu,
+                "description_en": description_en,
+                "category": dtc.get("category", "unknown"),
+                "severity": dtc.get("severity", "unknown"),
+                "system": dtc.get("system", ""),
+                "symptoms": dtc.get("symptoms", []),
+                "possible_causes": dtc.get("possible_causes", []),
+                "diagnostic_steps": dtc.get("diagnostic_steps", []),
+                "related_codes": dtc.get("related_codes", []),
+                "is_generic": dtc.get("is_generic", True),
+                "sources": dtc.get("sources", []),
+                "manufacturer": dtc.get("manufacturer"),
+            }
+        )
 
     if not ids:
         logger.warning("No valid DTC codes to index")
@@ -591,8 +617,10 @@ def index_dtc_codes(
     embedder = get_embedder()
 
     all_embeddings: List[List[float]] = []
-    for i in tqdm(range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding DTC codes"):
-        batch_texts = texts[i:i + EMBEDDING_BATCH_SIZE]
+    for i in tqdm(
+        range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding DTC codes"
+    ):
+        batch_texts = texts[i : i + EMBEDDING_BATCH_SIZE]
         batch_embeddings = embedder.embed_batch(batch_texts)
         all_embeddings.extend(batch_embeddings)
 
@@ -601,9 +629,9 @@ def index_dtc_codes(
     total_indexed = 0
 
     for i in tqdm(range(0, len(ids), UPSERT_BATCH_SIZE), desc="Indexing DTC codes"):
-        batch_ids = ids[i:i + UPSERT_BATCH_SIZE]
-        batch_vectors = all_embeddings[i:i + UPSERT_BATCH_SIZE]
-        batch_payloads = payloads[i:i + UPSERT_BATCH_SIZE]
+        batch_ids = ids[i : i + UPSERT_BATCH_SIZE]
+        batch_vectors = all_embeddings[i : i + UPSERT_BATCH_SIZE]
+        batch_payloads = payloads[i : i + UPSERT_BATCH_SIZE]
 
         count = indexer.upsert_batch(
             collection_name=DTC_COLLECTION,
@@ -656,13 +684,15 @@ def index_symptoms(
         symptom_id = f"symptom_dtc_{hash(symptom_text) % 10**10}"
         ids.append(symptom_id)
         texts.append(symptom_text)
-        payloads.append({
-            "symptom_text": symptom_text,
-            "symptom_text_hu": symptom_text,  # Already in Hungarian
-            "related_dtc_codes": sorted(list(related_codes)),
-            "related_codes_count": len(related_codes),
-            "source": "dtc_codes",
-        })
+        payloads.append(
+            {
+                "symptom_text": symptom_text,
+                "symptom_text_hu": symptom_text,  # Already in Hungarian
+                "related_dtc_codes": sorted(list(related_codes)),
+                "related_codes_count": len(related_codes),
+                "source": "dtc_codes",
+            }
+        )
 
     # Add symptoms from Neo4j (avoiding duplicates)
     existing_texts = set(texts)
@@ -676,13 +706,15 @@ def index_symptoms(
         # Use Hungarian description if available
         text_to_embed = symptom.get("description_hu") or name
         texts.append(text_to_embed)
-        payloads.append({
-            "symptom_text": name,
-            "symptom_text_hu": symptom.get("description_hu", name),
-            "description": symptom.get("description"),
-            "severity": symptom.get("severity", "medium"),
-            "source": "neo4j",
-        })
+        payloads.append(
+            {
+                "symptom_text": name,
+                "symptom_text_hu": symptom.get("description_hu", name),
+                "description": symptom.get("description"),
+                "severity": symptom.get("severity", "medium"),
+                "source": "neo4j",
+            }
+        )
         existing_texts.add(name)
 
     if not ids:
@@ -696,8 +728,10 @@ def index_symptoms(
     embedder = get_embedder()
 
     all_embeddings: List[List[float]] = []
-    for i in tqdm(range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding symptoms"):
-        batch_texts = texts[i:i + EMBEDDING_BATCH_SIZE]
+    for i in tqdm(
+        range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding symptoms"
+    ):
+        batch_texts = texts[i : i + EMBEDDING_BATCH_SIZE]
         batch_embeddings = embedder.embed_batch(batch_texts)
         all_embeddings.extend(batch_embeddings)
 
@@ -706,9 +740,9 @@ def index_symptoms(
     total_indexed = 0
 
     for i in tqdm(range(0, len(ids), UPSERT_BATCH_SIZE), desc="Indexing symptoms"):
-        batch_ids = ids[i:i + UPSERT_BATCH_SIZE]
-        batch_vectors = all_embeddings[i:i + UPSERT_BATCH_SIZE]
-        batch_payloads = payloads[i:i + UPSERT_BATCH_SIZE]
+        batch_ids = ids[i : i + UPSERT_BATCH_SIZE]
+        batch_vectors = all_embeddings[i : i + UPSERT_BATCH_SIZE]
+        batch_payloads = payloads[i : i + UPSERT_BATCH_SIZE]
 
         count = indexer.upsert_batch(
             collection_name=SYMPTOM_COLLECTION,
@@ -718,7 +752,9 @@ def index_symptoms(
         )
         total_indexed += count
 
-    logger.info(f"Successfully indexed {total_indexed} symptoms into {SYMPTOM_COLLECTION}")
+    logger.info(
+        f"Successfully indexed {total_indexed} symptoms into {SYMPTOM_COLLECTION}"
+    )
     return total_indexed
 
 
@@ -765,12 +801,14 @@ def index_components(
         component_id = f"component_{hash(name) % 10**10}"
         ids.append(component_id)
         texts.append(text_to_embed)
-        payloads.append({
-            "name": name,
-            "name_hu": name_hu,
-            "system": comp.get("system", ""),
-            "part_number": comp.get("part_number"),
-        })
+        payloads.append(
+            {
+                "name": name,
+                "name_hu": name_hu,
+                "system": comp.get("system", ""),
+                "part_number": comp.get("part_number"),
+            }
+        )
 
     logger.info(f"Components to index: {len(ids)}")
 
@@ -779,8 +817,10 @@ def index_components(
     embedder = get_embedder()
 
     all_embeddings: List[List[float]] = []
-    for i in tqdm(range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding components"):
-        batch_texts = texts[i:i + EMBEDDING_BATCH_SIZE]
+    for i in tqdm(
+        range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding components"
+    ):
+        batch_texts = texts[i : i + EMBEDDING_BATCH_SIZE]
         batch_embeddings = embedder.embed_batch(batch_texts)
         all_embeddings.extend(batch_embeddings)
 
@@ -789,9 +829,9 @@ def index_components(
     total_indexed = 0
 
     for i in tqdm(range(0, len(ids), UPSERT_BATCH_SIZE), desc="Indexing components"):
-        batch_ids = ids[i:i + UPSERT_BATCH_SIZE]
-        batch_vectors = all_embeddings[i:i + UPSERT_BATCH_SIZE]
-        batch_payloads = payloads[i:i + UPSERT_BATCH_SIZE]
+        batch_ids = ids[i : i + UPSERT_BATCH_SIZE]
+        batch_vectors = all_embeddings[i : i + UPSERT_BATCH_SIZE]
+        batch_payloads = payloads[i : i + UPSERT_BATCH_SIZE]
 
         count = indexer.upsert_batch(
             collection_name=COMPONENT_COLLECTION,
@@ -801,7 +841,9 @@ def index_components(
         )
         total_indexed += count
 
-    logger.info(f"Successfully indexed {total_indexed} components into {COMPONENT_COLLECTION}")
+    logger.info(
+        f"Successfully indexed {total_indexed} components into {COMPONENT_COLLECTION}"
+    )
     return total_indexed
 
 
@@ -848,15 +890,17 @@ def index_repairs(
         repair_id = f"repair_{hash(name) % 10**10}"
         ids.append(repair_id)
         texts.append(text_to_embed)
-        payloads.append({
-            "name": name,
-            "description": repair.get("description"),
-            "description_hu": description_hu,
-            "difficulty": repair.get("difficulty", "intermediate"),
-            "estimated_time_minutes": repair.get("estimated_time_minutes"),
-            "estimated_cost_min": repair.get("estimated_cost_min"),
-            "estimated_cost_max": repair.get("estimated_cost_max"),
-        })
+        payloads.append(
+            {
+                "name": name,
+                "description": repair.get("description"),
+                "description_hu": description_hu,
+                "difficulty": repair.get("difficulty", "intermediate"),
+                "estimated_time_minutes": repair.get("estimated_time_minutes"),
+                "estimated_cost_min": repair.get("estimated_cost_min"),
+                "estimated_cost_max": repair.get("estimated_cost_max"),
+            }
+        )
 
     logger.info(f"Repairs to index: {len(ids)}")
 
@@ -866,7 +910,7 @@ def index_repairs(
 
     all_embeddings: List[List[float]] = []
     for i in tqdm(range(0, len(texts), EMBEDDING_BATCH_SIZE), desc="Embedding repairs"):
-        batch_texts = texts[i:i + EMBEDDING_BATCH_SIZE]
+        batch_texts = texts[i : i + EMBEDDING_BATCH_SIZE]
         batch_embeddings = embedder.embed_batch(batch_texts)
         all_embeddings.extend(batch_embeddings)
 
@@ -875,9 +919,9 @@ def index_repairs(
     total_indexed = 0
 
     for i in tqdm(range(0, len(ids), UPSERT_BATCH_SIZE), desc="Indexing repairs"):
-        batch_ids = ids[i:i + UPSERT_BATCH_SIZE]
-        batch_vectors = all_embeddings[i:i + UPSERT_BATCH_SIZE]
-        batch_payloads = payloads[i:i + UPSERT_BATCH_SIZE]
+        batch_ids = ids[i : i + UPSERT_BATCH_SIZE]
+        batch_vectors = all_embeddings[i : i + UPSERT_BATCH_SIZE]
+        batch_payloads = payloads[i : i + UPSERT_BATCH_SIZE]
 
         count = indexer.upsert_batch(
             collection_name=REPAIR_COLLECTION,
@@ -887,7 +931,9 @@ def index_repairs(
         )
         total_indexed += count
 
-    logger.info(f"Successfully indexed {total_indexed} repairs into {REPAIR_COLLECTION}")
+    logger.info(
+        f"Successfully indexed {total_indexed} repairs into {REPAIR_COLLECTION}"
+    )
     return total_indexed
 
 
@@ -963,7 +1009,7 @@ def verify_semantic_search(indexer: QdrantIndexer) -> bool:
         )
 
         if not results:
-            logger.warning(f"  No results returned for query!")
+            logger.warning("  No results returned for query!")
             all_passed = False
             continue
 
@@ -976,7 +1022,9 @@ def verify_semantic_search(indexer: QdrantIndexer) -> bool:
             if collection == DTC_COLLECTION:
                 display = f"{payload.get('code', 'N/A')}: {payload.get('description_hu', payload.get('description_en', 'N/A'))[:60]}"
             elif collection == SYMPTOM_COLLECTION:
-                display = payload.get("symptom_text_hu", payload.get("symptom_text", "N/A"))[:60]
+                display = payload.get(
+                    "symptom_text_hu", payload.get("symptom_text", "N/A")
+                )[:60]
             elif collection == COMPONENT_COLLECTION:
                 display = payload.get("name_hu", payload.get("name", "N/A"))[:60]
             elif collection == REPAIR_COLLECTION:
@@ -984,12 +1032,14 @@ def verify_semantic_search(indexer: QdrantIndexer) -> bool:
             else:
                 display = str(payload)[:60]
 
-            logger.info(f"    {i+1}. [{score:.4f}] {display}")
+            logger.info(f"    {i + 1}. [{score:.4f}] {display}")
 
         # Check if top result has reasonable relevance score
         top_score = results[0]["score"]
         if top_score < 0.3:
-            logger.warning(f"  Low relevance score ({top_score:.4f}) - may indicate indexing issues")
+            logger.warning(
+                f"  Low relevance score ({top_score:.4f}) - may indicate indexing issues"
+            )
             all_passed = False
         else:
             logger.info(f"  Relevance OK (top score: {top_score:.4f})")
@@ -1056,7 +1106,9 @@ Examples:
     parser.add_argument("--components", action="store_true", help="Index components")
     parser.add_argument("--repairs", action="store_true", help="Index repairs")
     parser.add_argument("--all", action="store_true", help="Index all data types")
-    parser.add_argument("--recreate", action="store_true", help="Delete and recreate collections")
+    parser.add_argument(
+        "--recreate", action="store_true", help="Delete and recreate collections"
+    )
     parser.add_argument("--verify", action="store_true", help="Run verification tests")
     parser.add_argument(
         "--dtc-file",
@@ -1075,7 +1127,9 @@ Examples:
     index_repairs = args.repairs or index_all
 
     # If nothing specified and not just verifying, show help
-    if not (index_dtc or index_symptoms or index_components or index_repairs or args.verify):
+    if not (
+        index_dtc or index_symptoms or index_components or index_repairs or args.verify
+    ):
         parser.print_help()
         print("\nError: Please specify at least one indexing option or --verify")
         sys.exit(1)
@@ -1116,10 +1170,14 @@ Examples:
             totals["dtc"] = index_dtc_codes(indexer, dtc_codes, recreate=args.recreate)
 
         if index_symptoms:
-            totals["symptoms"] = index_symptoms(indexer, dtc_codes, neo4j_symptoms, recreate=args.recreate)
+            totals["symptoms"] = index_symptoms(
+                indexer, dtc_codes, neo4j_symptoms, recreate=args.recreate
+            )
 
         if index_components:
-            totals["components"] = index_components(indexer, components, recreate=args.recreate)
+            totals["components"] = index_components(
+                indexer, components, recreate=args.recreate
+            )
 
         if index_repairs:
             totals["repairs"] = index_repairs(indexer, repairs, recreate=args.recreate)
@@ -1130,7 +1188,7 @@ Examples:
         # Log totals
         total_indexed = sum(totals.values())
         if total_indexed > 0:
-            logger.info(f"\nTotal vectors indexed this run:")
+            logger.info("\nTotal vectors indexed this run:")
             logger.info(f"  - DTC codes: {totals['dtc']}")
             logger.info(f"  - Symptoms: {totals['symptoms']}")
             logger.info(f"  - Components: {totals['components']}")
@@ -1153,6 +1211,7 @@ Examples:
     except Exception as e:
         logger.error(f"Indexing failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

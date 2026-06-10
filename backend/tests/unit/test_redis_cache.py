@@ -1,6 +1,5 @@
 """Unit tests for app.db.redis_cache module."""
 
-import hashlib
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -59,9 +58,6 @@ class TestCacheTTL:
 
     def test_api_response_ttl(self):
         assert CacheTTL.API_RESPONSE == 300
-
-    def test_nhtsa_data_ttl(self):
-        assert CacheTTL.NHTSA_DATA == 21600
 
     def test_embeddings_ttl(self):
         assert CacheTTL.EMBEDDINGS == 3600
@@ -494,87 +490,28 @@ class TestDTCSearchCache:
 
 
 # ===========================================================================
-# NHTSA Data Cache
-# ===========================================================================
-
-
-class TestNHTSACache:
-    @pytest.mark.asyncio
-    async def test_get_nhtsa_recalls(self, service):
-        with patch.object(service, "get", new_callable=AsyncMock, return_value=[]) as mock_get:
-            await service.get_nhtsa_recalls("VW", "Golf", 2018)
-            mock_get.assert_awaited_once_with("nhtsa:recalls:VW:Golf:2018")
-
-    @pytest.mark.asyncio
-    async def test_set_nhtsa_recalls(self, service):
-        with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
-            await service.set_nhtsa_recalls("VW", "Golf", 2018, [{"id": 1}])
-            mock_set.assert_awaited_once_with(
-                "nhtsa:recalls:VW:Golf:2018", [{"id": 1}], CacheTTL.NHTSA_DATA
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_nhtsa_complaints(self, service):
-        with patch.object(service, "get", new_callable=AsyncMock, return_value=None) as mock_get:
-            await service.get_nhtsa_complaints("Toyota", "Corolla", 2020)
-            mock_get.assert_awaited_once_with("nhtsa:complaints:Toyota:Corolla:2020")
-
-    @pytest.mark.asyncio
-    async def test_set_nhtsa_complaints(self, service):
-        with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
-            await service.set_nhtsa_complaints("Toyota", "Corolla", 2020, [])
-            mock_set.assert_awaited_once_with(
-                "nhtsa:complaints:Toyota:Corolla:2020", [], CacheTTL.NHTSA_DATA
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_vin_decode(self, service):
-        with patch.object(
-            service, "get", new_callable=AsyncMock, return_value={"make": "VW"}
-        ) as mock_get:
-            result = await service.get_vin_decode("wvwzzz1kz1234")
-            assert result == {"make": "VW"}
-            mock_get.assert_awaited_once_with("nhtsa:vin:WVWZZZ1KZ1234")
-
-    @pytest.mark.asyncio
-    async def test_set_vin_decode(self, service):
-        with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
-            await service.set_vin_decode("wvwzzz1kz1234", {"make": "VW"})
-            mock_set.assert_awaited_once_with(
-                "nhtsa:vin:WVWZZZ1KZ1234", {"make": "VW"}, CacheTTL.NHTSA_DATA
-            )
-
-
-# ===========================================================================
 # Embedding Cache
 # ===========================================================================
 
 
 class TestEmbeddingCache:
-    @staticmethod
-    def _expected_key(text: str) -> str:
-        """Mirror RedisCacheService._embedding_cache_key for assertions."""
-        from app.core.config import settings
-
-        salt = f"{settings.HUBERT_MODEL}@{settings.HUBERT_REVISION}|"
-        digest = hashlib.sha256((salt + text).encode()).hexdigest()
-        return f"embed:{digest}"
-
     @pytest.mark.asyncio
     async def test_get_embedding(self, service):
+        # Wiring test: get_embedding must use the prod key builder
+        # (key format semantics are covered by test_embedding_key_changes_with_revision)
         with patch.object(
             service, "get", new_callable=AsyncMock, return_value=[0.1, 0.2]
         ) as mock_get:
             result = await service.get_embedding("motor hibakod")
             assert result == [0.1, 0.2]
-            mock_get.assert_awaited_once_with(self._expected_key("motor hibakod"))
+            mock_get.assert_awaited_once_with(service._embedding_cache_key("motor hibakod"))
 
     @pytest.mark.asyncio
     async def test_set_embedding(self, service):
         with patch.object(service, "set", new_callable=AsyncMock, return_value=True) as mock_set:
             await service.set_embedding("test", [0.1])
             mock_set.assert_awaited_once_with(
-                self._expected_key("test"), [0.1], CacheTTL.EMBEDDINGS
+                service._embedding_cache_key("test"), [0.1], CacheTTL.EMBEDDINGS
             )
 
     @pytest.mark.asyncio

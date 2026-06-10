@@ -31,6 +31,7 @@ from tenacity import (
 from app.core.config import settings
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
+from app.core.vehicle_makes import is_eu_only, normalize_make
 
 logger = get_logger(__name__)
 
@@ -256,86 +257,16 @@ class NHTSAService:
     RECALLS_BASE_URL = "https://api.nhtsa.gov/recalls"
     COMPLAINTS_BASE_URL = "https://api.nhtsa.gov/complaints"
 
-    # Brands not sold in the US — NHTSA recall lookups will always be empty.
-    # Skip the network round-trip and let callers display an EU-specific empty state.
-    EU_ONLY_MAKES = frozenset(
-        {
-            "skoda",
-            "škoda",
-            "seat",
-            "cupra",
-            "opel",
-            "vauxhall",
-            "peugeot",
-            "citroen",
-            "citroën",
-            "ds",
-            "ds automobiles",
-            "dacia",
-            "lancia",
-            "alfa romeo",
-            "lada",
-            "trabant",
-            "wartburg",
-            "moskvich",
-        }
-    )
+    # Make normalization lives in app.core.vehicle_makes (single source of
+    # truth, shared with the API schema layer). NHTSA's recall API is
+    # case-sensitive: "Volkswagen" returns hits but "VOLKSWAGEN" returns 0.
+    # Unknown makes pass through unchanged — no Title-case fallback, which
+    # would corrupt brands like "McLaren" → "Mclaren" or "RAM" → "Ram".
 
-    # Common user-typed make variants → canonical NHTSA make spelling.
-    # Two purposes:
-    #  1) Resolve typos/short forms ("vw" → "Volkswagen", "chevy" → "Chevrolet").
-    #  2) Protect 2-3 letter ALL-CAPS acronyms from the Title-case fallback —
-    #     e.g. "BMW".title() yields "Bmw" which returns 0 NHTSA recalls.
-    #     Every all-caps brand below MUST be aliased to itself.
-    BRAND_ALIASES: Dict[str, str] = {
-        # Aliases / typos
-        "vw": "Volkswagen",
-        "volkswagen ag": "Volkswagen",
-        "mercedes": "Mercedes-Benz",
-        "mercedes benz": "Mercedes-Benz",
-        "mb": "Mercedes-Benz",
-        "chevy": "Chevrolet",
-        "gm": "General Motors",
-        "gmc truck": "GMC",
-        "audi ag": "Audi",
-        "rolls royce": "Rolls-Royce",
-        "mini cooper": "MINI",
-        "mini": "MINI",
-        "land-rover": "Land Rover",
-        "landrover": "Land Rover",
-        "range rover": "Land Rover",
-        "rangerover": "Land Rover",
-        "alfa-romeo": "Alfa Romeo",
-        "porsche ag": "Porsche",
-        # Acronym/all-caps brands — explicit self-aliases prevent .title() corruption
-        "bmw": "BMW",
-        "bmw ag": "BMW",
-        "gmc": "GMC",
-        "mg": "MG",
-        "ds": "DS",
-        "fca": "FCA",
-        "kia": "Kia",
-        "smart": "smart",
-    }
-
-    @classmethod
-    def _normalize_make(cls, make: str) -> str:
-        """Return the canonical NHTSA make spelling for known aliases.
-
-        NHTSA's recall API is case-sensitive: "Volkswagen" returns hits but
-        "VOLKSWAGEN" or "volkswagen" returns 0. For inputs not covered by the
-        alias dict we apply a Title-Case fallback so common typing variants
-        ("VOLKSWAGEN", "land rover") still resolve.
-        """
-        cleaned = make.strip()
-        if not cleaned:
-            return cleaned
-        key = cleaned.lower()
-        if key in cls.BRAND_ALIASES:
-            return cls.BRAND_ALIASES[key]
-        # Title-case fallback: "land rover" → "Land Rover", "VOLKSWAGEN" → "Volkswagen".
-        # str.title() is safe here because we're producing a single-line proper noun.
-        return cleaned.title()
+    @staticmethod
+    def _normalize_make(make: str) -> str:
+        """Return the canonical NHTSA make spelling (delegates to core module)."""
+        return normalize_make(make)
 
     # Rate limiting settings
     REQUESTS_PER_SECOND = 5
@@ -584,12 +515,12 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = self._normalize_make(make)
+        make = normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — saves a round-trip
         # and avoids misleading "0 recalls" when the dataset simply doesn't cover them.
-        if make.lower() in self.EU_ONLY_MAKES:
+        if is_eu_only(make):
             logger.info(
                 f"Skipping NHTSA recalls lookup for EU-only make {sanitize_log(make)} "
                 f"{sanitize_log(model)} {sanitize_log(str(year))}"
@@ -682,11 +613,11 @@ class NHTSAService:
         Raises:
             NHTSAError: If API request fails
         """
-        make = self._normalize_make(make)
+        make = normalize_make(make)
         model = model.strip()
 
         # Skip NHTSA call for brands never sold in the US — same rationale as get_recalls.
-        if make.lower() in self.EU_ONLY_MAKES:
+        if is_eu_only(make):
             logger.info(
                 f"Skipping NHTSA complaints lookup for EU-only make {sanitize_log(make)} "
                 f"{sanitize_log(model)} {sanitize_log(str(year))}"

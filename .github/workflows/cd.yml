@@ -356,15 +356,30 @@ jobs:
           exit 0
 
   # ============================================
-  # Rollback on failure (manual trigger only)
-  # Disabled during early development to avoid noise
+  # Rollback on failure: opens an issue for build, migration, and deploy
+  # failures (incl. deploy failure after successful migration = schema drift)
   # ============================================
   rollback:
     name: Rollback Deployment
     runs-on: ubuntu-latest
-    needs: [prepare, smoke-tests, build-backend, build-frontend]
-    # Only run if build actually failed (not smoke tests)
-    if: failure() && (needs.build-backend.result == 'failure' || needs.build-frontend.result == 'failure')
+    # The issue-creation step needs explicit write permission; without it the
+    # API call 403s and the schema-drift warning is silently lost.
+    permissions:
+      issues: write
+    # deploy-railway and run-migrations MUST be listed in needs, otherwise their
+    # results are not readable from this job's `if` expression.
+    needs: [prepare, build-backend, build-frontend, run-migrations, deploy-railway, smoke-tests]
+    # always() is required: with plain failure(), a build failure would skip the
+    # downstream jobs and this job's needs would never be satisfied as "failed
+    # only". always() + explicit result checks covers every failure combination:
+    # build failure, migration failure, and deploy failure after a successful
+    # migration (skipped jobs evaluate to 'skipped' and don't trigger rollback).
+    if: >-
+      always() &&
+      (needs.build-backend.result == 'failure' ||
+       needs.build-frontend.result == 'failure' ||
+       needs.run-migrations.result == 'failure' ||
+       needs.deploy-railway.result == 'failure')
     environment: ${{ needs.prepare.outputs.environment }}
     steps:
       - name: Get previous version
@@ -376,13 +391,66 @@ jobs:
 
       - name: Create rollback issue
         uses: actions/github-script@v7
+        env:
+          BUILD_BACKEND_RESULT: ${{ needs.build-backend.result }}
+          BUILD_FRONTEND_RESULT: ${{ needs.build-frontend.result }}
+          MIGRATIONS_RESULT: ${{ needs.run-migrations.result }}
+          DEPLOY_RESULT: ${{ needs.deploy-railway.result }}
+          DEPLOY_VERSION: ${{ needs.prepare.outputs.version }}
+          DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
         with:
           script: |
-            github.rest.issues.create({
+            const buildBackend = process.env.BUILD_BACKEND_RESULT;
+            const buildFrontend = process.env.BUILD_FRONTEND_RESULT;
+            const migrations = process.env.MIGRATIONS_RESULT;
+            const deploy = process.env.DEPLOY_RESULT;
+            const shortSha = context.sha.substring(0, 8);
+
+            const meta = [
+              `- **Version:** ${process.env.DEPLOY_VERSION}`,
+              `- **Environment:** ${process.env.DEPLOY_ENVIRONMENT}`,
+              `- **Commit:** ${context.sha}`,
+              `- **Backend build:** ${buildBackend}`,
+              `- **Frontend build:** ${buildFrontend}`,
+              `- **Migrations:** ${migrations}`,
+              `- **Deploy:** ${deploy}`,
+            ].join('\n');
+
+            let title;
+            let details;
+            let labels = ['deployment'];
+
+            if (buildBackend === 'failure' || buildFrontend === 'failure') {
+              title = `Build Failed - Deployment Blocked (${shortSha})`;
+              details = 'Docker build failed. Migrations and deployment were not attempted.';
+              labels.push('build-failure');
+            } else if (migrations === 'failure') {
+              title = `Migration Failed - Deployment Blocked (${shortSha})`;
+              details = 'Alembic migration failed. Deployment was not attempted, ' +
+                'the running app and DB schema are still consistent (old version). ' +
+                'Investigate the migration before retrying.';
+              labels.push('migration-failure');
+            } else if (deploy === 'failure' && migrations === 'success') {
+              title = `Deploy Failed AFTER Successful Migration (${shortSha})`;
+              details = '**WARNING: DB schema is ahead of running code** — migrations ' +
+                'succeeded but the Railway deploy failed, so the OLD app version is ' +
+                'running against the NEW schema. Consider `alembic downgrade -1` to ' +
+                'restore schema compatibility, or fast-forward redeploy the new app ' +
+                'version as soon as possible.';
+              labels.push('deploy-failure', 'schema-drift');
+            } else {
+              title = `Deploy Failed (${shortSha})`;
+              details = 'Railway deploy failed. Check the workflow logs for details.';
+              labels.push('deploy-failure');
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Build Failed - Deployment Blocked (${context.sha.substring(0, 8)})`,
-              body: `## Build Failure\n\n- **Version:** ${{ needs.prepare.outputs.version }}\n- **Environment:** ${{ needs.prepare.outputs.environment }}\n- **Commit:** ${context.sha}\n\nDocker build failed. Deployment was not attempted.\n\n[View Workflow Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
-              labels: ['deployment', 'build-failure']
-            })
+              title,
+              body: `## Deployment Failure\n\n${meta}\n\n${details}\n\n[View Workflow Run](${runUrl})`,
+              labels,
+            });
         continue-on-error: true

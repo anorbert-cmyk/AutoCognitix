@@ -165,9 +165,7 @@ Jelenlegi méret (CLAUDE.md szerint): **35,000+ vector**.
 | `dtc:related:{CODE}` | Kapcsolódó DTC kódok listája. | 1h | `redis_cache.py:495-503`. |
 | `issues:*` | Ismert problémák cache. | 30m (`CacheTTL.KNOWN_ISSUES`) | prefix, `CacheTTL.KNOWN_ISSUES`. |
 | `vehicle:make:*`, `vehicle:model:*` | Jármű gyártó/modell adatok. | 24h (`CacheTTL.VEHICLE_DATA`) | prefix, `CacheTTL.VEHICLE_DATA`. |
-| `nhtsa:recalls:{make}:{model}:{year}` | NHTSA visszahívások. | 6h (`CacheTTL.NHTSA_DATA`) | `get_nhtsa_recalls()` / `set_nhtsa_recalls()` (508-527). Használat: `backend/app/services/nhtsa_service.py:513, 552`. |
-| `nhtsa:complaints:{make}:{model}:{year}` | NHTSA panaszok. | 6h | `get_nhtsa_complaints()` / `set_nhtsa_complaints()` (529-548). Használat: `nhtsa_service.py:602, 643`. |
-| `nhtsa:vin:{VIN}` | VIN decode eredmény. | 6h | `get_vin_decode()` / `set_vin_decode()` (550-558). Használat: `nhtsa_service.py:431, 469`. |
+| `nhtsa:{md5(prefix:args)}` | NHTSA recalls / complaints / VIN decode. Az NHTSA service saját cache backend-et használ (`RedisCache` vagy `InMemoryCache` fallback), kulcs: `_generate_cache_key()` md5 hash a `recalls` / `complaints` / `vin` prefixből + argumentumokból. | VIN: 24h (`VIN_CACHE_TTL`), recalls/complaints: 1h (`RECALLS_CACHE_TTL` / `COMPLAINTS_CACHE_TTL`) | `backend/app/services/nhtsa_service.py::_generate_cache_key()`; használat: `decode_vin()`, `get_recalls()`, `get_complaints()`. |
 | `embed:{sha256(text)}` | huBERT embedding vektor (768 float). | 1h (`CacheTTL.EMBEDDINGS`) | `get_embedding()` / `set_embedding()` (563-574). Használat: `backend/app/services/embedding_service.py::embed_text()` + `embed_text_async()`. |
 | `ratelimit:{identifier}` | Rate limit counter (atomic Lua INCR+EXPIRE). | ablaktól függ | `check_rate_limit()` (588-628). Callsite-ok: `backend/app/core/rate_limit.py`, `backend/app/core/rate_limiter.py`. Fail-closed policy Sprint 9 óta. |
 | `api:diagnosis:{session_id}*`, `api:user:{user_id}:history*` | Diagnózis válasz + user history cache. | 5m (`CacheTTL.API_RESPONSE`) | `redis_cache.py::invalidate_diagnosis_cache()` (224-234). |

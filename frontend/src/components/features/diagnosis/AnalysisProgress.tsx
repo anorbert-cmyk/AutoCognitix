@@ -22,29 +22,9 @@ import {
   AlertTriangle,
   RefreshCw,
 } from 'lucide-react';
-import type {
-  StreamingEventType,
-  StreamingCallbacks,
-  DiagnosisStreamRequest,
-} from '@/types/streaming';
+import type { StreamingEventType } from '@/types/streaming';
 import type { DiagnosisRequest } from '@/services/api';
-
-// ---------------------------------------------------------------------------
-// streamDiagnosis – the actual function is being created by another agent in
-// diagnosisService.ts.  We import the entire module and look up the function
-// at call-time so the component works whether or not it exists yet.
-// ---------------------------------------------------------------------------
-import * as diagnosisServiceModule from '@/services/diagnosisService';
-
-type StreamDiagnosisFn = (
-  params: DiagnosisStreamRequest,
-  callbacks: StreamingCallbacks,
-) => { abort: () => void };
-
-function getStreamDiagnosisFn(): StreamDiagnosisFn | undefined {
-  const fn = (diagnosisServiceModule as Record<string, unknown>)['streamDiagnosis'];
-  return typeof fn === 'function' ? (fn as StreamDiagnosisFn) : undefined;
-}
+import { streamDiagnosis, type DiagnosisFormData } from '@/services/diagnosisService';
 
 // =============================================================================
 // Types
@@ -201,7 +181,7 @@ export function AnalysisProgress({
   const [isRetrying, setIsRetrying] = useState(false);
 
   // Abort controller ref for cleanup
-  const abortRef = useRef<{ abort: () => void } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
   // Track whether streaming has been started to avoid double-invocation
@@ -243,8 +223,7 @@ export function AnalysisProgress({
   // =========================================================================
 
   const startStreaming = useCallback(() => {
-    const streamFn = getStreamDiagnosisFn();
-    if (!diagnosisRequest || !streamFn) return;
+    if (!diagnosisRequest) return;
 
     // Reset state for (re)start
     setErrorMessage(null);
@@ -252,12 +231,22 @@ export function AnalysisProgress({
     setStreamingProgress(0);
     setSteps(buildStreamingSteps(0));
 
-    const handle = streamFn(
-      {
-        ...diagnosisRequest,
-        include_context: true,
-        include_progress: true,
-      },
+    // Convert snake_case API request to the camelCase form data
+    // expected by streamDiagnosis (include_context/include_progress
+    // are added to the request body by streamDiagnosis itself).
+    const formData: DiagnosisFormData = {
+      vehicleMake: diagnosisRequest.vehicle_make,
+      vehicleModel: diagnosisRequest.vehicle_model,
+      vehicleYear: diagnosisRequest.vehicle_year,
+      vehicleEngine: diagnosisRequest.vehicle_engine,
+      vin: diagnosisRequest.vin,
+      dtcCodes: diagnosisRequest.dtc_codes,
+      symptoms: diagnosisRequest.symptoms,
+      additionalContext: diagnosisRequest.additional_context,
+    };
+
+    const handle = streamDiagnosis(
+      formData,
       {
         onStart: () => {
           if (!mountedRef.current) return;
@@ -358,6 +347,8 @@ export function AnalysisProgress({
         setSteps((prev) =>
           prev.map((s) => (s.status === 'in_progress' ? { ...s, status: 'error' as const } : s))
         );
+        // Notify the parent so its fallback (non-streaming) path can run
+        onErrorRef.current?.('Az elemzes tullepte a maximalis idokorlatot (2 perc)');
       }
     }, 120000);
   }, [diagnosisRequest, diagnosisId, navigate]);
@@ -366,14 +357,6 @@ export function AnalysisProgress({
   useEffect(() => {
     if (!streamingEnabled) return;
     if (streamStartedRef.current) return;
-
-    // If streamDiagnosis is not available, fall back to mock
-    if (!getStreamDiagnosisFn()) {
-      console.warn(
-        'AnalysisProgress: streamDiagnosis not available, falling back to mock mode'
-      );
-      return;
-    }
 
     if (!diagnosisRequest) {
       console.warn(
@@ -410,7 +393,7 @@ export function AnalysisProgress({
   // =========================================================================
 
   const isMockMode = useMemo(
-    () => !streamingEnabled || !getStreamDiagnosisFn() || !diagnosisRequest,
+    () => !streamingEnabled || !diagnosisRequest,
     [streamingEnabled, diagnosisRequest]
   );
 
@@ -491,7 +474,7 @@ export function AnalysisProgress({
   };
 
   const handleRetry = () => {
-    if (!diagnosisRequest || !getStreamDiagnosisFn()) return;
+    if (!diagnosisRequest) return;
     setIsRetrying(true);
     streamStartedRef.current = false;
 

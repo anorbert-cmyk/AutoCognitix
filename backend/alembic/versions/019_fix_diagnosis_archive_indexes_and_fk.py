@@ -1,12 +1,16 @@
-"""fix DiagnosisArchive missing FK constraint and explicit indexes
+"""fix DiagnosisArchive missing FK constraint and ensure indexes idempotently
 
-The 013 migration declared `index=True` inside `sa.Column(...)` which Alembic
-does NOT translate to an `op.create_index` call — so `original_id` and
-`user_id` were left without DB indexes despite the ORM model expecting them.
-The migration also created `user_id` as a plain UUID with no foreign key
+The 013 migration created `user_id` as a plain UUID with no foreign key
 to `users.id`, while the ORM model declares
-`ForeignKey("users.id", ondelete="CASCADE")`. Both gaps mean the DB doesn't
-enforce the integrity contract the ORM assumes.
+`ForeignKey("users.id", ondelete="CASCADE")` — so the DB doesn't enforce
+the integrity contract the ORM assumes. This migration adds that missing
+FK constraint (after purging orphan rows under a SHARE lock).
+
+It also re-asserts the `ix_diagnosis_archive_original_id` and
+`ix_diagnosis_archive_user_id` indexes with `if_not_exists=True`. Note that
+013's `op.create_table` with `sa.Column(..., index=True)` DOES create these
+indexes, so the calls below are normally no-ops — they are an idempotent
+safety net for any environment where the indexes are missing anyway.
 
 Production safety notes:
 - The table is briefly locked in SHARE mode to prevent concurrent INSERTs
@@ -44,7 +48,10 @@ def upgrade() -> None:
     #    can't starve the app's connection pool on production. 30s is well
     #    above expected migration time for this small table; tune up if the
     #    archive grows past millions of rows.
-    op.execute(sa.text("SET lock_timeout = '30s'"))
+    #    SET LOCAL is transaction-scoped: Alembic runs migrations inside a
+    #    transaction, and env.py reuses one connection for all pending
+    #    migrations — a session-level SET would leak into later migrations.
+    op.execute(sa.text("SET LOCAL lock_timeout = '30s'"))
 
     # 2) Lock the table briefly to prevent concurrent INSERTs from creating
     #    new orphan rows in the window between purge and FK validation.
@@ -78,7 +85,9 @@ def upgrade() -> None:
             + ")"
         )
 
-    # 3) Explicit indexes (idempotent on retry).
+    # 3) Idempotent index safety net: 013 already created these via
+    #    sa.Column(..., index=True), so these are normally no-ops;
+    #    if_not_exists covers any environment where they are missing.
     op.create_index(
         "ix_diagnosis_archive_original_id",
         "diagnosis_archive",
@@ -111,15 +120,15 @@ def downgrade() -> None:
     # re-upgrade WILL silently purge any new orphans created in the interim.
     #
     # Alembic's op.drop_constraint doesn't accept an if_exists flag, so we use
-    # raw SQL with IF EXISTS to stay idempotent (matches the indexes below and
-    # tolerates a partial-upgrade rollback where the constraint never landed).
+    # raw SQL with IF EXISTS to stay idempotent (tolerates a partial-upgrade
+    # rollback where the constraint never landed).
+    #
+    # The ix_diagnosis_archive_* indexes are intentionally NOT dropped here:
+    # they belong to migration 013 (created via sa.Column(..., index=True));
+    # the create_index calls in upgrade() are only an idempotent safety net.
     op.execute(
         sa.text(
             "ALTER TABLE diagnosis_archive "
             "DROP CONSTRAINT IF EXISTS diagnosis_archive_user_id_fkey"
         )
-    )
-    op.drop_index("ix_diagnosis_archive_user_id", table_name="diagnosis_archive", if_exists=True)
-    op.drop_index(
-        "ix_diagnosis_archive_original_id", table_name="diagnosis_archive", if_exists=True
     )
