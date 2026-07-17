@@ -34,18 +34,18 @@ jobs:
           JWT_SECRET_KEY: dummy-jwt-secret-for-backup-only-0000000
           PYTHONPATH: ${{ github.workspace }}/backend
         run: |
-          python scripts/backup_data.py --all --output-dir ./backups
+          python scripts/backup_data.py --all
 
       - name: Verify backup integrity
         run: |
           echo "Checking backup output..."
-          ls -la ./backups/
-          file_count=$(find ./backups/ -type f | wc -l)
+          ls -la data/backups/
+          file_count=$(find data/backups/ -type f | wc -l)
           if [ "$file_count" -eq 0 ]; then
             echo "::error::No backup files produced!"
             exit 1
           fi
-          for f in ./backups/*; do
+          for f in $(find data/backups/ -type f); do
             if [ ! -s "$f" ]; then
               echo "::error::Empty backup file: $f"
               exit 1
@@ -57,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backup-${{ github.run_id }}
-          path: ./backups/
+          path: ./data/backups/
           retention-days: 30
 
       - name: Notify on failure
