@@ -33,6 +33,7 @@ jobs:
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           SECRET_KEY: dummy-secret-key-for-backup-only-000000
           JWT_SECRET_KEY: dummy-jwt-secret-for-backup-only-0000000
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           python scripts/backup_data.py --all --output-dir ./backups
 
