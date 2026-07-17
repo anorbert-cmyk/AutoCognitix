@@ -1,5 +1,23 @@
 name: Scheduled Backup
 
+# ---------------------------------------------------------------------------
+# REQUIRED REPO SECRETS (Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL    - PUBLIC PostgreSQL connection string (a GitHub runner
+#                     cannot reach Railway-internal hosts like
+#                     postgres.railway.internal — use the public/proxy URL)
+#   NEO4J_URI       - bolt+s:// or neo4j+s:// URI of the Neo4j instance
+#   NEO4J_PASSWORD  - Neo4j password
+#   QDRANT_URL      - https:// URL of the Qdrant instance
+#   QDRANT_API_KEY  - Qdrant API key (leave unset only for unauthenticated
+#                     self-hosted instances)
+#
+# 2026-07-17: the job previously went red every day because NONE of these
+# secrets were configured — every client fell back to localhost/empty URL and
+# failed. The precheck below now SKIPS the backup with a loud warning instead
+# of failing the run, so a missing configuration is visible without producing
+# a daily red X. Once the secrets are set, the job runs exactly as before.
+# ---------------------------------------------------------------------------
+
 on:
   schedule:
     # Run daily at 3:00 AM UTC
@@ -12,18 +30,42 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Check backup secrets are configured
+        id: precheck
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NEO4J_URI: ${{ secrets.NEO4J_URI }}
+          NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+        run: |
+          missing=""
+          [ -z "$DATABASE_URL" ]   && missing="$missing DATABASE_URL"
+          [ -z "$NEO4J_URI" ]      && missing="$missing NEO4J_URI"
+          [ -z "$NEO4J_PASSWORD" ] && missing="$missing NEO4J_PASSWORD"
+          [ -z "$QDRANT_URL" ]     && missing="$missing QDRANT_URL"
+          if [ -n "$missing" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Backup skipped - secrets not configured::Missing repo secrets:$missing. Without them the backup job cannot reach any database (it would fail against localhost). Add them under Settings -> Secrets and variables -> Actions (see the header of .github/workflows/backup.yml for details), then re-run this workflow."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.precheck.outputs.configured == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: steps.precheck.outputs.configured == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: steps.precheck.outputs.configured == 'true'
         run: |
           pip install -r backend/requirements.txt
       - name: Run backup
+        if: steps.precheck.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           NEO4J_URI: ${{ secrets.NEO4J_URI }}
@@ -37,6 +79,7 @@ jobs:
           python scripts/backup_data.py --all
 
       - name: Verify backup integrity
+        if: steps.precheck.outputs.configured == 'true'
         run: |
           echo "Checking backup output..."
           ls -la data/backups/
@@ -54,6 +97,7 @@ jobs:
           echo "Backup verification passed: $file_count files"
 
       - name: Upload backup artifact
+        if: steps.precheck.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backup-${{ github.run_id }}
