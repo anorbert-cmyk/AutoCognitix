@@ -22,8 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install asyncpg neo4j qdrant-client pydantic pydantic-settings
-
+          pip install -r backend/requirements.txt
       - name: Run backup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
