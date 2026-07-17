@@ -22,7 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install asyncpg neo4j qdrant-client
+          pip install asyncpg neo4j qdrant-client pydantic pydantic-settings
 
       - name: Run backup
         env:
@@ -31,6 +31,8 @@ jobs:
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          SECRET_KEY: dummy-secret-key-for-backup-only-000000
+          JWT_SECRET_KEY: dummy-jwt-secret-for-backup-only-0000000
         run: |
           python scripts/backup_data.py --all --output-dir ./backups
 
