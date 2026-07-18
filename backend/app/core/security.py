@@ -4,6 +4,8 @@ Security utilities for authentication and authorization.
 Provides JWT token management, password hashing, and token blacklisting.
 """
 
+import hashlib
+import hmac
 import logging
 import re
 import secrets
@@ -382,29 +384,46 @@ def generate_secure_token(length: int = 32) -> str:
 
 def generate_csrf_token() -> str:
     """
-    Generate a CSRF token for cookie-based auth protection.
+    Generate an HMAC-signed CSRF token (header-only, no cookie).
 
-    Returns a cryptographically secure token that should be returned
-    in the login response body (NOT in a cookie) and sent by the
-    frontend as an X-CSRF-Token header on state-changing requests.
+    Produces a random nonce signed with HMAC-SHA256 using
+    settings.JWT_SECRET_KEY. The token is returned in the login
+    response body and sent by the frontend as an X-CSRF-Token header
+    on state-changing requests. No cookie is involved, so it works
+    across cross-site deployments where samesite cookies are dropped.
 
     Returns:
-        A URL-safe base64 encoded CSRF token string
+        A "<nonce>.<mac>" signed CSRF token string
     """
-    return secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    mac = hmac.new(settings.JWT_SECRET_KEY.encode(), nonce.encode(), hashlib.sha256).hexdigest()
+    return f"{nonce}.{mac}"
 
 
 def verify_csrf_token(token: Optional[str]) -> bool:
     """
-    Verify that a CSRF token is present and non-empty.
+    Verify an HMAC-signed CSRF token.
 
-    The token is validated for presence only since we use a per-session
-    token stored in-memory on the frontend (not accessible to attackers).
+    Recomputes the HMAC-SHA256 signature of the nonce using
+    settings.JWT_SECRET_KEY and compares it against the provided MAC
+    in constant time. Header-only, no cookie is consulted.
 
     Args:
-        token: The CSRF token from X-CSRF-Token header
+        token: The "<nonce>.<mac>" CSRF token from the X-CSRF-Token header
 
     Returns:
-        True if token is present and non-empty
+        True if the token is well-formed and its signature is valid
     """
-    return bool(token and len(token) >= 16)
+    # A well-formed token is always ASCII ("<nonce>.<hexdigest>"). Reject
+    # non-ASCII early: hmac.compare_digest raises TypeError on non-ASCII str
+    # (Starlette decodes headers as latin-1), which would surface as a 500
+    # instead of a clean 403.
+    if not token or "." not in token or not token.isascii():
+        return False
+    nonce, _, provided_mac = token.partition(".")
+    if not nonce or not provided_mac:
+        return False
+    expected_mac = hmac.new(
+        settings.JWT_SECRET_KEY.encode(), nonce.encode(), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(provided_mac, expected_mac)

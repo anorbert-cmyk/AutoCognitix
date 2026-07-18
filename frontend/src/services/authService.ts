@@ -164,14 +164,17 @@ export async function refreshTokens(): Promise<AuthTokens> {
 /**
  * Restore the CSRF token after a page reload.
  * Called after getCurrentUser() succeeds to re-populate the in-memory CSRF token.
- * Silently fails if the refresh endpoint is not available.
+ *
+ * Uses the safe GET /auth/csrf-token endpoint (not POST /auth/refresh): the
+ * signed token is stateless and CSRF-exempt by method, so this avoids forcing a
+ * refresh-token rotation just to restore the token. Silently fails if the
+ * endpoint is unavailable.
  */
 export async function refreshCsrfToken(): Promise<void> {
   try {
-    const tokens = await refreshTokens()
-    if (tokens.csrf_token) {
-      setCsrfToken(tokens.csrf_token)
-      authenticated = true
+    const response = await api.get<{ csrf_token?: string }>('/auth/csrf-token')
+    if (response.data.csrf_token) {
+      setCsrfToken(response.data.csrf_token)
     }
   } catch {
     // Silently ignore — the CSRF token may be missing only on page reload

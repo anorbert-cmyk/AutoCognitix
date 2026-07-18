@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosResponse } from 'axios'
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
 // =============================================================================
 // API Configuration
@@ -149,7 +149,18 @@ const processQueue = (error: unknown) => {
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError<ApiErrorDetail>) => {
-    const originalRequest = error.config as typeof error.config & { _retry?: boolean }
+    const originalRequest = error.config as typeof error.config & {
+      _retry?: boolean
+      _isRefreshCall?: boolean
+    }
+
+    // If the failing request IS the refresh call itself (e.g. expired refresh
+    // cookie returns 401), never re-enter the refresh/queue logic - that would
+    // deadlock because processQueue only runs after the awaited refresh settles.
+    // Reject normally so the outer catch(refreshError) can clear state + redirect.
+    if (originalRequest?._isRefreshCall) {
+      throw ApiError.fromAxiosError(error)
+    }
 
     // Handle 401 errors (token expired) - attempt silent refresh via cookie
     if (error.response?.status === 401 && !originalRequest?._retry) {
@@ -167,8 +178,12 @@ api.interceptors.response.use(
       isRefreshing = true
 
       try {
-        // Refresh token is sent automatically via httpOnly cookie
-        const response = await api.post('/auth/refresh')
+        // Refresh token is sent automatically via httpOnly cookie.
+        // Mark this request so the interceptor can recognize it and bail early
+        // instead of recursively re-entering the refresh/queue logic on a 401.
+        const response = await api.post('/auth/refresh', undefined, {
+          _isRefreshCall: true,
+        } as InternalAxiosRequestConfig & { _isRefreshCall?: boolean })
         const { csrf_token } = response.data
 
         // Update CSRF token in memory

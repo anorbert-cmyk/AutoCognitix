@@ -74,10 +74,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // Restore the CSRF token first (it lives in memory only and is cleared
+        // by a page reload). Doing this before getCurrentUser() lets an expired
+        // access token be silently refreshed, since POST /auth/refresh is now
+        // CSRF-protected and needs the token present.
+        await refreshCsrfToken()
         const userData = await getCurrentUser()
         setUser(userData)
-        // Restore CSRF token after page reload (it lives in memory only)
-        await refreshCsrfToken()
       } catch (err) {
         clearTokens()
         setUser(null)

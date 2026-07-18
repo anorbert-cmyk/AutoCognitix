@@ -475,7 +475,7 @@ async def search_dtc_codes(
         try:
             # Generate embedding for query
             embedding_service = get_embedding_service()
-            query_embedding = embedding_service.embed_text(query, preprocess=True)
+            query_embedding = await embedding_service.embed_text_async(query, preprocess=True)
 
             # Search Qdrant
             semantic_results = await qdrant_client.search_dtc(

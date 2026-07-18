@@ -360,11 +360,18 @@ For API support, visit the [project repository](https://github.com/autocognitix)
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-    # CSRF protection middleware - double-submit cookie pattern
-    # Exclude only safe endpoints from CSRF validation:
+    # CSRF protection middleware - header-only, HMAC-signed tokens
+    # Exclude safe endpoints and pre-auth bootstrap endpoints from CSRF validation:
     # - Health checks (GET only)
     # - Metrics (GET only)
     # - API docs (GET only)
+    # - Pre-auth endpoints that mint the first CSRF token (login/register/
+    #   forgot-password/reset-password) - the client has no token yet
+    # NOTE: /auth/refresh is intentionally NOT excluded. It reads and rotates the
+    #   httpOnly refresh cookie, so under SameSite=None a CSRF-less cross-origin
+    #   POST could force-rotate a victim's token (logout DoS). The client always
+    #   holds a CSRF token before calling refresh (from login, or the safe
+    #   GET /auth/csrf-token used to restore it after a page reload).
     # State-changing API operations (POST/PUT/DELETE) require CSRF tokens
     application.add_middleware(
         CSRFMiddleware,
@@ -374,6 +381,10 @@ For API support, visit the [project repository](https://github.com/autocognitix)
             "/api/v1/docs",
             "/api/v1/openapi.json",
             "/api/v1/redoc",
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/reset-password",
         ],
     )
 

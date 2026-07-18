@@ -766,6 +766,24 @@ async def get_me(
     )
 
 
+@router.get(
+    "/csrf-token",
+    summary="CSRF token lekérése",
+    description="""
+Új, aláírt CSRF token kérése az `X-CSRF-Token` headerhez.
+
+Biztonságos (GET) végpont, amely a memóriában tárolt CSRF token
+visszaállítására szolgál oldal-újratöltés után, amikor az még nem áll
+rendelkezésre a `/refresh` hívásához. A token stateless (HMAC-aláírt),
+így hitelesítés nélkül is kiadható: a CSRF-védelmet a custom header +
+CORS preflight adja, nem a token titkossága.
+    """,
+)
+async def get_csrf_token() -> dict:
+    """Return a fresh signed CSRF token for the X-CSRF-Token header."""
+    return {"csrf_token": generate_csrf_token()}
+
+
 @router.put(
     "/me",
     response_model=UserResponse,
