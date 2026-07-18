@@ -108,6 +108,17 @@ class InMemoryRateLimiter:
         return True, remaining, 0
 
 
+class RedisUnavailableError(Exception):
+    """Raised when the Redis rate-limit backend cannot answer a check.
+
+    Signals RateLimitMiddleware.dispatch to fall back to the in-memory limiter
+    instead of failing the request closed. The previous code returned a
+    fail-closed (False, 0, 60) here AND latched Redis as permanently
+    unavailable, so a single transient Redis blip turned into a permanent,
+    API-wide HTTP 429 outage that only a redeploy could clear.
+    """
+
+
 class RedisRateLimiter:
     """
     Redis-based distributed rate limiter using sliding window log.
@@ -115,32 +126,48 @@ class RedisRateLimiter:
     Suitable for multi-instance deployments.
     """
 
+    # After a Redis failure, wait this long before trying to reconnect instead
+    # of latching "unavailable" forever. Requests in the meantime fall back to
+    # the in-memory limiter (see RateLimitMiddleware.dispatch).
+    _RETRY_COOLDOWN_SECONDS = 30
+
     def __init__(self) -> None:
         self._redis: Optional[Any] = None
-        self._initialized = False
+        self._retry_at: float = 0.0
 
     async def _get_redis(self) -> Optional[Any]:
-        """Get Redis connection (lazy initialization)."""
-        if self._initialized:
+        """Get the Redis connection (lazy init with periodic retry).
+
+        On failure we do NOT mark Redis unavailable permanently: we back off
+        for _RETRY_COOLDOWN_SECONDS and then try again, so the limiter
+        self-heals once Redis returns instead of denying requests forever.
+        """
+        if self._redis is not None:
             return self._redis
+
+        # Still cooling down after a recent failure — don't hammer a down Redis
+        # on every request. The caller falls back to the in-memory limiter.
+        if self._retry_at and time.time() < self._retry_at:
+            return None
 
         try:
             import redis.asyncio as redis
 
-            self._redis = redis.from_url(
+            client = redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
             )
             # Test connection
-            await self._redis.ping()
-            self._initialized = True
+            await client.ping()
+            self._redis = client
+            self._retry_at = 0.0
             logger.info("Redis rate limiter initialized")
             return self._redis
 
         except Exception as e:
             logger.warning(f"Redis not available for rate limiting: {e}")
-            self._initialized = True
             self._redis = None
+            self._retry_at = time.time() + self._RETRY_COOLDOWN_SECONDS
             return None
 
     async def is_allowed(
@@ -162,9 +189,10 @@ class RedisRateLimiter:
         """
         redis_client = await self._get_redis()
         if not redis_client:
-            # Fail-closed: deny requests when Redis unavailable (security policy)
-            logger.warning("Redis unavailable - rate limiter denying request (fail-closed)")
-            return False, 0, 60
+            # Redis is unavailable. Signal the middleware to fall back to the
+            # in-memory limiter (requests stay rate-limited) instead of denying
+            # every request, which used to brick the whole API on one Redis blip.
+            raise RedisUnavailableError("Redis unavailable for rate limiting")
 
         now = time.time()
         window_start = now - window_seconds
@@ -203,8 +231,12 @@ class RedisRateLimiter:
 
         except Exception as e:
             logger.error(f"Redis rate limit error: {e}")
-            # Fail-closed: deny on error to prevent bypass during Redis failures
-            return False, 0, 60
+            # Drop the (possibly broken) connection and back off, then signal
+            # the middleware to fall back to the in-memory limiter for this
+            # request instead of failing it closed.
+            self._redis = None
+            self._retry_at = time.time() + self._RETRY_COOLDOWN_SECONDS
+            raise RedisUnavailableError(str(e)) from e
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
