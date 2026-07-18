@@ -13,6 +13,7 @@ from app.core.rate_limiter import (
     RateLimitConfig as MiddlewareRateLimitConfig,
     RateLimitMiddleware,
     RedisRateLimiter,
+    RedisUnavailableError,
     rate_limit,
 )
 
@@ -60,7 +61,7 @@ def dep_limiter():
 def redis_limiter():
     """Fresh RedisRateLimiter with uninitialised state."""
     rl = RedisRateLimiter()
-    rl._initialized = False
+    rl._retry_at = 0.0
     rl._redis = None
     return rl
 
@@ -176,23 +177,24 @@ class TestMiddlewareInMemoryRateLimiter:
 
 class TestRedisRateLimiter:
     @pytest.mark.asyncio
-    async def test_redis_unavailable_fail_closed(self, redis_limiter):
-        """When Redis cannot connect, requests should be denied (fail-closed)."""
+    async def test_redis_unavailable_raises_for_fallback(self, redis_limiter):
+        """When Redis cannot connect, is_allowed raises RedisUnavailableError so
+        the middleware falls back to the in-memory limiter — instead of the old
+        fail-closed behaviour that bricked the whole API on a single Redis blip."""
         with patch("app.core.rate_limiter.settings") as mock_settings:
             mock_settings.REDIS_URL = "redis://nonexistent:6379"
             with patch("redis.asyncio.from_url", side_effect=ConnectionError("no redis")):
-                allowed, _remaining, retry = await redis_limiter.is_allowed("k1", 10, 60)
-        assert allowed is False
-        assert retry == 60
+                with pytest.raises(RedisUnavailableError):
+                    await redis_limiter.is_allowed("k1", 10, 60)
 
     @pytest.mark.asyncio
-    async def test_redis_already_initialized_none(self, redis_limiter):
-        """When Redis was already tried and failed, returns fail-closed."""
-        redis_limiter._initialized = True
+    async def test_redis_in_cooldown_raises(self, redis_limiter):
+        """During the post-failure cooldown, _get_redis returns None without
+        reconnecting and is_allowed raises so the caller uses the memory limiter."""
         redis_limiter._redis = None
-        allowed, _remaining, retry = await redis_limiter.is_allowed("k1", 10, 60)
-        assert allowed is False
-        assert retry == 60
+        redis_limiter._retry_at = time.time() + 999  # still cooling down
+        with pytest.raises(RedisUnavailableError):
+            await redis_limiter.is_allowed("k1", 10, 60)
 
     @pytest.mark.asyncio
     async def test_redis_successful_under_limit(self, redis_limiter):
@@ -203,7 +205,6 @@ class TestRedisRateLimiter:
         mock_pipe.execute = AsyncMock(return_value=[None, 3, None, None])  # zcard=3
         mock_redis.pipeline.return_value = mock_pipe
 
-        redis_limiter._initialized = True
         redis_limiter._redis = mock_redis
 
         allowed, remaining, retry = await redis_limiter.is_allowed("k1", 10, 60)
@@ -221,7 +222,6 @@ class TestRedisRateLimiter:
         # oldest entry score
         mock_redis.zrange = AsyncMock(return_value=[("ts", time.time() - 30)])
 
-        redis_limiter._initialized = True
         redis_limiter._redis = mock_redis
 
         allowed, remaining, retry = await redis_limiter.is_allowed("k1", 10, 60)
@@ -238,7 +238,6 @@ class TestRedisRateLimiter:
         mock_redis.pipeline.return_value = mock_pipe
         mock_redis.zrange = AsyncMock(return_value=[])
 
-        redis_limiter._initialized = True
         redis_limiter._redis = mock_redis
 
         allowed, _, retry = await redis_limiter.is_allowed("k1", 10, 60)
@@ -246,17 +245,19 @@ class TestRedisRateLimiter:
         assert retry == 60
 
     @pytest.mark.asyncio
-    async def test_redis_pipeline_error_fail_closed(self, redis_limiter):
-        """Pipeline errors should fail-closed."""
+    async def test_redis_pipeline_error_raises_for_fallback(self, redis_limiter):
+        """A pipeline/runtime error drops the connection, schedules a retry and
+        raises RedisUnavailableError so the middleware falls back to memory."""
         mock_redis = MagicMock()
         mock_redis.pipeline.side_effect = RuntimeError("pipe broken")
 
-        redis_limiter._initialized = True
         redis_limiter._redis = mock_redis
 
-        allowed, _, retry = await redis_limiter.is_allowed("k1", 10, 60)
-        assert allowed is False
-        assert retry == 60
+        with pytest.raises(RedisUnavailableError):
+            await redis_limiter.is_allowed("k1", 10, 60)
+        # connection dropped + cooldown scheduled so it reconnects later
+        assert redis_limiter._redis is None
+        assert redis_limiter._retry_at > time.time()
 
     @pytest.mark.asyncio
     async def test_redis_init_success(self, redis_limiter):
@@ -266,7 +267,8 @@ class TestRedisRateLimiter:
         with patch("redis.asyncio.from_url", return_value=mock_redis):
             client = await redis_limiter._get_redis()
         assert client is mock_redis
-        assert redis_limiter._initialized is True
+        assert redis_limiter._redis is mock_redis
+        assert redis_limiter._retry_at == 0.0
 
 
 # ============================================================================
