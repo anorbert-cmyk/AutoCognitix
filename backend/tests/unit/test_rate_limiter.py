@@ -183,9 +183,11 @@ class TestRedisRateLimiter:
         fail-closed behaviour that bricked the whole API on a single Redis blip."""
         with patch("app.core.rate_limiter.settings") as mock_settings:
             mock_settings.REDIS_URL = "redis://nonexistent:6379"
-            with patch("redis.asyncio.from_url", side_effect=ConnectionError("no redis")):
-                with pytest.raises(RedisUnavailableError):
-                    await redis_limiter.is_allowed("k1", 10, 60)
+            with (
+                patch("redis.asyncio.from_url", side_effect=ConnectionError("no redis")),
+                pytest.raises(RedisUnavailableError),
+            ):
+                await redis_limiter.is_allowed("k1", 10, 60)
 
     @pytest.mark.asyncio
     async def test_redis_in_cooldown_raises(self, redis_limiter):
