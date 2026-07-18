@@ -123,6 +123,21 @@ JWT_SECRET_KEY=<generálj-egy-erős-kulcsot>
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
+# Cross-site auth (KÖTELEZŐ, ha a frontend és a backend külön domainen fut,
+# pl. külön *.up.railway.app hostokon). Az auth 100%-ban httpOnly cookie-alapú:
+# - SameSite=None + Secure nélkül a böngésző cross-site NEM küldi el az auth
+#   cookie-kat -> a felhasználó login után azonnal kijelentkezettnek látszik.
+# - A SameSite=None-hoz Secure=true KELL (a config validator ezt ki is kényszeríti).
+COOKIE_SAMESITE=none
+COOKIE_SECURE=true
+
+# CORS - BIZTONSÁG-KRITIKUS. A CSRF-védelem header-only, aláírt tokenre épül,
+# aminek a valódi garanciája a custom X-CSRF-Token header + CORS preflight.
+# Ezért a BACKEND_CORS_ORIGINS-nek a PONTOS frontend origin(eke)t kell tartalmaznia
+# (vesszővel elválasztva). SOHA ne legyen "*" wildcard - az feloldaná a CSRF-védelmet
+# (és allow_credentials=True mellett a böngésző úgyis elutasítja).
+BACKEND_CORS_ORIGINS=https://<frontend-service>.up.railway.app
+
 # Database (Railway automatikusan beállítja, ha linkelve van)
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
@@ -280,6 +295,10 @@ curl https://<backend>.railway.app/health
 - [ ] Backend service deploy-olva
 - [ ] Frontend service deploy-olva
 - [ ] Environment variables beállítva
+- [ ] **Cross-site auth: `COOKIE_SAMESITE=none` + `COOKIE_SECURE=true`** (különben a login után azonnali kijelentkezés)
+- [ ] **`BACKEND_CORS_ORIGINS` = a pontos frontend origin** (nincs `*` wildcard — a CSRF-védelem ezen múlik)
+- [ ] **`JWT_SECRET_KEY` beállítva és stabil** (rotáció érvényteleníti a kint lévő CSRF tokeneket)
 - [ ] Database migration lefutott
 - [ ] Seed data betöltve
 - [ ] Health check működik
+- [ ] Smoke teszt: böngészőből login → 200, majd egy írás (pl. jármű hozzáadása) → 200 (nem 403)

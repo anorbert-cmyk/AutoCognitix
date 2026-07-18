@@ -7,7 +7,7 @@ Supports Railway deployment with automatic environment variable detection.
 from functools import lru_cache
 from typing import List, Literal, Optional, Union
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,27 @@ class Settings(BaseSettings):
     COOKIE_DOMAIN: Optional[str] = None  # None = current domain only
     COOKIE_SECURE: bool = True  # Set to False for local HTTP development
     COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"  # CSRF protection
+
+    @model_validator(mode="after")
+    def validate_cookie_samesite_secure(self) -> "Settings":
+        """
+        Enforce the browser rule for cross-site cookies.
+
+        Browsers reject a cookie with ``SameSite=None`` unless it is also
+        marked ``Secure``. This combination is required in cross-site
+        production (frontend and backend on different Railway domains), so
+        guard against a misconfiguration that would silently drop auth cookies.
+
+        Raises:
+            ValueError: If COOKIE_SAMESITE is "none" but COOKIE_SECURE is False.
+        """
+        if self.COOKIE_SAMESITE == "none" and not self.COOKIE_SECURE:
+            raise ValueError(
+                "COOKIE_SAMESITE='none' requires COOKIE_SECURE=True. "
+                "Browsers reject SameSite=None cookies without the Secure flag, "
+                "which would drop auth cookies cross-site."
+            )
+        return self
 
     @field_validator("SECRET_KEY", "JWT_SECRET_KEY")
     @classmethod
