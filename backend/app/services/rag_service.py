@@ -584,13 +584,16 @@ class RAGService:
                     path_by_code[code] = path_data
 
         for code in dtc_codes:
-            path_data = path_by_code.get(code, {})
+            # Use a fresh name (not path_data, whose first-loop binding is
+            # dict | BaseException from gather(return_exceptions=True)); values
+            # stored in path_by_code are always dicts, so this is Any/dict.
+            dtc_path = path_by_code.get(code, {})
 
-            if path_data:
+            if dtc_path:
                 # Create item for DTC
                 items.append(
                     RetrievedItem(
-                        content=path_data.get("dtc", {}),
+                        content=dtc_path.get("dtc", {}),
                         source=RetrievalSource.NEO4J_GRAPH,
                         score=1.0,  # High confidence for direct match
                         metadata={"code": code},
@@ -598,9 +601,9 @@ class RAGService:
                 )
 
                 # Combine graph data
-                combined_data["components"].extend(path_data.get("components", []))
-                combined_data["repairs"].extend(path_data.get("repairs", []))
-                combined_data["symptoms"].extend(path_data.get("symptoms", []))
+                combined_data["components"].extend(dtc_path.get("components", []))
+                combined_data["repairs"].extend(dtc_path.get("repairs", []))
+                combined_data["symptoms"].extend(dtc_path.get("symptoms", []))
 
         return items, combined_data
 
