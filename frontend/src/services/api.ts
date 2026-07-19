@@ -340,6 +340,7 @@ export interface DiagnosisResponse {
   ai_disclaimer?: string  // EU AI Act
 }
 
+// A /diagnosis végpontok history-eleme (snake_case, diagnosis.py sémát tükrözi)
 export interface DiagnosisHistoryItem {
   id: string
   vehicle_make: string
@@ -451,6 +452,8 @@ export interface Recall {
   recall_date?: string
 }
 
+// A /vehicles/{make}/{model}/{year}/complaints végpont eleme (NHTSA nyers séma:
+// `odinumber` aláhúzás nélkül — nem tévesztendő össze a RelatedComplaint.odi_number-rel)
 export interface Complaint {
   odinumber?: string
   manufacturer: string

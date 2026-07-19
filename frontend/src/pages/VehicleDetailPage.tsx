@@ -33,6 +33,7 @@ import {
   useCreateCost,
   useVehicleRecalls,
 } from '../services/hooks/useGarage'
+import { useVehicleComplaints } from '../services/hooks/useVehicle'
 import {
   formatHealthScore,
   getHealthScoreColorClass,
@@ -49,7 +50,7 @@ import {
 // Constants
 // =============================================================================
 
-type ActiveTab = 'reminders' | 'costs' | 'recalls'
+type ActiveTab = 'reminders' | 'costs' | 'recalls' | 'complaints'
 
 const EMPTY_REMINDER: Omit<MaintenanceReminderCreate, 'vehicle_id'> = {
   reminder_type: 'oil_change',
@@ -95,6 +96,11 @@ export default function VehicleDetailPage() {
   const { data: remindersData } = useReminders({ vehicle_id: vehicleId })
   const { data: costsData } = useCosts(vehicleId)
   const { data: recalls = [] } = useVehicleRecalls(vehicleId)
+  const {
+    data: complaints = [],
+    isLoading: complaintsLoading,
+    isError: complaintsError,
+  } = useVehicleComplaints(vehicle?.make, vehicle?.model, vehicle?.year)
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -309,10 +315,11 @@ export default function VehicleDetailPage() {
         <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6 w-fit">
           <button
             onClick={() => setActiveTab('reminders')}
+            aria-pressed={activeTab === 'reminders'}
             className={`flex items-center gap-2 h-9 px-5 rounded-lg text-sm font-semibold transition-colors ${
               activeTab === 'reminders'
                 ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                : 'text-slate-600 hover:text-slate-800'
             }`}
           >
             <Bell className="h-4 w-4" aria-hidden="true" />
@@ -325,10 +332,11 @@ export default function VehicleDetailPage() {
           </button>
           <button
             onClick={() => setActiveTab('costs')}
+            aria-pressed={activeTab === 'costs'}
             className={`flex items-center gap-2 h-9 px-5 rounded-lg text-sm font-semibold transition-colors ${
               activeTab === 'costs'
                 ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                : 'text-slate-600 hover:text-slate-800'
             }`}
           >
             <Banknote className="h-4 w-4" aria-hidden="true" />
@@ -336,16 +344,33 @@ export default function VehicleDetailPage() {
           </button>
           <button
             onClick={() => setActiveTab('recalls')}
+            aria-pressed={activeTab === 'recalls'}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'recalls'
                 ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700'
+                : 'text-slate-600 hover:text-slate-800'
             }`}
           >
             Visszahívások
             {recalls.length > 0 && (
               <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-red-600 text-white">
                 {recalls.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('complaints')}
+            aria-pressed={activeTab === 'complaints'}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'complaints'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            Panaszok
+            {complaints.length > 0 && (
+              <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">
+                {complaints.length}
               </span>
             )}
           </button>
@@ -531,6 +556,64 @@ export default function VehicleDetailPage() {
                       <p className="text-xs text-green-700 mt-2">
                         <span className="font-semibold">Javítás:</span> {recall.remedy}
                       </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Complaints tab ────────────────────────────────────────────────── */}
+        {activeTab === 'complaints' && (
+          <div>
+            {complaintsLoading ? (
+              <div className="text-center py-12 text-slate-500">
+                <p className="text-sm font-medium">Panaszok betöltése…</p>
+              </div>
+            ) : complaintsError ? (
+              <div className="text-center py-12 text-slate-500">
+                <p className="text-sm font-medium">A panaszok jelenleg nem elérhetők. Próbálja újra később.</p>
+              </div>
+            ) : complaints.length === 0 ? (
+              <div className="text-center py-12 text-slate-500">
+                <p className="text-sm font-medium">Nincs ismert panasz ehhez a járműhöz</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {complaints.map((complaint, idx) => (
+                  <div
+                    key={complaint.odinumber || idx}
+                    className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm"
+                  >
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className="text-xs font-bold uppercase text-slate-600 tracking-wide">
+                        {complaint.components || 'Egyéb'}
+                      </span>
+                      {complaint.odinumber && (
+                        <span className="text-xs text-slate-600 font-mono">#{complaint.odinumber}</span>
+                      )}
+                      {complaint.crash && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-700">
+                          Baleset
+                        </span>
+                      )}
+                      {complaint.fire && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-orange-100 text-orange-700">
+                          Tűz
+                        </span>
+                      )}
+                      {complaint.injuries > 0 && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-700">
+                          {complaint.injuries} sérült
+                        </span>
+                      )}
+                    </div>
+                    {complaint.summary && (
+                      <p className="text-sm text-slate-700 leading-relaxed">{complaint.summary}</p>
+                    )}
+                    {complaint.complaint_date && (
+                      <p className="text-xs text-slate-500 mt-2">{complaint.complaint_date}</p>
                     )}
                   </div>
                 ))}

@@ -508,4 +508,105 @@ describe('ResultPage', () => {
       expect(screen.getByText('Beállítások')).toBeInTheDocument();
     });
   });
+
+  // ── Extended fields: urgency, safety, diagnostic steps, complaints, sources ──
+
+  describe('extended diagnosis fields (Sprint 1.1 / 1.3)', () => {
+    it('shows the urgency badge when urgency_level is present', () => {
+      setupHookReturn({ data: createMockResult({ urgency_level: 'high' }) });
+      render(<ResultPage />);
+      expect(screen.getByText('Magas sürgősség')).toBeInTheDocument();
+    });
+
+    it('renders a safety-warnings callout when safety_warnings is present', () => {
+      setupHookReturn({
+        data: createMockResult({
+          safety_warnings: ['Ne vezesse a járművet, amíg a hiba fennáll.'],
+        }),
+      });
+      render(<ResultPage />);
+      expect(screen.getByText('Biztonsági figyelmeztetések')).toBeInTheDocument();
+      expect(
+        screen.getByText('Ne vezesse a járművet, amíg a hiba fennáll.'),
+      ).toBeInTheDocument();
+    });
+
+    it('hides the safety-warnings callout when safety_warnings is empty', () => {
+      setupHookReturn({ data: createMockResult({ safety_warnings: [] }) });
+      render(<ResultPage />);
+      expect(screen.queryByText('Biztonsági figyelmeztetések')).not.toBeInTheDocument();
+    });
+
+    it('renders diagnostic steps when diagnostic_steps is present', () => {
+      setupHookReturn({
+        data: createMockResult({
+          diagnostic_steps: ['Ellenőrizze a gyújtógyertyákat.', 'Mérje meg a kompressziót.'],
+        }),
+      });
+      render(<ResultPage />);
+      expect(screen.getByText('Diagnosztikai lépések')).toBeInTheDocument();
+      expect(screen.getByText('Ellenőrizze a gyújtógyertyákat.')).toBeInTheDocument();
+      expect(screen.getByText('Mérje meg a kompressziót.')).toBeInTheDocument();
+    });
+
+    it('renders similar complaints (crash flag + similarity) when present', () => {
+      setupHookReturn({
+        data: createMockResult({
+          similar_complaints: [
+            {
+              odi_number: '11223344',
+              components: 'ENGINE',
+              summary: 'A motor leállt vezetés közben.',
+              crash: true,
+              fire: false,
+              similarity_score: 0.82,
+            },
+          ],
+        }),
+      });
+      render(<ResultPage />);
+      expect(screen.getByText('Hasonló panaszok')).toBeInTheDocument();
+      expect(screen.getByText('A motor leállt vezetés közben.')).toBeInTheDocument();
+      expect(screen.getByText('Baleset')).toBeInTheDocument();
+      expect(screen.getByText('82% egyezés')).toBeInTheDocument();
+    });
+
+    it('hides similar complaints when similar_complaints is absent', () => {
+      setupHookReturn({ data: createMockResult() });
+      render(<ResultPage />);
+      expect(screen.queryByText('Hasonló panaszok')).not.toBeInTheDocument();
+    });
+
+    it('renders the sources section when sources are present', () => {
+      setupHookReturn({ data: createMockResult() });
+      render(<ResultPage />);
+      // default mock includes one source: NHTSA Complaints
+      expect(screen.getByText('Források')).toBeInTheDocument();
+      expect(screen.getByText('NHTSA Complaints')).toBeInTheDocument();
+    });
+  });
+
+  // ── Fabricated content removal (Sprint 0.1) ────────────────────────────
+
+  describe('removes fabricated content', () => {
+    beforeEach(() => {
+      setupHookReturn({ data: createMockResult({ id: 'real-id-1357' }) });
+    });
+
+    it('does not render the fake "Rendszer státusz: ONLINE" badge', () => {
+      render(<ResultPage />);
+      expect(screen.queryByText(/Rendszer státusz/)).not.toBeInTheDocument();
+    });
+
+    it('does not inject the hardcoded főtengely-szöggyorsulás root-cause sentence', () => {
+      render(<ResultPage />);
+      expect(screen.queryByText(/főtengely-szöggyorsulás/)).not.toBeInTheDocument();
+    });
+
+    it('does not render the hardcoded 4829 diagnosis-number literal', () => {
+      render(<ResultPage />);
+      // id ends in 1357, so the old hardcoded '4829' fallback must be gone
+      expect(screen.queryByText(/4829/)).not.toBeInTheDocument();
+    });
+  });
 });

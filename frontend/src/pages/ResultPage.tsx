@@ -21,6 +21,42 @@ function getVehicleImageUrl(make: string, model: string): string {
   return `https://placehold.co/800x600/1a1a2e/e0e0e0?text=${encodeURIComponent(make + ' ' + model)}`;
 }
 
+// Sürgősségi szint badge konfiguráció - csak akkor jelenik meg, ha a backend ad urgency_level-t
+const URGENCY_CONFIG: Record<string, { label: string; className: string }> = {
+  low: { label: 'Alacsony sürgősség', className: 'bg-green-50 text-green-700 border-green-200' },
+  medium: { label: 'Közepes sürgősség', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  high: { label: 'Magas sürgősség', className: 'bg-orange-50 text-orange-700 border-orange-200' },
+  critical: { label: 'Kritikus sürgősség', className: 'bg-red-50 text-red-700 border-red-200' },
+};
+
+// Csak http/https sémájú forrás-URL-t engedünk linkként renderelni
+// (javascript: és egyéb sémák ellen — a source.url API-ból érkezik).
+function isSafeHttpUrl(url: string): boolean {
+  try {
+    return ['http:', 'https:'].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+// Forrás típus → Material ikon leképezés (ResultPage/DemoResultPage konvenció)
+function getSourceIcon(type: string): string {
+  switch (type) {
+    case 'database':
+      return 'storage';
+    case 'tsb':
+      return 'description';
+    case 'forum':
+      return 'forum';
+    case 'video':
+      return 'play_circle';
+    case 'manual':
+      return 'menu_book';
+    default:
+      return 'source';
+  }
+}
+
 function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
   const toast = useToast();
   // Autó kép URL generálása
@@ -47,6 +83,14 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
 
   // Konfidencia százalék
   const confidencePercentage = Math.round(result.confidence_score * 100);
+
+  // Sürgősségi badge (csak ha a backend adott urgency_level-t)
+  const urgencyBadge = result.urgency_level
+    ? URGENCY_CONFIG[result.urgency_level.toLowerCase()] ?? {
+        label: result.urgency_level,
+        className: 'bg-slate-100 text-slate-700 border-slate-200',
+      }
+    : null;
 
   // Javítási lépések
   const repairSteps = result.recommended_repairs.length > 0
@@ -107,17 +151,18 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-bold uppercase tracking-wider mb-4">
               <MaterialIcon name="assignment" className="text-sm" />
-              Diagnosztikai Folyamat #{result.id?.slice(-4) || '4829'}
+              Diagnosztikai Folyamat{result.id ? ` #${result.id.slice(-4)}` : ''}
             </div>
             <h2 className="text-4xl font-bold tracking-tight text-slate-900 font-['Space_Grotesk',sans-serif]">Javítási javaslat</h2>
           </div>
-          <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm">
-            <div className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+          {urgencyBadge && (
+            <div
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-bold ${urgencyBadge.className}`}
+            >
+              <MaterialIcon name="priority_high" className="text-base" aria-hidden="true" />
+              {urgencyBadge.label}
             </div>
-            <span className="text-sm font-bold text-slate-700">Rendszer státusz: ONLINE</span>
-          </div>
+          )}
         </div>
 
         {/* Wizard Steps */}
@@ -248,6 +293,36 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               </div>
             )}
 
+            {/* Biztonsági figyelmeztetések - csak ha a backend adott safety_warnings-et */}
+            {result.safety_warnings && result.safety_warnings.length > 0 && (
+              <SectionErrorBoundary sectionName="Biztonsági figyelmeztetések">
+                <section aria-labelledby="safety-warnings-heading">
+                  <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-100">
+                        <MaterialIcon name="warning" className="text-xl text-red-600" aria-hidden="true" />
+                      </div>
+                      <h3 id="safety-warnings-heading" className="text-lg font-bold text-red-900">
+                        Biztonsági figyelmeztetések
+                      </h3>
+                    </div>
+                    <ul className="space-y-2.5">
+                      {result.safety_warnings.map((warning, idx) => (
+                        <li key={idx} className="flex items-start gap-2.5 text-sm text-red-800 leading-relaxed">
+                          <MaterialIcon
+                            name="priority_high"
+                            className="text-base text-red-600 flex-shrink-0 mt-0.5"
+                            aria-hidden="true"
+                          />
+                          <span>{warning}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+              </SectionErrorBoundary>
+            )}
+
             {/* AI Analysis Section */}
             <SectionErrorBoundary sectionName="AI elemzés">
             <section className="bg-[#0D1B2A] rounded-3xl p-8 lg:p-10 shadow-xl shadow-[#0D1B2A]/10 relative overflow-hidden text-white group">
@@ -262,10 +337,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                     </div>
                     <h3 className="text-xl font-bold tracking-tight">AI Diagnosztikai Elemzés</h3>
                   </div>
-                  <p className="text-white/90 leading-relaxed mb-6 text-lg font-light">
-                    A rendszer <span className="text-white font-bold decoration-blue-400 underline underline-offset-4 decoration-2">{primaryDTC} hibakódot</span> detektált, amely közvetlen összefüggésben áll a motorvezérlő (ECU) által észlelt főtengely-szöggyorsulás ingadozással.
-                  </p>
-                  <div className="text-sm text-slate-300 leading-relaxed space-y-4 border-t border-white/10 pt-4">
+                  <div className="text-white/90 leading-relaxed space-y-4 text-base font-light">
                     <p>{aiAnalysisDetails}</p>
                   </div>
                 </div>
@@ -274,6 +346,33 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
               </div>
             </section>
             </SectionErrorBoundary>
+
+            {/* Diagnosztikai lépések - csak ha a backend adott diagnostic_steps-et */}
+            {result.diagnostic_steps && result.diagnostic_steps.length > 0 && (
+              <SectionErrorBoundary sectionName="Diagnosztikai lépések">
+                <section aria-labelledby="diagnostic-steps-heading">
+                  <div className="flex items-center gap-4 mb-6">
+                    <h3 id="diagnostic-steps-heading" className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">
+                      Diagnosztikai lépések
+                    </h3>
+                    <div className="h-px flex-1 bg-slate-200"></div>
+                    <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+                      {result.diagnostic_steps.length} lépés
+                    </span>
+                  </div>
+                  <ol className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                    {result.diagnostic_steps.map((step, idx) => (
+                      <li key={idx} className="flex items-start gap-4 p-5">
+                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-50 text-blue-700 text-sm font-bold flex-shrink-0">
+                          {idx + 1}
+                        </span>
+                        <p className="text-sm text-slate-700 leading-relaxed pt-1">{step}</p>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              </SectionErrorBoundary>
+            )}
 
             {/* Repair Steps Section */}
             <SectionErrorBoundary sectionName="Javítási lépések">
@@ -492,6 +591,119 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
                   </div>
                 </div>
               </section>
+              </SectionErrorBoundary>
+            )}
+
+            {/* Hasonló NHTSA panaszok - csak ha a backend adott similar_complaints-et */}
+            {result.similar_complaints && result.similar_complaints.length > 0 && (
+              <SectionErrorBoundary sectionName="Hasonló panaszok">
+                <section aria-labelledby="similar-complaints-heading">
+                  <div className="flex items-center gap-4 mb-6">
+                    <h3 id="similar-complaints-heading" className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">
+                      Hasonló panaszok
+                    </h3>
+                    <div className="h-px flex-1 bg-slate-200"></div>
+                    <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+                      {result.similar_complaints.length} panasz
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {result.similar_complaints.map((complaint, idx) => (
+                      <div
+                        key={complaint.odi_number || idx}
+                        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm"
+                      >
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <span className="text-xs font-bold uppercase text-slate-600 tracking-wide">
+                            {complaint.components || 'Egyéb'}
+                          </span>
+                          {complaint.odi_number && (
+                            <span className="text-xs text-slate-600 font-mono">#{complaint.odi_number}</span>
+                          )}
+                          {complaint.crash && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-700">
+                              Baleset
+                            </span>
+                          )}
+                          {complaint.fire && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-orange-100 text-orange-700">
+                              Tűz
+                            </span>
+                          )}
+                          {complaint.similarity_score != null && (
+                            <span className="ml-auto text-xs font-bold text-blue-600">
+                              {Math.round(complaint.similarity_score * 100)}% egyezés
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">{complaint.summary}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </SectionErrorBoundary>
+            )}
+
+            {/* Felhasznált források - csak ha a backend adott sources-t */}
+            {result.sources && result.sources.length > 0 && (
+              <SectionErrorBoundary sectionName="Források">
+                <section aria-labelledby="sources-heading">
+                  <div className="flex items-center gap-4 mb-6">
+                    <h3 id="sources-heading" className="text-2xl font-bold text-slate-900 font-['Space_Grotesk',sans-serif]">
+                      Források
+                    </h3>
+                    <div className="h-px flex-1 bg-slate-200"></div>
+                    <span className="text-xs font-bold uppercase text-slate-500 tracking-wider">
+                      {result.sources.length} forrás
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {result.sources.map((source, idx) => (
+                      <div
+                        key={`${source.url ?? source.title}-${idx}`}
+                        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex items-start gap-3"
+                      >
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                          <MaterialIcon name={getSourceIcon(source.type)} className="text-base text-slate-500" aria-hidden="true" />
+                        </div>
+                        <div className="min-w-0">
+                          {source.url && isSafeHttpUrl(source.url) ? (
+                            <a
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-medium text-blue-600 hover:underline break-words rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            >
+                              {source.title}
+                              <span className="sr-only"> (új ablakban nyílik)</span>
+                            </a>
+                          ) : (
+                            <p className="text-sm font-medium text-slate-900 break-words">{source.title}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] uppercase font-bold text-slate-600 tracking-wider">{source.type}</span>
+                            {source.relevance_score != null && (
+                              <>
+                                <span className="text-[10px] text-slate-500">·</span>
+                                <span
+                                  className={`text-[10px] font-bold ${
+                                    source.relevance_score >= 0.8
+                                      ? 'text-green-700'
+                                      : source.relevance_score >= 0.5
+                                        ? 'text-amber-700'
+                                        : 'text-slate-500'
+                                  }`}
+                                >
+                                  {Math.round(source.relevance_score * 100)}% relevancia
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </SectionErrorBoundary>
             )}
           </div>
