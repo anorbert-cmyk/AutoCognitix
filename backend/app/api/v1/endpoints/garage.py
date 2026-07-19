@@ -52,7 +52,9 @@ async def _get_vehicle_or_404(
     if not vehicle:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "A jármű nem található vagy nincs jogosultságod hozzá."},
+            detail={
+                "error": {"message_hu": "A jármű nem található vagy nincs jogosultságod hozzá."}
+            },
         )
     return vehicle
 
@@ -140,13 +142,17 @@ async def list_vehicles(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a járművek listázásakor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -170,7 +176,9 @@ async def create_vehicle(
         if existing_total >= MAX_VEHICLES_PER_USER:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": f"Maximum {MAX_VEHICLES_PER_USER} jármű tárolható."},
+                detail={
+                    "error": {"message_hu": f"Maximum {MAX_VEHICLES_PER_USER} jármű tárolható."}
+                },
             )
         vehicle = await service.create_vehicle(
             db, str(current_user.id), data.model_dump(exclude_none=True)
@@ -193,13 +201,17 @@ async def create_vehicle(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a jármű létrehozásakor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -264,13 +276,17 @@ async def update_vehicle(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a jármű frissítésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -303,13 +319,17 @@ async def delete_vehicle(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a jármű törlésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -348,13 +368,17 @@ async def get_vehicle_health(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba az egészségi pontszám lekérdezésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -407,13 +431,17 @@ async def get_upcoming_reminders(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a közelgő emlékeztetők lekérdezésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -463,13 +491,17 @@ async def list_reminders(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba az emlékeztetők listázásakor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -506,13 +538,17 @@ async def create_reminder(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba az emlékeztető létrehozásakor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -536,7 +572,11 @@ async def complete_reminder(
         if not reminder:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Az emlékeztető nem található vagy nincs jogosultságod hozzá."},
+                detail={
+                    "error": {
+                        "message_hu": "Az emlékeztető nem található vagy nincs jogosultságod hozzá."
+                    }
+                },
             )
 
         logger.info(
@@ -554,13 +594,17 @@ async def complete_reminder(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba az emlékeztető teljesítésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -591,13 +635,17 @@ async def delete_reminder(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba az emlékeztető törlésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -645,13 +693,17 @@ async def list_costs(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a karbantartási költségek listázásakor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 
@@ -688,13 +740,17 @@ async def create_cost(
     except VehicleGarageServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": exc.message},
+            detail={"error": {"message_hu": exc.message}},
         ) from exc
     except Exception:
         logger.error("Váratlan hiba a karbantartási költség rögzítésekor", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"message": "Váratlan szerverhiba történt. Kérjük próbálja újra később."},
+            detail={
+                "error": {
+                    "message_hu": "Váratlan szerverhiba történt. Kérjük próbálja újra később."
+                }
+            },
         )
 
 

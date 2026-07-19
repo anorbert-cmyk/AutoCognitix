@@ -111,6 +111,9 @@ class HungarianEmbeddingService:
         self._model = None
         self._nlp = None  # Optional spacy.Language
         self._cache_enabled = True
+        # Guards lazy model loading so concurrent thread-pool workers never
+        # observe a half-initialized model (assigned but not yet .to()/.eval()).
+        self._model_load_lock = threading.Lock()
 
         if TORCH_AVAILABLE:
             self._device = self._detect_device()
@@ -206,46 +209,58 @@ class HungarianEmbeddingService:
         - Disabled gradient computation for inference
         - Model compiled with torch.compile on PyTorch 2.0+
         """
+        # Fast path: model already fully published, no lock needed.
         if self._model is not None and self._tokenizer is not None:
             return
 
-        logger.info(f"Loading huBERT model: {settings.HUBERT_MODEL}")
+        # Double-checked locking: serialize concurrent loaders so only one
+        # thread performs the load and others wait for it to finish.
+        with self._model_load_lock:
+            if self._model is not None and self._tokenizer is not None:
+                return
 
-        try:
-            # Load tokenizer with fast implementation
-            self._tokenizer = AutoTokenizer.from_pretrained(  # nosec B614 B615
-                settings.HUBERT_MODEL,
-                revision=settings.HUBERT_REVISION,
-                use_fast=True,  # Use fast tokenizer implementation
-            )
+            logger.info(f"Loading huBERT model: {settings.HUBERT_MODEL}")
 
-            # Load model with optimizations
-            self._model = AutoModel.from_pretrained(  # nosec B614 B615
-                settings.HUBERT_MODEL,
-                revision=settings.HUBERT_REVISION,
-                torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
-            )
-            if self._model is None:
-                raise RuntimeError("Failed to load huBERT model")
-            self._model.to(self._device)
-            self._model.eval()
+            try:
+                # Load tokenizer with fast implementation
+                tokenizer = AutoTokenizer.from_pretrained(  # nosec B614 B615
+                    settings.HUBERT_MODEL,
+                    revision=settings.HUBERT_REVISION,
+                    use_fast=True,  # Use fast tokenizer implementation
+                )
 
-            # Disable gradient computation for inference
-            for param in self._model.parameters():
-                param.requires_grad = False
+                # Load model with optimizations
+                model = AutoModel.from_pretrained(  # nosec B614 B615
+                    settings.HUBERT_MODEL,
+                    revision=settings.HUBERT_REVISION,
+                    torch_dtype=torch.float16 if self._use_fp16 else torch.float32,
+                )
+                if model is None:
+                    raise RuntimeError("Failed to load huBERT model")
+                model.to(self._device)
+                model.eval()
 
-            # Try to compile model for faster inference (PyTorch 2.0+)
-            if hasattr(torch, "compile") and self._device.type in ("cuda", "cpu"):
-                try:
-                    self._model = torch.compile(self._model, mode="reduce-overhead")
-                    logger.info("Model compiled with torch.compile")
-                except Exception as e:
-                    logger.debug(f"torch.compile not available: {e}")
+                # Disable gradient computation for inference
+                for param in model.parameters():
+                    param.requires_grad = False
 
-            logger.info(f"huBERT model loaded: dtype={self._model.dtype}, device={self._device}")
-        except Exception as e:
-            logger.error(f"Failed to load huBERT model: {e}")
-            raise RuntimeError(f"Could not load huBERT model: {e}") from e
+                # Try to compile model for faster inference (PyTorch 2.0+)
+                if hasattr(torch, "compile") and self._device.type in ("cuda", "cpu"):
+                    try:
+                        model = torch.compile(model, mode="reduce-overhead")
+                        logger.info("Model compiled with torch.compile")
+                    except Exception as e:
+                        logger.debug(f"torch.compile not available: {e}")
+
+                # Publish fully-initialized objects only after setup completes,
+                # so fast-path readers never see a partially built model.
+                self._tokenizer = tokenizer
+                self._model = model
+
+                logger.info(f"huBERT model loaded: dtype={model.dtype}, device={self._device}")
+            except Exception as e:
+                logger.error(f"Failed to load huBERT model: {e}")
+                raise RuntimeError(f"Could not load huBERT model: {e}") from e
 
     def _load_huspacy_model(self) -> None:
         """Load HuSpaCy model lazily."""
@@ -775,8 +790,14 @@ class HungarianEmbeddingService:
                     from app.db.redis_cache import get_cache_service
 
                     cache = await get_cache_service()
-                    for text, emb in zip(uncached_texts, embeddings):
-                        await cache.set_embedding(text, emb)
+                    # Fire the cache writes concurrently instead of one serial
+                    # round-trip per text (the client exposes no batched setter).
+                    await asyncio.gather(
+                        *(
+                            cache.set_embedding(text, emb)
+                            for text, emb in zip(uncached_texts, embeddings)
+                        )
+                    )
                 except Exception:
                     pass
 

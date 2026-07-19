@@ -3,7 +3,6 @@ Vehicle Garage Service — CRUD operations for user vehicles,
 maintenance reminders, and maintenance cost tracking.
 """
 
-import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -17,19 +16,6 @@ from app.db.postgres.models import MaintenanceCost, MaintenanceReminder, UserVeh
 
 logger = get_logger(__name__)
 
-REMINDER_TYPE_LABELS: Dict[str, str] = {
-    "oil_change": "Olajcsere",
-    "tire_rotation": "Gumicsere / Forgatás",
-    "mueszaki_vizsga": "Műszaki vizsga",
-    "kotelezo_biztositas": "Kötelező biztosítás megújítás",
-    "coolant": "Hűtőfolyadék csere",
-    "brake_fluid": "Fékfolyadék csere",
-    "timing_belt": "Vezérszíj csere",
-    "air_filter": "Légszűrő csere",
-    "brake_pads": "Fékbetét csere",
-    "custom": "Egyedi emlékeztető",
-}
-
 
 class VehicleGarageServiceError(Exception):
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
@@ -38,27 +24,10 @@ class VehicleGarageServiceError(Exception):
         super().__init__(self.message)
 
 
-_garage_service_lock = threading.Lock()
-
-
 class VehicleGarageService:
     """Service for managing user vehicle garage, reminders, and maintenance costs."""
 
-    _instance: Optional["VehicleGarageService"] = None
-    _initialized: bool = False
-
-    def __new__(cls) -> "VehicleGarageService":
-        if cls._instance is None:
-            with _garage_service_lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self) -> None:
-        if self._initialized:
-            return
-        self._initialized = True
         logger.info("VehicleGarageService inicializálva")
 
     # ─── UserVehicle CRUD ──────────────────────────────────────────────────────

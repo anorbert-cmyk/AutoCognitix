@@ -400,7 +400,9 @@ class NHTSAService:
             return cast("Dict[str, Any]", response.json())
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error from NHTSA: {e.response.status_code} - {e}")
+            logger.error(
+                f"HTTP error from NHTSA: {e.response.status_code} - {sanitize_log(str(e))}"
+            )
             raise NHTSAError(
                 f"HTTP error: {e.response.status_code}",
                 status_code=e.response.status_code,

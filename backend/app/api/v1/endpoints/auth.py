@@ -161,7 +161,7 @@ async def get_current_user_from_token(
         raise credentials_exception
 
     if not user:
-        logger.warning(f"User {user_id} not found")
+        logger.warning(f"User {sanitize_log(str(user_id))} not found")
         raise credentials_exception
 
     if not user.is_active:
@@ -521,7 +521,9 @@ async def login(
         await db.commit()
 
         if is_locked:
-            logger.warning(f"Account locked due to failed attempts: {form_data.username[:3]}***")
+            logger.warning(
+                f"Account locked due to failed attempts: {sanitize_log(form_data.username[:3])}***"
+            )
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail="Fiók zárolva túl sok sikertelen bejelentkezési kísérlet miatt. Próbálja újra később.",
@@ -902,10 +904,12 @@ async def change_password(
 
     logger.info(f"Password changed for user_id={sanitize_log(str(current_user.id))}")
 
-    # Invalidate the current access token so the session cannot be reused
-    # with the old password after a successful change.
-    if hasattr(current_user, "jti") and current_user.jti:
-        await blacklist_token(current_user.jti)
+    # NOTE: Pre-change access/refresh tokens are NOT invalidated here. The User
+    # model carries no jti, and blacklist_token() requires a full JWT (not a bare
+    # jti), so no per-token revocation is possible from this endpoint alone.
+    # Proper "log out all sessions on password change" requires a schema change
+    # (e.g. a token_version / password_changed_at column enforced in decode_token),
+    # which is out of scope for this file.
 
     return ResetPasswordResponse(message="A jelszó sikeresen megváltozott")
 

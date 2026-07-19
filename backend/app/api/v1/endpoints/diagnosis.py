@@ -661,7 +661,8 @@ async def quick_analyze(
     """
     try:
         async with DiagnosisService(db) as service:
-            # Validate DTC codes
+            # Validate and normalize DTC codes
+            normalized_codes = []
             for code in dtc_codes:
                 code = code.upper().strip()
                 if not (len(code) == 5 and code[0] in "PBCU" and code[1:].isdigit()):
@@ -669,10 +670,11 @@ async def quick_analyze(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid DTC code format: {code}",
                     )
+                normalized_codes.append(code)
 
             # Get DTC details from repository
             dtc_details = []
-            for code in dtc_codes:
+            for code in normalized_codes:
                 details = await service.dtc_repository.get_by_code(code)
                 if details:
                     dtc_details.append(
