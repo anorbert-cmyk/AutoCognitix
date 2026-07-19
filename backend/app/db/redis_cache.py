@@ -484,7 +484,9 @@ class RedisCacheService:
         limit: int,
     ) -> str:
         """Generate a consistent cache key for search queries."""
-        params = f"{query.lower()}:{category or 'all'}:{limit}"
+        # "v2" cache-key version: bump to cold-start the cache after a result-shape
+        # or index change so pre-fix cached results don't linger for the TTL window.
+        params = f"v2:{query.lower()}:{category or 'all'}:{limit}"
         hash_val = hashlib.sha256(params.encode()).hexdigest()[:12]
         return f"{CachePrefix.DTC_SEARCH}{hash_val}"
 

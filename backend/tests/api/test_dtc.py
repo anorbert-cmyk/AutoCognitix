@@ -10,8 +10,32 @@ Tests:
 - POST /api/v1/dtc/bulk - Bulk import DTC codes
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from httpx import AsyncClient
+
+from app.db.qdrant_client import QdrantService
+
+
+def _qdrant_with_mocked_search(hits: list) -> QdrantService:
+    """Build a real QdrantService whose only mocked seam is the low-level
+    ``search``.
+
+    This exercises the true ``search_dtc`` -> ``search_unified`` -> ``search``
+    routing (so the collection/type fix is under test) while returning canned
+    ``autocognitix``-style hits and opening no network connection.
+    """
+    service = QdrantService.__new__(QdrantService)  # bypass __init__ (no network)
+    service.search = AsyncMock(return_value=hits)  # type: ignore[method-assign]
+    return service
+
+
+def _embedding_service_stub() -> MagicMock:
+    """Stub embedding service returning a fixed 768-dim query vector."""
+    stub = MagicMock()
+    stub.embed_text_async = AsyncMock(return_value=[0.0] * 768)
+    return stub
 
 
 class TestDTCSearch:
@@ -200,6 +224,175 @@ class TestDTCSearch:
         )
 
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_enriches_unified_hits_from_postgres(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """REGRESSION (Qdrant collection drift): a Hungarian symptom query returns
+        real, PostgreSQL-enriched results and preserves the Qdrant relevance score.
+
+        The unified ``autocognitix`` DTC payload carries only ``{type, code,
+        description, category, subcategory}`` — so ``description_hu`` in the
+        response can ONLY come from the PostgreSQL enrichment, proving the
+        semantic hit was mapped to a full DTCSearchResult.
+        """
+        autocognitix_hit = {
+            "id": 1,
+            "score": 0.82,
+            "payload": {
+                "type": "dtc",
+                "code": "P0101",
+                "description": "Mass Air Flow Circuit Range/Performance",
+                "category": "powertrain",
+                "subcategory": "",
+            },
+        }
+        qdrant = _qdrant_with_mocked_search([autocognitix_hit])
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "motor rángatás", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        codes = [d["code"] for d in data]
+        assert "P0101" in codes
+
+        p0101 = next(d for d in data if d["code"] == "P0101")
+        # Enrichment proof: description_hu is NOT in the Qdrant payload.
+        assert p0101["description_hu"] == "Levegotomeg-mero aramkor tartomany/teljesitmeny hiba"
+        assert p0101["severity"] == "medium"
+        # Qdrant relevance score is preserved on the enriched result.
+        assert p0101["relevance_score"] == pytest.approx(0.82)
+
+        # The mocked seam confirms we hit the unified collection with type=dtc.
+        _, kwargs = qdrant.search.call_args
+        assert kwargs["collection_name"] == "autocognitix"
+        assert kwargs["filter_conditions"]["type"] == "dtc"
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_skips_codes_missing_in_postgres(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """Codes returned by Qdrant but absent from PostgreSQL are skipped, not
+        crashed on."""
+        hits = [
+            {
+                "id": 1,
+                "score": 0.95,
+                "payload": {"type": "dtc", "code": "P9999", "category": "powertrain"},
+            },
+            {
+                "id": 2,
+                "score": 0.80,
+                "payload": {"type": "dtc", "code": "P0101", "category": "powertrain"},
+            },
+        ]
+        qdrant = _qdrant_with_mocked_search(hits)
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "füst a kipufogóból", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        codes = [d["code"] for d in response.json()]
+        assert "P0101" in codes  # exists in PostgreSQL -> enriched
+        assert "P9999" not in codes  # missing in PostgreSQL -> skipped
+
+    @pytest.mark.asyncio
+    async def test_semantic_failure_falls_back_to_lexical_no_500(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """A Qdrant failure must not 500 the endpoint; it falls back to lexical
+        results already collected from PostgreSQL."""
+        qdrant = QdrantService.__new__(QdrantService)
+        qdrant.search = AsyncMock(side_effect=RuntimeError("Qdrant down"))  # type: ignore[method-assign]
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            # "Levegotomeg" matches P0101's Hungarian description via the lexical
+            # path; the semantic path runs (and fails) but must be swallowed.
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "Levegotomeg", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        codes = [d["code"] for d in response.json()]
+        assert "P0101" in codes
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_clamps_out_of_range_scores(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """Raw cosine similarity is in [-1, 1], but DTCSearchResult.relevance_score
+        is bounded to [0, 1]. An unclamped out-of-range hit would raise
+        ValidationError, get swallowed by the except, and silently degrade to a
+        lexical-only response (the drift bug reappearing). Both a negative and a
+        >1 hit must survive, clamped into range.
+        """
+        hits = [
+            {
+                "id": 1,
+                "score": -0.05,  # below the 0 lower bound
+                "payload": {"type": "dtc", "code": "P0101", "category": "powertrain"},
+            },
+            {
+                "id": 2,
+                "score": 1.0000001,  # just above the 1 upper bound (float noise)
+                "payload": {"type": "dtc", "code": "P0171", "category": "powertrain"},
+            },
+        ]
+        qdrant = _qdrant_with_mocked_search(hits)
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "motor rángatás", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        by_code = {d["code"]: d for d in data}
+
+        # Both codes survived — no ValidationError swallowed into a lexical-only fallback.
+        assert "P0101" in by_code
+        assert "P0171" in by_code
+
+        # Scores are clamped into the [0, 1] bound the schema requires.
+        assert by_code["P0101"]["relevance_score"] == 0.0
+        assert by_code["P0171"]["relevance_score"] == 1.0
+        for d in data:
+            assert 0.0 <= d["relevance_score"] <= 1.0
 
 
 class TestDTCCategories:
