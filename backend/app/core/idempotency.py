@@ -40,6 +40,38 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             return None
 
+    @staticmethod
+    async def _resolve_identity(request: Request) -> str:
+        """Resolve the authenticated user id for cache-key binding.
+
+        Reads the access token from the ``access_token`` cookie or the
+        ``Authorization: Bearer`` header, decodes it, and returns the user
+        id (``sub`` claim). Returns ``"anon"`` for any request without a
+        valid access token. This identity is folded into the hashed cache
+        key so a cached response can never be replayed across identities
+        (one user to another, or an authenticated response to an anonymous
+        caller and vice versa).
+        """
+        token: Optional[str] = request.cookies.get("access_token")
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[len("Bearer ") :].strip()
+        if not token:
+            return "anon"
+
+        try:
+            from app.core.security import decode_token
+
+            payload = await decode_token(token, expected_type="access")
+        except Exception:
+            return "anon"
+
+        if not payload:
+            return "anon"
+        sub = payload.get("sub")
+        return str(sub) if sub else "anon"
+
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Only apply to POST/PUT methods with a valid Idempotency-Key header
         idempotency_key: Optional[str] = request.headers.get("Idempotency-Key")
@@ -69,17 +101,20 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         except Exception:
             body_hash = "nobody"
 
-        # Bind the cache key to the caller's credentials so one user's cached
-        # response can never be replayed to a different user (or an
-        # unauthenticated caller) that reuses the same key/path/body.
-        # NOTE (follow-up): this middleware currently runs before auth, so it
-        # cannot see the resolved user id. Keying on the raw Authorization
-        # header is a defensive mitigation; a full fix requires reordering the
-        # middleware to run after authentication.
-        auth_identity = request.headers.get("Authorization", "")
+        # Bind the cache key to the *authenticated user identity* (not the raw
+        # Authorization header) so one user's cached response can never be
+        # replayed to a different user or an unauthenticated caller reusing the
+        # same key/path/body. Decoding the access token here (rather than
+        # hashing the bearer string) means the identity is stable across token
+        # rotation -- avoiding duplicate execution of mutating handlers -- and
+        # cookie-auth callers no longer collide on an empty string. Folding the
+        # identity into the hashed key guarantees keys never collide across
+        # identities, so a stored authenticated response cannot be served to an
+        # anonymous caller.
+        identity = await self._resolve_identity(request)
         cache_key = (
             f"idempotency:"
-            f"{hashlib.sha256(f'{auth_identity}:{idempotency_key}:{request.url.path}:{body_hash}'.encode()).hexdigest()}"
+            f"{hashlib.sha256(f'{identity}:{idempotency_key}:{request.url.path}:{body_hash}'.encode()).hexdigest()}"
         )
 
         # Check for cached response

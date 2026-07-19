@@ -30,6 +30,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_log
 from app.core.pii import redact_pii
 
 # Context variables for request correlation and distributed tracing
@@ -74,6 +75,43 @@ class ErrorContext:
     def update(cls, data: Dict[str, Any]) -> None:
         """Update context with multiple values."""
         cls._context.update(data)
+
+
+class LogInjectionFilter(logging.Filter):
+    """Central defense-in-depth filter against log injection (CWE-117).
+
+    Sanitizes ``record.msg`` and ``record.args`` on every log record so that
+    CR/LF and other control characters embedded in user-controlled data are
+    neutralized in one place, regardless of whether the call site remembered to
+    wrap the value in ``sanitize_log()``. This complements — it does not replace
+    — the existing manual ``sanitize_log()`` call sites.
+
+    The filter never raises: any failure returns ``True`` so that logging keeps
+    working even if a value cannot be sanitized.
+    """
+
+    # Only string payloads carry injectable control characters; leave numbers,
+    # bools, dicts (structured `extra` fields) and other types untouched so the
+    # JSON/structured output is unchanged.
+    def _sanitize(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return sanitize_log(value, max_length=len(value) + 32)
+        return value
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = self._sanitize(record.msg)
+
+            args = record.args
+            if isinstance(args, tuple):
+                record.args = tuple(self._sanitize(arg) for arg in args)
+            elif isinstance(args, dict):
+                record.args = {key: self._sanitize(val) for key, val in args.items()}
+        except Exception:
+            # Sanitization must never break logging.
+            return True
+        return True
 
 
 class StructuredJsonFormatter(jsonlogger.JsonFormatter):
@@ -662,6 +700,10 @@ def setup_logging() -> None:
         formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 
     console_handler.setFormatter(formatter)
+    # Central defense-in-depth log-injection sanitizer (CWE-117): sanitizes
+    # every record's message/args before formatting, complementing the manual
+    # sanitize_log() call sites.
+    console_handler.addFilter(LogInjectionFilter())
     root_logger.addHandler(console_handler)
 
     # Set specific logger levels from config
