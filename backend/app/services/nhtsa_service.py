@@ -739,22 +739,27 @@ class NHTSAService:
 # =============================================================================
 
 
+# Whether the shared NHTSA service caches via Redis. Internal detail (not a
+# request parameter); the singleton is built with this on first use.
+_USE_REDIS = False
 _service_instance: Optional[NHTSAService] = None
 
 
-async def get_nhtsa_service(use_redis: bool = False) -> NHTSAService:
+async def get_nhtsa_service() -> NHTSAService:
     """
-    Get or create NHTSA service instance.
+    Get or create the NHTSA service instance.
 
-    Args:
-        use_redis: Whether to use Redis for caching
+    Takes no parameters so it is safe to use directly as a FastAPI
+    dependency (``Depends(get_nhtsa_service)``) without exposing a
+    client-controllable query parameter. The Redis-cache backend is an
+    internal detail; flip ``_USE_REDIS`` if it should be enabled.
 
     Returns:
         NHTSAService instance
     """
     global _service_instance
     if _service_instance is None:
-        _service_instance = NHTSAService(use_redis=use_redis)
+        _service_instance = NHTSAService(use_redis=_USE_REDIS)
     return _service_instance
 
 

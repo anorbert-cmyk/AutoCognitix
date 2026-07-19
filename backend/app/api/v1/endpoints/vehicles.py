@@ -41,16 +41,6 @@ logger = get_logger(__name__)
 _VEHICLE_PARAM_RE = re.compile(r"^[a-zA-Z0-9\s\-\.]+$")
 
 
-async def _nhtsa_service_dependency() -> NHTSAService:
-    """Provide the NHTSA service without exposing `use_redis` as a query param.
-
-    Using ``get_nhtsa_service`` directly as a dependency would let FastAPI bind
-    its ``use_redis`` default to a client-controllable query parameter, which
-    would pin the process-wide singleton's cache backend on the first request.
-    """
-    return await get_nhtsa_service()
-
-
 def _validate_vehicle_param(value: str, max_len: int = 50) -> str:
     """Validate a vehicle make/model path parameter against SSRF and header injection."""
     if len(value) > max_len:
@@ -556,7 +546,7 @@ Uses the NHTSA vPIC API for decoding.
 )
 async def decode_vin(
     request: VINDecodeRequest,
-    nhtsa_service: NHTSAService = Depends(_nhtsa_service_dependency),
+    nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
 ) -> VINDecodeResponse:
     """
     Decode a VIN (Vehicle Identification Number) to get vehicle details.
@@ -678,7 +668,7 @@ async def get_vehicle_recalls(
     make: str = Path(..., description="Vehicle make (e.g., Toyota)"),
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
-    nhtsa_service: NHTSAService = Depends(_nhtsa_service_dependency),
+    nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
 ) -> List[Recall]:
     """
     Get recall information for a specific vehicle.
@@ -743,7 +733,7 @@ async def get_vehicle_complaints(
     make: str = Path(..., description="Vehicle make (e.g., Toyota)"),
     model: str = Path(..., description="Vehicle model (e.g., Camry)"),
     year: int = Path(..., ge=1900, le=2030, description="Model year"),
-    nhtsa_service: NHTSAService = Depends(_nhtsa_service_dependency),
+    nhtsa_service: NHTSAService = Depends(get_nhtsa_service),
 ) -> List[Complaint]:
     """
     Get complaint information for a specific vehicle.
