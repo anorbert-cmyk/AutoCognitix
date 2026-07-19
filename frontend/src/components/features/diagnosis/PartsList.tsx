@@ -6,6 +6,7 @@
 
 import { useMemo } from 'react';
 import { MaterialIcon } from '../../ui/MaterialIcon';
+import { formatCostRange } from '../../../services/diagnosisService';
 
 // =============================================================================
 // Types
@@ -54,18 +55,6 @@ export interface PartsListProps {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-function formatPrice(min: number, max: number, currency: string): string {
-  const formatter = new Intl.NumberFormat('hu-HU', {
-    style: 'currency',
-    currency: currency,
-    maximumFractionDigits: 0,
-  });
-  if (min === max) {
-    return formatter.format(min);
-  }
-  return `${formatter.format(min)} - ${formatter.format(max)}`;
-}
 
 function getStockStatusColor(inStock: boolean): string {
   return inStock
@@ -151,7 +140,7 @@ function PartCard({ part, vehicleInfo }: PartCardProps) {
         <div className="flex items-center justify-between mb-3">
           <div>
             <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block mb-0.5">Ár tartomány</span>
-            <span className="text-xl font-bold text-slate-900">{formatPrice(part.price_range_min, part.price_range_max, part.currency)}</span>
+            <span className="text-xl font-bold text-slate-900">{formatCostRange(part.price_range_min, part.price_range_max, part.currency)}</span>
           </div>
           <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${getStockStatusColor(hasStock)}`}>
             <MaterialIcon name={hasStock ? 'check_circle' : 'schedule'} className="text-sm" />
@@ -170,7 +159,7 @@ function PartCard({ part, vehicleInfo }: PartCardProps) {
                     {source.in_stock && <span className="w-2 h-2 rounded-full bg-green-500" title="Készleten" />}
                   </div>
                   <div className="text-right">
-                    <span className="font-semibold text-slate-900">{formatPrice(source.price_min, source.price_max, source.currency)}</span>
+                    <span className="font-semibold text-slate-900">{formatCostRange(source.price_min, source.price_max, source.currency)}</span>
                     {source.delivery_days && <span className="text-xs text-slate-500 ml-2">{source.delivery_days} nap</span>}
                   </div>
                 </div>

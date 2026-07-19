@@ -627,8 +627,13 @@ async def get_cache_service() -> RedisCacheService:
     """
     global _cache_service
     if _cache_service is None:
-        _cache_service = RedisCacheService()
-        await _cache_service.connect()
+        # Only cache the singleton after a successful connect. If connect()
+        # raises (Redis down), leave the global None so the next call retries
+        # instead of pinning a permanently-disconnected instance — which would
+        # make the JWT blacklist check silently fail OPEN.
+        service = RedisCacheService()
+        await service.connect()
+        _cache_service = service
     return _cache_service
 
 

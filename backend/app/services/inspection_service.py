@@ -14,6 +14,7 @@ Features:
 Author: AutoCognitix Team
 """
 
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.api.v1.schemas.inspection import (
@@ -343,8 +344,21 @@ class InspectionService:
                 seen_codes.add(upper_code)
                 unique_dtc_codes.append(upper_code)
 
+        # Fetch parts for all DTC codes in parallel (mirror diagnosis_service)
+        price_service = get_parts_price_service()
+        parts_tasks = [
+            price_service.get_parts_for_dtc(
+                dtc_code=dtc_code,
+                vehicle_make=request.vehicle_make,
+                vehicle_model=request.vehicle_model,
+                vehicle_year=request.vehicle_year,
+            )
+            for dtc_code in unique_dtc_codes
+        ]
+        parts_results = await asyncio.gather(*parts_tasks, return_exceptions=True)
+
         # Classify each DTC code
-        for dtc_code in unique_dtc_codes:
+        for dtc_code, parts_result in zip(unique_dtc_codes, parts_results):
             category, severity, issue = self._classify_dtc(dtc_code)
             affected_categories.add(category)
 
@@ -353,24 +367,19 @@ class InspectionService:
             cost_max = 0
             fix_recommendation = f"{issue} - szakszervizes vizsgálat szükséges"
 
-            try:
-                price_service = get_parts_price_service()
-                parts = await price_service.get_parts_for_dtc(
-                    dtc_code=dtc_code,
-                    vehicle_make=request.vehicle_make,
-                    vehicle_model=request.vehicle_model,
-                    vehicle_year=request.vehicle_year,
-                )
-                if parts:
-                    cost_min = sum(p.get("price_min", 0) for p in parts)
-                    cost_max = sum(p.get("price_max", 0) for p in parts)
-                    part_names = [p.get("name", "?") for p in parts[:3]]
-                    fix_recommendation = f"{issue} - javasolt alkatrészek: {', '.join(part_names)}"
-            except Exception as exc:
+            if isinstance(parts_result, BaseException):
+                # BaseException (not just Exception) so a CancelledError from a
+                # gather task is treated as "no parts" instead of falling to the
+                # elif and raising on iteration.
                 logger.warning(
-                    f"Alkatrész ár lekérés sikertelen: {sanitize_log(dtc_code)} - {sanitize_exception(exc)}",
+                    f"Alkatrész ár lekérés sikertelen: {sanitize_log(dtc_code)} - {sanitize_exception(parts_result)}",
                     extra={"dtc_code": sanitize_log(dtc_code)},
                 )
+            elif parts_result:
+                cost_min = sum(p.get("price_min", 0) for p in parts_result)
+                cost_max = sum(p.get("price_max", 0) for p in parts_result)
+                part_names = [p.get("name", "?") for p in parts_result[:3]]
+                fix_recommendation = f"{issue} - javasolt alkatrészek: {', '.join(part_names)}"
 
             failing_items.append(
                 FailingItem(

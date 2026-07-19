@@ -468,6 +468,7 @@ class RAGService:
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5,
+        preprocess: bool = True,
     ) -> List[RetrievedItem]:
         """
         Retrieve items from Qdrant vector store.
@@ -478,6 +479,9 @@ class RAGService:
             top_k: Number of results to return.
             filters: Optional filter conditions.
             score_threshold: Minimum similarity score.
+            preprocess: Run Hungarian NLP preprocessing before embedding.
+                Set to False when the caller has already preprocessed the query
+                to avoid a redundant spaCy pass.
 
         Returns:
             List of RetrievedItem from Qdrant.
@@ -492,7 +496,7 @@ class RAGService:
 
         # Generate embedding for query (async to avoid blocking event loop)
         try:
-            query_embedding = await embed_text_async(query, preprocess=True)
+            query_embedding = await embed_text_async(query, preprocess=preprocess)
         except (RuntimeError, Exception) as e:
             logger.warning(f"Embedding failed, falling back to keyword search: {e}")
             query_embedding = None
@@ -554,24 +558,42 @@ class RAGService:
             "symptoms": [],
         }
 
+        # Resolve cached codes first, then fetch uncached ones concurrently
+        # (each get_diagnostic_path issues Neo4j round-trips; gathering avoids
+        # multiplying Aura latency by the number of codes).
+        path_by_code: Dict[str, Any] = {}
+        uncached_codes: List[str] = []
         for code in dtc_codes:
-            # Check cache
             cached = self._cache.get("neo4j", code)
             if cached is not None:
-                path_data = cached
-            else:
-                try:
-                    path_data = await get_diagnostic_path(code)
-                    self._cache.set(path_data, "neo4j", code)
-                except Exception as e:
-                    logger.warning(f"Neo4j error for {code}: {e}")
-                    path_data = {}
+                path_by_code[code] = cached
+            elif code not in uncached_codes:
+                uncached_codes.append(code)
 
-            if path_data:
+        if uncached_codes:
+            fetched = await asyncio.gather(
+                *(get_diagnostic_path(code) for code in uncached_codes),
+                return_exceptions=True,
+            )
+            for code, path_data in zip(uncached_codes, fetched):
+                if isinstance(path_data, BaseException):
+                    logger.warning(f"Neo4j error for {code}: {path_data}")
+                    path_by_code[code] = {}
+                else:
+                    self._cache.set(path_data, "neo4j", code)
+                    path_by_code[code] = path_data
+
+        for code in dtc_codes:
+            # Use a fresh name (not path_data, whose first-loop binding is
+            # dict | BaseException from gather(return_exceptions=True)); values
+            # stored in path_by_code are always dicts, so this is Any/dict.
+            dtc_path = path_by_code.get(code, {})
+
+            if dtc_path:
                 # Create item for DTC
                 items.append(
                     RetrievedItem(
-                        content=path_data.get("dtc", {}),
+                        content=dtc_path.get("dtc", {}),
                         source=RetrievalSource.NEO4J_GRAPH,
                         score=1.0,  # High confidence for direct match
                         metadata={"code": code},
@@ -579,9 +601,9 @@ class RAGService:
                 )
 
                 # Combine graph data
-                combined_data["components"].extend(path_data.get("components", []))
-                combined_data["repairs"].extend(path_data.get("repairs", []))
-                combined_data["symptoms"].extend(path_data.get("symptoms", []))
+                combined_data["components"].extend(dtc_path.get("components", []))
+                combined_data["repairs"].extend(dtc_path.get("repairs", []))
+                combined_data["symptoms"].extend(dtc_path.get("symptoms", []))
 
         return items, combined_data
 
@@ -613,6 +635,20 @@ class RAGService:
 
         items = []
 
+        def _dtc_content(dtc: DTCCode) -> Dict[str, Any]:
+            """Build the shared content payload for a DTCCode row."""
+            return {
+                "code": dtc.code,
+                "description": dtc.description_hu or dtc.description_en,
+                "description_hu": dtc.description_hu,
+                "description_en": dtc.description_en,
+                "category": dtc.category,
+                "severity": dtc.severity,
+                "symptoms": dtc.symptoms,
+                "possible_causes": dtc.possible_causes,
+                "diagnostic_steps": dtc.diagnostic_steps,
+            }
+
         try:
             # Direct DTC code lookup
             if dtc_codes:
@@ -623,17 +659,7 @@ class RAGService:
                 for dtc in dtc_records:
                     items.append(
                         RetrievedItem(
-                            content={
-                                "code": dtc.code,
-                                "description": dtc.description_hu or dtc.description_en,
-                                "description_hu": dtc.description_hu,
-                                "description_en": dtc.description_en,
-                                "category": dtc.category,
-                                "severity": dtc.severity,
-                                "symptoms": dtc.symptoms,
-                                "possible_causes": dtc.possible_causes,
-                                "diagnostic_steps": dtc.diagnostic_steps,
-                            },
+                            content=_dtc_content(dtc),
                             source=RetrievalSource.POSTGRES_TEXT,
                             score=1.0,  # Direct match
                             metadata={"id": dtc.id},
@@ -667,17 +693,7 @@ class RAGService:
 
                     items.append(
                         RetrievedItem(
-                            content={
-                                "code": dtc.code,
-                                "description": dtc.description_hu or dtc.description_en,
-                                "description_hu": dtc.description_hu,
-                                "description_en": dtc.description_en,
-                                "category": dtc.category,
-                                "severity": dtc.severity,
-                                "symptoms": dtc.symptoms,
-                                "possible_causes": dtc.possible_causes,
-                                "diagnostic_steps": dtc.diagnostic_steps,
-                            },
+                            content=_dtc_content(dtc),
                             source=RetrievalSource.POSTGRES_TEXT,
                             score=0.7,  # Lower score for text match
                             metadata={"id": dtc.id},
@@ -772,18 +788,20 @@ class RAGService:
 
         # Parallel retrieval from all sources
         tasks = [
-            # Qdrant DTC search
+            # Qdrant DTC search (query already preprocessed above)
             self.retrieve_from_qdrant(
                 query=search_query,
                 collection=QdrantService.DTC_COLLECTION,
                 top_k=10,
+                preprocess=False,
             ),
-            # Qdrant symptom search
+            # Qdrant symptom search (query already preprocessed above)
             self.retrieve_from_qdrant(
                 query=preprocessed_symptoms or search_query,
                 collection=QdrantService.SYMPTOM_COLLECTION,
                 top_k=5,
                 filters={"vehicle_make": vehicle_info.make} if vehicle_info.make else None,
+                preprocess=False,
             ),
             # Neo4j graph retrieval
             self.retrieve_from_neo4j(dtc_codes),
@@ -1145,7 +1163,8 @@ class RAGService:
             model=vehicle_info.get("model", ""),
             year=vehicle_info.get("year", 0),
             vin=vehicle_info.get("vin"),
-            engine_code=vehicle_info.get("engine_code"),
+            # Accept both "engine_code" and the producer's "engine" key
+            engine_code=vehicle_info.get("engine_code") or vehicle_info.get("engine"),
             mileage_km=vehicle_info.get("mileage_km"),
         )
 

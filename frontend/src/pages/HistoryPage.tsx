@@ -23,6 +23,7 @@ import {
   useDiagnosisHistory,
   useDiagnosisStats,
 } from '@/services/hooks';
+import { formatDate } from '@/services/diagnosisService';
 
 type DiagnosisStatus = 'fixed' | 'in_progress' | 'pending';
 
@@ -114,15 +115,6 @@ export default function HistoryPage() {
     },
     [navigate]
   );
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('hu-HU', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
 
   return (
     <div className="min-h-screen bg-white text-slate-900">

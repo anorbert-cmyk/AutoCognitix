@@ -6,6 +6,7 @@
 
 import { useMemo } from 'react';
 import { MaterialIcon } from '../../ui/MaterialIcon';
+import { formatCostRange } from '../../../services/diagnosisService';
 
 // =============================================================================
 // Types
@@ -38,21 +39,6 @@ export interface CostEstimateProps {
 // =============================================================================
 // Helper Functions
 // =============================================================================
-
-function formatPrice(amount: number, currency: string): string {
-  return new Intl.NumberFormat('hu-HU', {
-    style: 'currency',
-    currency: currency,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function formatPriceRange(min: number, max: number, currency: string): string {
-  if (min === max) {
-    return formatPrice(min, currency);
-  }
-  return `${formatPrice(min, currency)} - ${formatPrice(max, currency)}`;
-}
 
 function getDifficultyConfig(difficulty: string): { label: string; color: string; icon: string } {
   switch (difficulty) {
@@ -150,7 +136,7 @@ export function CostEstimate({ estimate, className = '' }: CostEstimateProps) {
             \u00d6sszes k\u00f6lts\u00e9g
           </span>
           <span className="text-3xl md:text-4xl font-bold text-slate-900">
-            {formatPriceRange(estimate.total_cost_min, estimate.total_cost_max, estimate.currency)}
+            {formatCostRange(estimate.total_cost_min, estimate.total_cost_max, estimate.currency)}
           </span>
         </div>
 
@@ -185,7 +171,7 @@ export function CostEstimate({ estimate, className = '' }: CostEstimateProps) {
                 Alkatr\u00e9szek
               </span>
               <span className="text-lg font-bold text-slate-900">
-                {formatPriceRange(estimate.parts_cost_min, estimate.parts_cost_max, estimate.currency)}
+                {formatCostRange(estimate.parts_cost_min, estimate.parts_cost_max, estimate.currency)}
               </span>
             </div>
           </div>
@@ -202,7 +188,7 @@ export function CostEstimate({ estimate, className = '' }: CostEstimateProps) {
                 Munkad\u00edj (~{estimate.estimated_hours.toFixed(1)} \u00f3ra)
               </span>
               <span className="text-lg font-bold text-slate-900">
-                {formatPriceRange(estimate.labor_cost_min, estimate.labor_cost_max, estimate.currency)}
+                {formatCostRange(estimate.labor_cost_min, estimate.labor_cost_max, estimate.currency)}
               </span>
             </div>
           </div>

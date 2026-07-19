@@ -201,6 +201,9 @@ export function AnalysisProgress({
   // Bug 3: Ref for mock mode completion setTimeout
   const mockCompletionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Guard so the mock completion side effect is scheduled at most once
+  const mockCompletionScheduledRef = useRef(false);
+
   // Keep callback refs in sync with latest props
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -211,6 +214,15 @@ export function AnalysisProgress({
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  // Sync incoming `steps` prop into state so parent-driven updates are
+  // reflected (the useState initializer only runs on first mount, otherwise
+  // the UI could freeze at 0% when the parent updates the steps prop).
+  useEffect(() => {
+    if (initialSteps) {
+      setSteps(initialSteps);
+    }
+  }, [initialSteps]);
 
   // ---- Derived state ----
   const completedSteps = steps.filter((s) => s.status === 'completed').length;
@@ -421,21 +433,10 @@ export function AnalysisProgress({
             };
           }
 
-          // If all done, trigger complete
-          const newCompletedCount = newSteps.filter(
-            (s) => s.status === 'completed'
-          ).length;
-
-          if (newCompletedCount === newSteps.length) {
-            // Bug 3: Use refs to avoid stale closures; store timeout for cleanup
-            if (onCompleteRef.current) {
-              const cb = onCompleteRef.current;
-              mockCompletionTimeoutRef.current = setTimeout(() => cb(), 500);
-            } else if (diagnosisId) {
-              mockCompletionTimeoutRef.current = setTimeout(() => navigate(`/diagnosis/${diagnosisId}`), 500);
-            }
-          }
-
+          // NOTE: completion side effect (navigate/onComplete + timer) is
+          // handled in a dedicated effect below — scheduling it inside this
+          // updater would run twice under React StrictMode (updaters are
+          // double-invoked).
           return newSteps;
         }
 
@@ -455,6 +456,29 @@ export function AnalysisProgress({
       }
     };
   }, [isMockMode, diagnosisId, navigate]);
+
+  // Bug 3: Trigger mock-mode completion as a side effect (outside the setSteps
+  // updater) so React StrictMode's double-invocation of updaters cannot
+  // schedule the navigate/onComplete twice. Runs once when all steps complete.
+  useEffect(() => {
+    if (!isMockMode) return;
+    if (mockCompletionScheduledRef.current) return;
+
+    const allCompleted =
+      steps.length > 0 && steps.every((s) => s.status === 'completed');
+    if (!allCompleted) return;
+
+    mockCompletionScheduledRef.current = true;
+    if (onCompleteRef.current) {
+      const cb = onCompleteRef.current;
+      mockCompletionTimeoutRef.current = setTimeout(() => cb(), 500);
+    } else if (diagnosisId) {
+      mockCompletionTimeoutRef.current = setTimeout(
+        () => navigate(`/diagnosis/${diagnosisId}`),
+        500
+      );
+    }
+  }, [isMockMode, steps, diagnosisId, navigate]);
 
   // =========================================================================
   // Handlers

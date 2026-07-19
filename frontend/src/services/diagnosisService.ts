@@ -267,6 +267,10 @@ export async function quickAnalyze(dtcCodes: string[]): Promise<QuickAnalyzeResu
 
   const response = await api.post<QuickAnalyzeResult>('/diagnosis/quick-analyze', null, {
     params: { dtc_codes: normalizedCodes },
+    // FastAPI binds repeated `dtc_codes=...`; axios' default array serializer
+    // emits `dtc_codes[]=...` which the endpoint rejects with 422. `indexes: null`
+    // produces bracket-free repeated keys (`dtc_codes=P0300&dtc_codes=P0301`).
+    paramsSerializer: { indexes: null },
   })
 
   return response.data
@@ -441,6 +445,32 @@ export function streamDiagnosis(
         error: undefined, // Handled separately
       }
 
+      // Dispatch a batch of parsed SSE events. Returns true if an error event
+      // was encountered (caller must stop reading — onError has been invoked).
+      const dispatchEvents = (events: StreamingEvent[]): boolean => {
+        for (const event of events) {
+          // Handle progress callback
+          if (callbacks.onProgress && event.progress != null) {
+            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
+            callbacks.onProgress(event.progress, stepName)
+          }
+
+          // Handle error events specially
+          if (event.event_type === 'error') {
+            const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
+            callbacks.onError?.(new ApiError(errorMsg, 500, errorMsg))
+            return true
+          }
+
+          // Dispatch to typed callback
+          const handler = callbackMap[event.event_type]
+          if (handler) {
+            handler(event.data)
+          }
+        }
+        return false
+      }
+
       let streamDone = false
       while (!streamDone) {
         const { done, value } = await reader.read()
@@ -453,45 +483,16 @@ export function streamDiagnosis(
         const { events, remaining } = parseSSEEvents(buffer)
         buffer = remaining
 
-        for (const event of events) {
-          // Handle progress callback
-          if (callbacks.onProgress && event.progress != null) {
-            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
-            callbacks.onProgress(event.progress, stepName)
-          }
-
-          // Handle error events specially
-          if (event.event_type === 'error') {
-            const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
-            callbacks.onError?.(new ApiError(errorMsg, 500, errorMsg))
-            return
-          }
-
-          // Dispatch to typed callback
-          const handler = callbackMap[event.event_type]
-          if (handler) {
-            handler(event.data)
-          }
+        if (dispatchEvents(events)) {
+          return
         }
       }
 
       // Process any remaining buffer content
       if (buffer.trim()) {
         const { events } = parseSSEEvents(buffer + '\n\n')
-        for (const event of events) {
-          if (callbacks.onProgress && event.progress != null) {
-            const stepName = typeof event.event_type === 'string' ? event.event_type : undefined
-            callbacks.onProgress(event.progress, stepName)
-          }
-          if (event.event_type === 'error') {
-            const errorMsg = (event.data?.message as string) || 'Ismeretlen streaming hiba'
-            callbacks.onError?.(new ApiError(errorMsg, 500, errorMsg))
-            return
-          }
-          const handler = callbackMap[event.event_type]
-          if (handler) {
-            handler(event.data)
-          }
+        if (dispatchEvents(events)) {
+          return
         }
       }
     } catch (err: unknown) {

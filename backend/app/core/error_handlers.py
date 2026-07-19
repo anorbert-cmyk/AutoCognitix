@@ -8,6 +8,7 @@ This module provides:
 - Error logging with context
 """
 
+import re
 import traceback
 import uuid
 from collections.abc import Callable
@@ -44,12 +45,24 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
+# Client-supplied X-Request-ID is only accepted if it matches a bounded,
+# safe charset (alnum + dash), preventing log injection (CWE-117) and header
+# response splitting. Anything else falls back to a server-generated UUID.
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     """Middleware to add request context (ID, timing) to each request."""
 
     async def dispatch(self, request: Request, call_next: Callable):
-        # Generate or extract request ID
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        # Generate or extract request ID. Only trust a client-supplied value
+        # if it is a bounded alnum/dash token; otherwise generate a UUID so
+        # untrusted content can never reach logs or the response header.
+        client_request_id = request.headers.get("X-Request-ID")
+        if client_request_id and _REQUEST_ID_PATTERN.match(client_request_id):
+            request_id = client_request_id
+        else:
+            request_id = str(uuid.uuid4())
 
         # Store request ID in state for access in handlers
         request.state.request_id = request_id

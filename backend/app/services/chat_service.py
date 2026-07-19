@@ -167,9 +167,11 @@ class ChatService:
                     "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 }
                 # Store fallback response in conversation history
-                self._conversations[conversation_id].append(
-                    {"role": "assistant", "content": fallback_content}
-                )
+                async with self._lock:
+                    if conversation_id in self._conversations:
+                        self._conversations[conversation_id].append(
+                            {"role": "assistant", "content": fallback_content}
+                        )
             else:
                 llm = get_llm_provider()
                 full_response = ""
@@ -191,15 +193,17 @@ class ChatService:
                         }
 
                 # Store assistant response in conversation history
-                self._conversations[conversation_id].append(
-                    {"role": "assistant", "content": full_response}
-                )
+                async with self._lock:
+                    if conversation_id in self._conversations:
+                        self._conversations[conversation_id].append(
+                            {"role": "assistant", "content": full_response}
+                        )
 
-                # Trim conversation history to last 10 messages
-                if len(self._conversations[conversation_id]) > 10:
-                    self._conversations[conversation_id] = self._conversations[conversation_id][
-                        -10:
-                    ]
+                        # Trim conversation history to last 10 messages
+                        if len(self._conversations[conversation_id]) > 10:
+                            self._conversations[conversation_id] = self._conversations[
+                                conversation_id
+                            ][-10:]
 
             # Yield source events
             sources = await self._get_sources(vehicle_context)
@@ -288,15 +292,24 @@ class ChatService:
     async def _fetch_rag_context(self, dtc_codes: List[str]) -> Optional[str]:
         """Fetch DTC context from RAG service for the given codes."""
         try:
+            from app.db.qdrant_client import QdrantService
             from app.services.rag_service import get_rag_service
 
             rag_service = get_rag_service()
-            context_lines: List[str] = []
+            codes = dtc_codes[:5]  # Limit to 5 codes
 
-            for code in dtc_codes[:5]:  # Limit to 5 codes
-                results = await rag_service.retrieve_from_qdrant(
-                    query=code, collection="dtc_codes", top_k=3
+            # Retrieve per-code context concurrently to avoid serial latency
+            results_per_code = await asyncio.gather(
+                *(
+                    rag_service.retrieve_from_qdrant(
+                        query=code, collection=QdrantService.DTC_COLLECTION, top_k=3
+                    )
+                    for code in codes
                 )
+            )
+
+            context_lines: List[str] = []
+            for code, results in zip(codes, results_per_code):
                 if results:
                     summaries = [
                         str(r.content.get("description", r.content)) for r in results if r.content

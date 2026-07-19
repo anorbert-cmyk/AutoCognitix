@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 # Password hashing context with bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Clock-skew leeway (seconds) applied when decoding tokens. A blacklisted
+# token stays acceptable to decode_token until exp + leeway, so blacklist
+# entries must live at least this long past exp to close the replay window.
+JWT_DECODE_LEEWAY = 10
+
 
 def create_access_token(
     subject: Union[str, Any],
@@ -176,7 +181,7 @@ async def decode_token(token: str, expected_type: str = "access") -> Optional[Di
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
-            leeway=10,
+            leeway=JWT_DECODE_LEEWAY,
         )
 
         # Validate token type to prevent type confusion attacks
@@ -222,11 +227,14 @@ async def blacklist_token(token: str) -> bool:
             logger.warning("Token missing JTI claim - cannot blacklist")
             return False
 
-        # Calculate TTL based on token expiration
+        # Calculate TTL based on token expiration, extended by the decode
+        # leeway. decode_token accepts tokens up to JWT_DECODE_LEEWAY seconds
+        # past exp, so the blacklist entry must outlive that window; otherwise
+        # a revoked token is replayable in [exp, exp + leeway].
         exp = payload.get("exp", 0)
-        ttl = max(0, exp - int(datetime.now(timezone.utc).timestamp()))
+        ttl = exp + JWT_DECODE_LEEWAY - int(datetime.now(timezone.utc).timestamp())
 
-        # Only store if token hasn't expired yet
+        # Only store if the token can still be accepted (within exp + leeway)
         if ttl > 0:
             try:
                 from app.db.redis_cache import get_cache_service

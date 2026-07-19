@@ -4,7 +4,6 @@ Main FastAPI Application Entry Point
 """
 
 from collections.abc import AsyncGenerator
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -123,7 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Qdrant health check - verify connectivity and report collection count
     try:
-        collections = await asyncio.to_thread(qdrant_client.client.get_collections)
+        collections = await qdrant_client.client.get_collections()
         logger.info(f"Qdrant connected: {len(collections.collections)} collections")
     except Exception as e:
         logger.warning(f"Qdrant health check failed (non-fatal): {e}")
@@ -328,25 +327,6 @@ For API support, visit the [project repository](https://github.com/autocognitix)
     # Request logging middleware (must be added before CORS)
     application.add_middleware(RequestLoggingMiddleware)
 
-    # CORS middleware - Restricted to specific methods and headers for security
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.BACKEND_CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=[
-            "Authorization",
-            "Content-Type",
-            "Accept",
-            "Origin",
-            "X-Requested-With",
-            "X-Request-ID",
-            "X-CSRF-Token",
-            "Idempotency-Key",
-        ],
-        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Idempotent-Replayed"],
-    )
-
     # Security headers middleware - protect against common web vulnerabilities
     @application.middleware("http")
     async def add_security_headers(request: Request, call_next):
@@ -388,8 +368,31 @@ For API support, visit the [project repository](https://github.com/autocognitix)
         ],
     )
 
-    # Max request body size middleware (outermost - rejects oversized requests early)
+    # Max request body size middleware (rejects oversized requests early)
     application.add_middleware(MaxBodySizeMiddleware)
+
+    # CORS middleware - Restricted to specific methods and headers for security.
+    # Added last so it is the OUTERMOST middleware: its Access-Control-Allow-Origin
+    # headers wrap every response, including the CSRF 403 and MaxBodySize 413
+    # rejections above, so cross-origin clients see a real error instead of an
+    # opaque CORS failure.
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-Requested-With",
+            "X-Request-ID",
+            "X-CSRF-Token",
+            "Idempotency-Key",
+        ],
+        expose_headers=["X-Request-ID", "X-Correlation-ID", "X-Idempotent-Replayed"],
+    )
 
     # Setup exception handlers
     setup_all_exception_handlers(application)

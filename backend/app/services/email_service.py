@@ -19,37 +19,17 @@ Author: AutoCognitix Team
 import asyncio
 import html
 import logging
-import re
 from typing import Optional
 
 import httpx
 
 from app.core.config import settings
 
+# Use the shared, mandated log-sanitization helper (CWE-117 defense) instead of
+# a divergent hand-rolled copy. Aliased to keep existing call sites unchanged.
+from app.core.log_sanitizer import sanitize_log as _sanitize_log
+
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_log(value: str) -> str:
-    """Sanitize a user-provided value before including it in a log message.
-
-    Removes control characters (newlines, carriage returns, tabs, and other
-    non-printable ASCII) to prevent log injection attacks where an attacker
-    could forge additional log entries by embedding newline sequences in
-    user-controlled input. Truncates overly long values to avoid log flooding.
-    """
-    # Safely convert to string
-    s = str(value)
-    # Explicitly remove newlines and carriage returns to prevent log entry splitting
-    s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
-    # Remove any remaining non-printable ASCII control characters
-    s = re.sub(r"[\x00-\x1f\x7f]", "", s)
-    # Collapse multiple whitespace characters and trim
-    s = re.sub(r"\s+", " ", s).strip()
-    # Truncate to a reasonable length to prevent log flooding
-    max_len = 200
-    if len(s) > max_len:
-        s = s[:max_len] + "...[truncated]"
-    return s if s else "<empty>"
 
 
 # =============================================================================
@@ -217,6 +197,18 @@ class EmailService:
         self._from_email = getattr(settings, "EMAIL_FROM", "noreply@autocognitix.com")
         self._n8n_webhook_url = getattr(settings, "N8N_WEBHOOK_URL", None)
 
+        # EMAIL_DEMO_MODE defaults to True and appears in no .env template, so a
+        # production deploy that only configures RESEND_API_KEY (per .env.example)
+        # would silently log emails instead of sending them. When a real transport
+        # is configured and the operator did NOT explicitly opt into demo mode,
+        # default to sending. Explicit EMAIL_DEMO_MODE=true still forces demo.
+        if (
+            self._demo_mode
+            and getattr(settings, "RESEND_API_KEY", None)
+            and "EMAIL_DEMO_MODE" not in getattr(settings, "model_fields_set", set())
+        ):
+            self._demo_mode = False
+
         if self._n8n_webhook_url:
             logger.info(f"EmailService: n8n webhook mód — {self._n8n_webhook_url}")
             self._demo_mode = False
@@ -352,9 +344,19 @@ Ha nem te kérted, hagyd figyelmen kívül.
 AutoCognitix csapat
 """
 
-        return await self._send(to_email, subject, html_body, text_body)
+        # Password reset is transactional and carries the reset link in the body;
+        # it must NOT be rerouted through the n8n newsletter webhook (which only
+        # sends 'confirm'/'welcome' template emails and would drop the token).
+        return await self._send(to_email, subject, html_body, text_body, allow_n8n=False)
 
-    async def _send(self, to: str, subject: str, html_body: str, text: str) -> bool:
+    async def _send(
+        self,
+        to: str,
+        subject: str,
+        html_body: str,
+        text: str,
+        allow_n8n: bool = True,
+    ) -> bool:
         """Send email. Falls back to logging if SMTP not configured.
 
         This is a convenience wrapper that delegates to :meth:`_send_email`.
@@ -383,6 +385,7 @@ AutoCognitix csapat
                 subject=subject,
                 text_content=text,
                 html_content=html_body,
+                allow_n8n=allow_n8n,
             )
 
         # Real SMTP implementation (used when SMTP_HOST is configured)
@@ -528,6 +531,7 @@ AutoCognitix csapat
         subject: str,
         text_content: str,
         html_content: Optional[str] = None,
+        allow_n8n: bool = True,
     ) -> bool:
         """
         Internal email sending implementation.
@@ -539,12 +543,15 @@ AutoCognitix csapat
             subject: Subject
             text_content: Plain text content
             html_content: HTML content (optional)
+            allow_n8n: Route via the n8n newsletter webhook when configured.
+                Set False for transactional emails (e.g. password reset) whose
+                body-embedded links would be dropped by the newsletter template.
 
         Returns:
             True if successful
         """
         # Try n8n webhook first (for newsletter/confirm emails)
-        if self._n8n_webhook_url:
+        if self._n8n_webhook_url and allow_n8n:
             # Detect email type from subject
             email_type = "confirm"
             language = "hu"
