@@ -201,11 +201,9 @@ class TestRedisRateLimiter:
     @pytest.mark.asyncio
     async def test_redis_successful_under_limit(self, redis_limiter):
         """When Redis works and under limit, request is allowed."""
-        mock_redis = MagicMock()  # pipeline() is sync
-        mock_pipe = MagicMock()
-        # pipeline methods (zremrangebyscore, zcard, zadd, expire) are sync on the pipeline object
-        mock_pipe.execute = AsyncMock(return_value=[None, 3, None, None])  # zcard=3
-        mock_redis.pipeline.return_value = mock_pipe
+        mock_redis = MagicMock()
+        # Atomic Lua returns {allowed, count_before_add, oldest_score}.
+        mock_redis.eval = AsyncMock(return_value=[1, 3, b"0"])  # allowed, count=3
 
         redis_limiter._redis = mock_redis
 
@@ -218,11 +216,8 @@ class TestRedisRateLimiter:
     async def test_redis_over_limit(self, redis_limiter):
         """When at or over limit, request is denied."""
         mock_redis = MagicMock()
-        mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[None, 10, None, None])  # zcard=10, limit=10
-        mock_redis.pipeline.return_value = mock_pipe
-        # oldest entry score
-        mock_redis.zrange = AsyncMock(return_value=[("ts", time.time() - 30)])
+        # denied: {0, count=10, oldest_score} — oldest is ~30s ago so retry > 0
+        mock_redis.eval = AsyncMock(return_value=[0, 10, str(time.time() - 30).encode()])
 
         redis_limiter._redis = mock_redis
 
@@ -235,10 +230,8 @@ class TestRedisRateLimiter:
     async def test_redis_over_limit_no_oldest(self, redis_limiter):
         """When over limit and no oldest entry, retry_after = window."""
         mock_redis = MagicMock()
-        mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[None, 10, None, None])
-        mock_redis.pipeline.return_value = mock_pipe
-        mock_redis.zrange = AsyncMock(return_value=[])
+        # denied with oldest_score "0" (empty set) -> retry_after falls back to window
+        mock_redis.eval = AsyncMock(return_value=[0, 10, b"0"])
 
         redis_limiter._redis = mock_redis
 
@@ -251,7 +244,7 @@ class TestRedisRateLimiter:
         """A pipeline/runtime error drops the connection, schedules a retry and
         raises RedisUnavailableError so the middleware falls back to memory."""
         mock_redis = MagicMock()
-        mock_redis.pipeline.side_effect = RuntimeError("pipe broken")
+        mock_redis.eval = AsyncMock(side_effect=RuntimeError("eval broken"))
 
         redis_limiter._redis = mock_redis
 

@@ -131,6 +131,26 @@ class RedisRateLimiter:
     # the in-memory limiter (see RateLimitMiddleware.dispatch).
     _RETRY_COOLDOWN_SECONDS = 30
 
+    # Atomic sliding-window limiter. KEYS[1]=zset key, ARGV=[now, window, limit].
+    # Prunes expired entries, counts, and adds the request only when under the
+    # limit — one round-trip so concurrent requests can't over-admit. Returns
+    # {allowed(0/1), count_before_add, oldest_score_or_0}.
+    _SLIDING_WINDOW_LUA = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+local count = redis.call('ZCARD', key)
+if count >= limit then
+    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+    return {0, count, oldest[2] or '0'}
+end
+redis.call('ZADD', key, now, ARGV[1])
+redis.call('EXPIRE', key, window + 1)
+return {1, count, '0'}
+"""
+
     def __init__(self) -> None:
         self._redis: Optional[Any] = None
         self._retry_at: float = 0.0
@@ -195,40 +215,39 @@ class RedisRateLimiter:
             raise RedisUnavailableError("Redis unavailable for rate limiting")
 
         now = time.time()
-        window_start = now - window_seconds
         redis_key = f"rate_limit:{key}"
 
         try:
-            # First pass: prune the window and count existing entries WITHOUT
-            # recording this request yet. Recording before the limit check let
-            # denied requests consume quota, so a client retrying at/above the
-            # rate kept the window full and stayed locked out indefinitely.
-            pipe = redis_client.pipeline()
+            # Atomic sliding-window check-and-add in a single round-trip: prune
+            # the window, count existing entries, and record THIS request only
+            # when it is under the limit — all inside one Lua script. Splitting
+            # the count and the add into two commands let concurrent requests
+            # each read an under-limit count and then all add, transiently
+            # over-admitting past the limit; the script closes that race.
+            # Denied requests are never added, so a client retrying at/above the
+            # rate cannot keep the window permanently full (the old lockout bug).
+            result = await redis_client.eval(
+                self._SLIDING_WINDOW_LUA,
+                1,
+                redis_key,
+                repr(now),
+                str(window_seconds),
+                str(limit),
+            )
+            allowed = bool(result[0])
+            current_count = int(result[1])
 
-            # Remove old entries
-            pipe.zremrangebyscore(redis_key, "-inf", window_start)
-
-            # Count current entries (before adding this request)
-            pipe.zcard(redis_key)
-
-            results = await pipe.execute()
-            current_count = results[1]
-
-            if current_count >= limit:
-                # Deny without adding this request to the window, so rejected
-                # attempts do not keep the ZSET above the limit forever.
-                oldest = await redis_client.zrange(redis_key, 0, 0, withscores=True)
-                if oldest:
-                    retry_after = int(oldest[0][1] + window_seconds - now) + 1
-                else:
+            if not allowed:
+                oldest_score = result[2]
+                if isinstance(oldest_score, bytes):
+                    oldest_score = oldest_score.decode()
+                try:
+                    retry_after = int(float(oldest_score) + window_seconds - now) + 1
+                except (TypeError, ValueError):
+                    retry_after = window_seconds
+                if retry_after <= 0:
                     retry_after = window_seconds
                 return False, 0, retry_after
-
-            # Allowed: now record this request and refresh the TTL.
-            pipe = redis_client.pipeline()
-            pipe.zadd(redis_key, {str(now): now})
-            pipe.expire(redis_key, window_seconds + 1)
-            await pipe.execute()
 
             remaining = limit - current_count - 1
             return True, max(0, remaining), 0
