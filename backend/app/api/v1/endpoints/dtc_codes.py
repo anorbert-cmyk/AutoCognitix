@@ -14,6 +14,7 @@ Performance optimizations:
 - Response compression via middleware
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Union
 
@@ -396,7 +397,6 @@ Supports multiple search modes:
 async def search_dtc_codes(
     q: str = Query(..., min_length=1, description="Search query (code or description)"),
     category: Optional[DTCCategory] = Query(None, description="Filter by category"),
-    make: Optional[str] = Query(None, description="Filter by vehicle make"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results to return"),
     use_semantic: bool = Query(True, description="Use semantic search (slower but better)"),
     skip_cache: bool = Query(False, description="Skip cache lookup"),
@@ -419,7 +419,6 @@ async def search_dtc_codes(
     Args:
         q: Search query
         category: Optional category filter (powertrain, body, chassis, network)
-        make: Optional vehicle make filter for manufacturer-specific codes
         limit: Maximum number of results
         use_semantic: Whether to use semantic search (default: True)
         skip_cache: Skip cache lookup (default: False)
@@ -733,20 +732,26 @@ async def get_related_codes(
 
     # Get related codes from Neo4j graph
     try:
-        from app.db.neo4j_models import DTCNode
 
-        dtc_node = DTCNode.nodes.get_or_none(code=code)
-        if dtc_node:
-            # Get directly related codes
-            for related_node in dtc_node.related_to.all():
-                if related_node.code not in existing_codes:
-                    # Fetch from PostgreSQL for full details
-                    related_dtc = await repository.get_by_code(related_node.code)
-                    if related_dtc:
-                        results.append(
-                            _dtc_model_to_search_result(related_dtc, relevance_score=0.85)
-                        )
-                        existing_codes.add(related_node.code)
+        def _fetch_neo4j_related_codes() -> List[str]:
+            """Blocking Neomodel lookup; run off the event loop via to_thread."""
+            from app.db.neo4j_models import DTCNode
+
+            dtc_node = DTCNode.nodes.get_or_none(code=code)
+            if not dtc_node:
+                return []
+            return [related_node.code for related_node in dtc_node.related_to.all()]
+
+        neo4j_related_codes = await asyncio.to_thread(_fetch_neo4j_related_codes)
+
+        # Batch fetch full details from PostgreSQL in a single query (avoid N+1)
+        codes_to_fetch = [c for c in neo4j_related_codes if c not in existing_codes]
+        if codes_to_fetch:
+            related_dtcs = await repository.get_by_codes(codes_to_fetch)
+            for related_dtc in related_dtcs:
+                if related_dtc.code not in existing_codes:
+                    results.append(_dtc_model_to_search_result(related_dtc, relevance_score=0.85))
+                    existing_codes.add(related_dtc.code)
     except Exception as e:
         logger.warning(f"Error fetching Neo4j related codes: {sanitize_log(str(e))}")
 

@@ -64,12 +64,19 @@ export class ApiError extends Error {
     const { status } = error.response
     const data = error.response.data as Record<string, unknown> | undefined
 
-    // Structured error format: { detail: { error: { code, message, message_hu, details } } }
+    // Structured error format: backend's build_error_response emits the payload at
+    // the top level ({ error: { code, message, message_hu, details } }); some legacy
+    // handlers nest the same shape under `detail`. Prefer top-level, fall back to detail.
+    const topLevelError = data?.error
     const structured = data?.detail as Record<string, unknown> | undefined
-    const errorObj = (
+    const nestedError =
       structured !== null && typeof structured === 'object' && !Array.isArray(structured)
         ? structured?.error
         : undefined
+    const errorObj = (
+      topLevelError !== null && typeof topLevelError === 'object' && !Array.isArray(topLevelError)
+        ? topLevelError
+        : nestedError
     ) as Record<string, unknown> | undefined
 
     // code and field: check errorObj first, then top-level data
@@ -445,15 +452,19 @@ export interface Recall {
 }
 
 export interface Complaint {
-  odiNumber: string
+  odinumber?: string
+  manufacturer: string
+  make: string
+  model: string
+  model_year: number
   crash: boolean
   fire: boolean
-  numberOfInjuries: number
-  numberOfDeaths: number
-  dateOfIncident?: string
-  dateComplaintFiled?: string
-  components: string[]
-  summary: string
+  injuries: number
+  deaths: number
+  complaint_date?: string
+  date_of_incident?: string
+  components?: string
+  summary?: string
 }
 
 // =============================================================================

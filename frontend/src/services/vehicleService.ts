@@ -6,6 +6,7 @@
 import api, {
   ApiError,
   Complaint,
+  PaginatedResponse,
   Recall,
   VehicleMake,
   VehicleModel,
@@ -88,11 +89,11 @@ export function validateVIN(vin: string): string | null {
  * @throws ApiError on request failure
  */
 export async function getVehicleMakes(search?: string): Promise<VehicleMake[]> {
-  const response = await api.get<VehicleMake[]>('/vehicles/makes', {
+  const response = await api.get<PaginatedResponse<VehicleMake>>('/vehicles/makes', {
     params: search ? { search: search.trim() } : undefined,
   })
 
-  return response.data
+  return response.data.items
 }
 
 /**
@@ -107,11 +108,11 @@ export async function getVehicleModels(makeId: string, year?: number): Promise<V
     return []
   }
 
-  const response = await api.get<VehicleModel[]>(`/vehicles/models/${makeId}`, {
-    params: year ? { year } : undefined,
+  const response = await api.get<PaginatedResponse<VehicleModel>>('/vehicles/models', {
+    params: { make: makeId.trim(), ...(year ? { year } : {}) },
   })
 
-  return response.data
+  return response.data.items
 }
 
 /**

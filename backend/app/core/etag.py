@@ -215,7 +215,9 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
                     response.headers["Cache-Control"] = cache_control
                     break
             else:
-                # Default: short cache for API responses
-                response.headers["Cache-Control"] = "public, max-age=60"
+                # Default: treat unlisted endpoints as private, per-user data
+                # (e.g. /api/v1/garage/*). Never mark them publicly cacheable —
+                # a shared cache/CDN could serve one user's data to another.
+                response.headers["Cache-Control"] = "private, no-store"
 
         return response

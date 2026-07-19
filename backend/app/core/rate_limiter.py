@@ -199,32 +199,36 @@ class RedisRateLimiter:
         redis_key = f"rate_limit:{key}"
 
         try:
-            # Use pipeline for atomicity
+            # First pass: prune the window and count existing entries WITHOUT
+            # recording this request yet. Recording before the limit check let
+            # denied requests consume quota, so a client retrying at/above the
+            # rate kept the window full and stayed locked out indefinitely.
             pipe = redis_client.pipeline()
 
             # Remove old entries
             pipe.zremrangebyscore(redis_key, "-inf", window_start)
 
-            # Count current entries
+            # Count current entries (before adding this request)
             pipe.zcard(redis_key)
-
-            # Add current request with timestamp as score
-            pipe.zadd(redis_key, {str(now): now})
-
-            # Set TTL on the key
-            pipe.expire(redis_key, window_seconds + 1)
 
             results = await pipe.execute()
             current_count = results[1]
 
             if current_count >= limit:
-                # Get oldest entry to calculate retry time
+                # Deny without adding this request to the window, so rejected
+                # attempts do not keep the ZSET above the limit forever.
                 oldest = await redis_client.zrange(redis_key, 0, 0, withscores=True)
                 if oldest:
                     retry_after = int(oldest[0][1] + window_seconds - now) + 1
                 else:
                     retry_after = window_seconds
                 return False, 0, retry_after
+
+            # Allowed: now record this request and refresh the TTL.
+            pipe = redis_client.pipeline()
+            pipe.zadd(redis_key, {str(now): now})
+            pipe.expire(redis_key, window_seconds + 1)
+            await pipe.execute()
 
             remaining = limit - current_count - 1
             return True, max(0, remaining), 0
@@ -293,10 +297,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             idx = max(0, len(ips) - trusted_count)
             return str(ips[idx])
 
-        # Check X-Real-IP header
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return str(real_ip)
+        # Check X-Real-IP header, but only trust it when a reverse proxy is
+        # actually configured (TRUSTED_PROXY_COUNT >= 1). A direct client can
+        # set X-Real-IP freely, so honoring it unconditionally would let such a
+        # client rotate its rate-limit key on every request. When no proxy is
+        # configured we ignore the header and use the socket peer instead.
+        trusted_count = getattr(settings, "TRUSTED_PROXY_COUNT", 1)
+        if trusted_count >= 1:
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return str(real_ip)
 
         # Fall back to direct connection IP
         if request.client:
