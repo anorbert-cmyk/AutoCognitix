@@ -492,7 +492,7 @@ class VehicleService:
             "common-issues neo4j: make=%s model=%s year=%s rows=%d",
             sanitize_log(make),
             sanitize_log(model),
-            year,
+            sanitize_log(str(year)),
             len(rows),
         )
         return rows
