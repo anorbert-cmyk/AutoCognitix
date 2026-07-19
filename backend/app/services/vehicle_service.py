@@ -11,12 +11,40 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from neomodel import db as neomodel_db
 from sqlalchemy import func, select
 
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.core.sql_utils import escape_ilike
-from app.db.postgres.models import VehicleMake, VehicleModel as VehicleModelDB
+from app.db.postgres.models import DTCCode, VehicleMake, VehicleModel as VehicleModelDB
 from app.db.postgres.session import async_session_maker
 
 logger = get_logger(__name__)
+
+# Default cap on the number of ranked common-issue rows returned.
+_DEFAULT_COMMON_ISSUES_LIMIT = 20
+
+# Bare-label complaint aggregation for a vehicle's most common DTC issues.
+#
+# The real Neo4j graph (26k+ nodes) stores vehicles, complaints and DTCs with
+# BARE labels; the loaders never created the legacy
+# (:VehicleNode)-[:HAS_COMMON_ISSUE]->(:DTCNode) path with a precomputed
+# occurrence_count that the old query ordered by (hence the production 500s).
+# Complaints link to DTCs via MENTIONS_DTC (sync_neo4j_sprint9) OR MENTIONED_IN
+# (load_all_to_neo4j) - opposite directions - so the relationship match is
+# undirected to cover both. count(DISTINCT c) collapses a single complaint that
+# is reachable through several vehicle-year nodes of the same make/model.
+_COMMON_ISSUES_CYPHER = """
+    MATCH (v:Vehicle)-[:HAS_COMPLAINT]->(c:Complaint)
+    MATCH (c)-[:MENTIONS_DTC|MENTIONED_IN]-(d:DTC)
+    WHERE toLower(v.make) = toLower($make)
+      AND toLower(v.model) = toLower($model){year_filter}
+    RETURN d.code AS code,
+           d.description_en AS description_en,
+           d.description_hu AS description_hu,
+           d.severity AS severity,
+           count(DISTINCT c) AS occurrence_count
+    ORDER BY occurrence_count DESC, code ASC
+    LIMIT $limit
+"""
 
 
 class VehicleService:
@@ -387,52 +415,156 @@ class VehicleService:
         make: str,
         model: str,
         year: Optional[int] = None,
+        limit: int = _DEFAULT_COMMON_ISSUES_LIMIT,
     ) -> List[Dict[str, Any]]:
-        """Get common DTC issues for a vehicle from Neo4j."""
-        if year:
-            query = """
-                MATCH (v:VehicleNode)-[r:HAS_COMMON_ISSUE]->(d:DTCNode)
-                WHERE toLower(v.make) = toLower($make)
-                  AND toLower(v.model) = toLower($model)
-                  AND (v.year_start IS NULL OR v.year_start <= $year)
-                  AND (v.year_end IS NULL OR v.year_end >= $year)
-                RETURN d.code AS code,
-                       d.description_en AS description_en,
-                       d.description_hu AS description_hu,
-                       d.severity AS severity,
-                       r.frequency AS frequency,
-                       r.occurrence_count AS occurrence_count
-                ORDER BY r.occurrence_count DESC
-            """
-            params = {"make": make, "model": model, "year": year}
-        else:
-            query = """
-                MATCH (v:VehicleNode)-[r:HAS_COMMON_ISSUE]->(d:DTCNode)
-                WHERE toLower(v.make) = toLower($make)
-                  AND toLower(v.model) = toLower($model)
-                RETURN d.code AS code,
-                       d.description_en AS description_en,
-                       d.description_hu AS description_hu,
-                       d.severity AS severity,
-                       r.frequency AS frequency,
-                       r.occurrence_count AS occurrence_count
-                ORDER BY r.occurrence_count DESC
-            """
-            params = {"make": make, "model": model}
+        """Get the most common DTC issues for a vehicle from the complaint graph.
 
+        Aggregates the DTC codes mentioned across NHTSA complaints linked to the
+        given make/model (optionally filtered by complaint year) and ranks them by
+        how many distinct complaints mention each code. Descriptions and severity
+        are enriched from the curated PostgreSQL DTC table when available, falling
+        back to the graph node's own properties.
+
+        Degrades gracefully to an empty list on any Neo4j/driver error or when the
+        graph has no matching data - this endpoint must never surface a 500.
+        """
+        try:
+            rows = await self._get_common_issues_neo4j(make, model, year, limit)
+        except Exception as e:
+            logger.warning(
+                "Neo4j common-issues query failed for %s %s: %s",
+                sanitize_log(make),
+                sanitize_log(model),
+                sanitize_exception(e),
+            )
+            return []
+
+        if not rows:
+            return []
+
+        try:
+            return await self._enrich_common_issues(rows)
+        except Exception as e:
+            logger.warning(
+                "PostgreSQL enrichment for common issues failed, using graph data only: %s",
+                sanitize_exception(e),
+            )
+            return [self._issue_from_graph_row(row) for row in rows]
+
+    async def _get_common_issues_neo4j(
+        self,
+        make: str,
+        model: str,
+        year: Optional[int],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Run the bare-label complaint aggregation against Neo4j.
+
+        See ``_COMMON_ISSUES_CYPHER`` for the schema rationale. The year filter is
+        applied on ``Complaint.year`` (a plain int), because the graph links every
+        vehicle-year node of a make/model to all of that model's complaints.
+        """
+        params: Dict[str, Any] = {"make": make, "model": model, "limit": limit}
+        year_filter = ""
+        if year is not None:
+            year_filter = "\n      AND c.year = $year"
+            params["year"] = year
+
+        query = _COMMON_ISSUES_CYPHER.format(year_filter=year_filter)
         results, _ = await asyncio.to_thread(neomodel_db.cypher_query, query, params)
 
-        return [
-            {
-                "code": row[0],
-                "description_en": row[1],
-                "description_hu": row[2],
-                "severity": row[3],
-                "frequency": row[4],
-                "occurrence_count": row[5],
-            }
-            for row in results
-        ]
+        rows: List[Dict[str, Any]] = []
+        for row in results or []:
+            code = row[0]
+            if not code:  # skip malformed / null DTC codes (code is required downstream)
+                continue
+            rows.append(
+                {
+                    "code": code,
+                    "description_en": row[1],
+                    "description_hu": row[2],
+                    "severity": row[3],
+                    "occurrence_count": row[4],
+                }
+            )
+
+        logger.info(
+            "common-issues neo4j: make=%s model=%s year=%s rows=%d",
+            sanitize_log(make),
+            sanitize_log(model),
+            sanitize_log(str(year)),
+            len(rows),
+        )
+        return rows
+
+    async def _enrich_common_issues(
+        self,
+        rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Enrich graph aggregation rows with curated PostgreSQL DTC data.
+
+        Preserves the graph's occurrence-based ranking. Curated PostgreSQL values
+        take precedence; the graph node's own properties are used as a fallback for
+        codes absent from the DTC table (the graph carries many more codes than the
+        curated set). Mirrors the "PostgreSQL is the DTC source of truth, Neo4j
+        supplies the graph relationships" pattern used by the DTC detail endpoint.
+        """
+        codes = [row["code"] for row in rows if row.get("code")]
+        curated: Dict[str, DTCCode] = {}
+        if codes:
+            async with async_session_maker() as session:
+                result = await session.execute(select(DTCCode).where(DTCCode.code.in_(codes)))
+                curated = {dtc.code: dtc for dtc in result.scalars().all()}
+
+        issues: List[Dict[str, Any]] = []
+        for row in rows:
+            code = row.get("code")
+            if not code:
+                continue
+            dtc = curated.get(code)
+            occurrence_count = row.get("occurrence_count")
+            issues.append(
+                {
+                    "code": code,
+                    "description_en": (dtc.description_en if dtc else None)
+                    or row.get("description_en"),
+                    "description_hu": (dtc.description_hu if dtc else None)
+                    or row.get("description_hu"),
+                    "severity": (dtc.severity if dtc else None) or row.get("severity"),
+                    "frequency": self._frequency_bucket(occurrence_count),
+                    "occurrence_count": occurrence_count,
+                }
+            )
+        return issues
+
+    def _issue_from_graph_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Map a raw graph aggregation row to a VehicleCommonIssue dict (no enrichment)."""
+        occurrence_count = row.get("occurrence_count")
+        return {
+            "code": row["code"],
+            "description_en": row.get("description_en"),
+            "description_hu": row.get("description_hu"),
+            "severity": row.get("severity"),
+            "frequency": self._frequency_bucket(occurrence_count),
+            "occurrence_count": occurrence_count,
+        }
+
+    @staticmethod
+    def _frequency_bucket(occurrence_count: Optional[int]) -> str:
+        """Derive a qualitative frequency label from the real occurrence count.
+
+        Uses the same vocabulary as the historical ``HasCommonIssueRel.frequency``
+        property (rare / uncommon / common / very_common). This is a truthful
+        summary of the aggregated complaint counts, not a fabricated value.
+        """
+        count = occurrence_count or 0
+        if count >= 20:
+            return "very_common"
+        if count >= 5:
+            return "common"
+        if count >= 2:
+            return "uncommon"
+        return "rare"
 
     def _node_to_dict(self, node: Any) -> Dict[str, Any]:
         """Convert a Neo4j node to a dictionary."""

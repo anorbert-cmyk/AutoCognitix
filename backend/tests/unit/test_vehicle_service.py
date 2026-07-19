@@ -919,38 +919,120 @@ class TestFindVehicle:
 
 
 class TestGetVehicleCommonIssues:
+    """Common-issues aggregation over the bare-label complaint graph.
+
+    Regression coverage for the production 500 caused by querying the
+    never-populated (:VehicleNode)-[:HAS_COMMON_ISSUE]->(:DTCNode) path.
+    Neo4j aggregation rows are [code, description_en, description_hu, severity,
+    occurrence_count]; enrichment is a batched PostgreSQL lookup by code.
+    """
+
+    @staticmethod
+    def _dtc(code, description_en=None, description_hu=None, severity=None):
+        """Build a DTCCode-like mock as returned by the PostgreSQL enrichment query."""
+        m = MagicMock()
+        m.code = code
+        m.description_en = description_en
+        m.description_hu = description_hu
+        m.severity = severity
+        return m
+
+    @classmethod
+    def _mock_pg_session(cls, dtc_rows):
+        """Mock async_session_maker() -> session whose execute() yields dtc_rows."""
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = dtc_rows
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        return mock_ctx
+
     @pytest.mark.asyncio
-    async def test_returns_issues_with_year(self, service):
+    async def test_returns_ranked_issues_with_year(self, service):
         async def _to_thread(fn, *args, **kwargs):
             return [
-                ["P0300", "Random Misfire", "Veletlenszeru egeszkimaradas", "high", "common", 42],
-                ["P0420", "Catalyst Below", "Katalizator hatekonysag", "medium", "rare", 5],
+                ["P0301", "Cylinder 1 Misfire", None, None, 42],
+                ["P0420", "Catalyst Below Threshold", None, None, 7],
             ], None
 
-        with patch("asyncio.to_thread", side_effect=_to_thread):
-            issues = await service.get_vehicle_common_issues("VW", "Golf", year=2018)
+        pg = self._mock_pg_session(
+            [
+                self._dtc(
+                    "P0301", "Cylinder 1 Misfire Detected", "1. henger gyujtaskihagyas", "high"
+                ),
+                self._dtc(
+                    "P0420", "Catalyst System Efficiency", "Katalizator hatekonysag", "medium"
+                ),
+            ]
+        )
 
-        assert len(issues) == 2
-        assert issues[0]["code"] == "P0300"
-        assert issues[0]["severity"] == "high"
+        with (
+            patch("asyncio.to_thread", side_effect=_to_thread),
+            patch("app.services.vehicle_service.async_session_maker", return_value=pg),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        # Ranked by occurrence_count DESC (as returned by the graph)
+        assert [i["code"] for i in issues] == ["P0301", "P0420"]
         assert issues[0]["occurrence_count"] == 42
-        assert issues[1]["code"] == "P0420"
+        assert issues[0]["frequency"] == "very_common"
+        # Enriched from the curated PostgreSQL table
+        assert issues[0]["description_hu"] == "1. henger gyujtaskihagyas"
+        assert issues[0]["severity"] == "high"
+        assert issues[1]["frequency"] == "common"
 
     @pytest.mark.asyncio
-    async def test_returns_issues_without_year(self, service):
+    async def test_returns_issues_without_year_falls_back_to_graph(self, service):
         async def _to_thread(fn, *args, **kwargs):
-            return [
-                ["P0171", "System Too Lean", "Rendszer tul szegeny", "medium", "common", 10]
-            ], None
+            return [["P0171", "System Too Lean", "Rendszer tul sovany", "medium", 10]], None
 
-        with patch("asyncio.to_thread", side_effect=_to_thread):
+        pg = self._mock_pg_session([])  # code not in curated table -> graph fallback
+
+        with (
+            patch("asyncio.to_thread", side_effect=_to_thread),
+            patch("app.services.vehicle_service.async_session_maker", return_value=pg),
+        ):
             issues = await service.get_vehicle_common_issues("Toyota", "Corolla")
 
         assert len(issues) == 1
         assert issues[0]["code"] == "P0171"
+        assert issues[0]["description_hu"] == "Rendszer tul sovany"
+        assert issues[0]["severity"] == "medium"
+        assert issues[0]["frequency"] == "common"
+        assert issues[0]["occurrence_count"] == 10
 
     @pytest.mark.asyncio
-    async def test_returns_empty_when_no_issues(self, service):
+    async def test_enrichment_prefers_postgres_over_graph(self, service):
+        async def _to_thread(fn, *args, **kwargs):
+            # Graph node carries a stale English-only description, no hu / severity
+            return [["P0128", "Coolant Thermostat", None, None, 3]], None
+
+        pg = self._mock_pg_session(
+            [self._dtc("P0128", "Coolant Thermostat (curated)", "Hutofolyadek termosztat", "low")]
+        )
+
+        with (
+            patch("asyncio.to_thread", side_effect=_to_thread),
+            patch("app.services.vehicle_service.async_session_maker", return_value=pg),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf")
+
+        assert issues[0]["description_en"] == "Coolant Thermostat (curated)"
+        assert issues[0]["description_hu"] == "Hutofolyadek termosztat"
+        assert issues[0]["severity"] == "low"
+        assert issues[0]["frequency"] == "uncommon"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_matches(self, service):
+        """Zero graph matches -> empty list, no PostgreSQL call, no error."""
+
         async def _to_thread(fn, *args, **kwargs):
             return [], None
 
@@ -958,6 +1040,119 @@ class TestGetVehicleCommonIssues:
             issues = await service.get_vehicle_common_issues("Mazda", "MX-5")
 
         assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_neo4j_error_returns_empty_not_raise(self, service):
+        """Driver/query error degrades to [] so the endpoint never returns 500."""
+        with patch("asyncio.to_thread", side_effect=Exception("Neo4j down")):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_postgres_enrichment_error_falls_back_to_graph(self, service):
+        """PostgreSQL enrichment failure still returns graph data (never 500)."""
+
+        async def _to_thread(fn, *args, **kwargs):
+            return [["P0300", "Random Misfire", "Veletlenszeru kihagyas", "high", 30]], None
+
+        broken_ctx = AsyncMock()
+        broken_ctx.__aenter__ = AsyncMock(side_effect=Exception("PG down"))
+        broken_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("asyncio.to_thread", side_effect=_to_thread),
+            patch("app.services.vehicle_service.async_session_maker", return_value=broken_ctx),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf")
+
+        assert len(issues) == 1
+        assert issues[0]["code"] == "P0300"
+        assert issues[0]["description_hu"] == "Veletlenszeru kihagyas"
+        assert issues[0]["frequency"] == "very_common"
+
+    @pytest.mark.asyncio
+    async def test_skips_rows_with_empty_code(self, service):
+        """Null/empty DTC codes are dropped (VehicleCommonIssue.code is required)."""
+
+        async def _to_thread(fn, *args, **kwargs):
+            return [
+                [None, "x", None, None, 5],
+                ["", "y", None, None, 4],
+                ["P0101", "MAF", None, None, 3],
+            ], None
+
+        pg = self._mock_pg_session([])
+
+        with (
+            patch("asyncio.to_thread", side_effect=_to_thread),
+            patch("app.services.vehicle_service.async_session_maker", return_value=pg),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf")
+
+        assert [i["code"] for i in issues] == ["P0101"]
+
+    @pytest.mark.asyncio
+    async def test_uses_bare_label_aggregation_query(self, service):
+        """Revert guard: the Cypher must use the bare-label complaint aggregation,
+        never the dead VehicleNode / HAS_COMMON_ISSUE / DTCNode path.
+
+        This test fails if the label fix is reverted.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            captured["params"] = args[1] if len(args) > 1 else None
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        query = captured["query"]
+        # New bare-label schema is present
+        assert "(v:Vehicle)" in query
+        assert "HAS_COMPLAINT" in query
+        assert "(c:Complaint)" in query
+        assert "MENTIONS_DTC" in query
+        assert "MENTIONED_IN" in query
+        assert "(d:DTC)" in query
+        assert "count(DISTINCT c)" in query
+        assert "ORDER BY occurrence_count DESC" in query
+        # Dead path is gone
+        assert "VehicleNode" not in query
+        assert "HAS_COMMON_ISSUE" not in query
+        assert "DTCNode" not in query
+        # Year filters on the complaint
+        assert "c.year" in query
+        assert captured["params"]["year"] == 2018
+
+    @pytest.mark.asyncio
+    async def test_no_year_omits_year_filter(self, service):
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            captured["params"] = args[1] if len(args) > 1 else None
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Volkswagen", "Golf")
+
+        assert "c.year" not in captured["query"]
+        assert "year" not in captured["params"]
+
+    @pytest.mark.asyncio
+    async def test_frequency_buckets(self, service):
+        assert service._frequency_bucket(25) == "very_common"
+        assert service._frequency_bucket(20) == "very_common"
+        assert service._frequency_bucket(19) == "common"
+        assert service._frequency_bucket(5) == "common"
+        assert service._frequency_bucket(4) == "uncommon"
+        assert service._frequency_bucket(2) == "uncommon"
+        assert service._frequency_bucket(1) == "rare"
+        assert service._frequency_bucket(0) == "rare"
+        assert service._frequency_bucket(None) == "rare"
 
 
 # ===========================================================================

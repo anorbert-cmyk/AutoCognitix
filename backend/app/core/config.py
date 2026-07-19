@@ -149,6 +149,10 @@ class Settings(BaseSettings):
     QDRANT_GRPC_PORT: int = 6334
     QDRANT_URL: Optional[str] = None  # For Qdrant Cloud: https://xxx.cloud.qdrant.io:6333
     QDRANT_API_KEY: Optional[str] = None  # For Qdrant Cloud authentication
+    # Unified collection holding all huBERT vectors (DTC/complaint/recall) with a
+    # type-discriminated payload. Env-overridable so a collection rename is a
+    # Railway variable change, not a redeploy.
+    QDRANT_UNIFIED_COLLECTION: str = "autocognitix"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

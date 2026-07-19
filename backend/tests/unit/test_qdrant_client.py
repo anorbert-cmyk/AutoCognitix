@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.config import settings
 from app.core.exceptions import QdrantConnectionException, QdrantException
 
 
@@ -316,14 +317,17 @@ class TestSearch:
 class TestSearchDTC:
     @pytest.mark.asyncio
     async def test_search_dtc_no_filters(self, service):
+        # REVERT-GUARD: DTC vectors live in the unified collection with a
+        # {"type": "dtc"} discriminator, NOT the empty "dtc_embeddings_hu".
         with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             results = await service.search_dtc([0.1] * 768, limit=5)
             assert results == []
             mock_search.assert_awaited_once_with(
-                collection_name="dtc_embeddings_hu",
+                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
                 query_vector=[0.1] * 768,
                 limit=5,
-                filter_conditions=None,
+                filter_conditions={"type": "dtc"},
+                score_threshold=None,
                 model_version=None,
             )
 
@@ -337,12 +341,50 @@ class TestSearchDTC:
                 severity="high",
             )
             mock_search.assert_awaited_once_with(
-                collection_name="dtc_embeddings_hu",
+                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
                 query_vector=[0.1] * 768,
                 limit=3,
-                filter_conditions={"category": "powertrain", "severity": "high"},
+                filter_conditions={"type": "dtc", "category": "powertrain", "severity": "high"},
+                score_threshold=None,
                 model_version=None,
             )
+
+
+class TestSearchUnified:
+    """Tests for the unified-collection search that fixes the Qdrant drift bug."""
+
+    def test_unified_collection_default_is_autocognitix(self):
+        # The 54,652 huBERT vectors were indexed into "autocognitix"; the default
+        # must match, and it must be env-overridable for a no-redeploy correction.
+        assert settings.QDRANT_UNIFIED_COLLECTION == "autocognitix"
+
+    @pytest.mark.asyncio
+    async def test_search_unified_targets_configured_collection_with_type(self, service):
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
+            await service.search_unified([0.1] * 768, type_="dtc", limit=7)
+            mock_search.assert_awaited_once_with(
+                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
+                query_vector=[0.1] * 768,
+                limit=7,
+                filter_conditions={"type": "dtc"},
+                score_threshold=None,
+                model_version=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_dtc_uses_unified_collection_not_legacy(self, service):
+        """REVERT-GUARD: this FAILS if search_dtc is reverted to the empty
+        legacy `dtc_embeddings_hu` collection or loses the {"type": "dtc"} filter.
+        """
+        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
+            await service.search_dtc([0.1] * 768, limit=5)
+
+        _, kwargs = mock_search.call_args
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["collection_name"] == "autocognitix"
+        # Must NOT regress to the empty legacy collection.
+        assert kwargs["collection_name"] != service.DTC_COLLECTION
+        assert kwargs["filter_conditions"]["type"] == "dtc"
 
 
 class TestSearchSimilarSymptoms:

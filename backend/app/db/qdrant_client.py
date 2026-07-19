@@ -250,6 +250,51 @@ class QdrantService:
                 original_error=e,
             )
 
+    async def search_unified(
+        self,
+        query_vector: List[float],
+        type_: str,
+        limit: int = 10,
+        extra_filters: Optional[Dict[str, str]] = None,
+        score_threshold: Optional[float] = None,
+        model_version: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Search the unified collection, discriminating results by payload ``type``.
+
+        All huBERT vectors (DTC/complaint/recall) are indexed into a single
+        collection (``settings.QDRANT_UNIFIED_COLLECTION``, default
+        ``autocognitix``) with a type-discriminated payload. This method targets
+        that collection and always constrains results to the requested ``type_``
+        (e.g. ``"dtc"``), so callers only ever get the entity kind they asked for.
+
+        Args:
+            query_vector: Query embedding vector
+            type_: Payload discriminator to match (e.g. "dtc", "complaint", "recall")
+            limit: Maximum number of results
+            extra_filters: Optional additional exact-match payload filters
+            score_threshold: Minimum similarity score
+            model_version: Filter by embedding model version (None = no filter)
+
+        Returns:
+            List of matching hits (id/score/payload) for the requested type.
+        """
+        # Build the optional payload filters first, then set the ``type``
+        # discriminator LAST so a caller-supplied ``type`` in ``extra_filters`` can
+        # never clobber it. NOTE: the unified ``autocognitix`` collection carries no
+        # ``_embedding_model_version`` payload, so callers must not pass ``model_version``.
+        filter_conditions: Dict[str, str] = {k: v for k, v in (extra_filters or {}).items() if v}
+        filter_conditions["type"] = type_
+
+        return await self.search(
+            collection_name=settings.QDRANT_UNIFIED_COLLECTION,
+            query_vector=query_vector,
+            limit=limit,
+            filter_conditions=filter_conditions,
+            score_threshold=score_threshold,
+            model_version=model_version,
+        )
+
     async def search_dtc(
         self,
         query_vector: List[float],
@@ -261,6 +306,12 @@ class QdrantService:
         """
         Search for similar DTC codes.
 
+        The huBERT DTC vectors live in the unified ``autocognitix`` collection
+        with a ``{"type": "dtc", "code", ...}`` payload — NOT in the (empty)
+        ``dtc_embeddings_hu`` collection — so this delegates to
+        :meth:`search_unified` with ``type_="dtc"``. Hits carry ``code`` in their
+        payload; callers enrich them to full records from PostgreSQL.
+
         Args:
             query_vector: Query embedding vector
             limit: Maximum number of results
@@ -271,17 +322,17 @@ class QdrantService:
         Returns:
             List of matching DTC codes with similarity scores
         """
-        filter_conditions = {}
+        extra_filters: Dict[str, str] = {}
         if category:
-            filter_conditions["category"] = category
+            extra_filters["category"] = category
         if severity:
-            filter_conditions["severity"] = severity
+            extra_filters["severity"] = severity
 
-        return await self.search(
-            collection_name=self.DTC_COLLECTION,
+        return await self.search_unified(
             query_vector=query_vector,
+            type_="dtc",
             limit=limit,
-            filter_conditions=filter_conditions if filter_conditions else None,
+            extra_filters=extra_filters or None,
             model_version=model_version,
         )
 

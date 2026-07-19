@@ -706,3 +706,91 @@ class TestVehicleEndpointErrors:
         response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/2018/complaints")
 
         assert response.status_code == 502
+
+
+class TestVehicleCommonIssues:
+    """Tests for GET /api/v1/vehicles/{make}/{model}/common-issues endpoint.
+
+    Regression coverage for the production 500 (dead Neo4j label path). The
+    endpoint must return a ranked list on data and 200-with-empty otherwise.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_overrides(self, app):
+        yield
+        app.dependency_overrides.clear()
+
+    @pytest.mark.asyncio
+    async def test_common_issues_returns_200_ranked(self, async_client: AsyncClient, app):
+        mock = AsyncMock()
+        mock.get_vehicle_common_issues.return_value = [
+            {
+                "code": "P0301",
+                "description_en": "Cylinder 1 Misfire Detected",
+                "description_hu": "1. henger gyujtaskihagyas",
+                "severity": "high",
+                "frequency": "very_common",
+                "occurrence_count": 42,
+            },
+            {
+                "code": "P0420",
+                "description_en": "Catalyst System Efficiency Below Threshold",
+                "description_hu": "Katalizator hatekonysag a kuszob alatt",
+                "severity": "medium",
+                "frequency": "common",
+                "occurrence_count": 7,
+            },
+        ]
+        app.dependency_overrides[get_vehicle_service] = lambda: mock
+
+        response = await async_client.get(
+            "/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["make"] == "Volkswagen"
+        assert data["model"] == "Golf"
+        assert data["year"] == 2018
+        assert [i["code"] for i in data["issues"]] == ["P0301", "P0420"]
+        assert data["issues"][0]["occurrence_count"] == 42
+        mock.get_vehicle_common_issues.assert_awaited_once_with(
+            make="Volkswagen", model="Golf", year=2018
+        )
+
+    @pytest.mark.asyncio
+    async def test_common_issues_empty_returns_200_not_500(self, async_client: AsyncClient, app):
+        """No graph data must yield 200 with empty issues, never 500."""
+        mock = AsyncMock()
+        mock.get_vehicle_common_issues.return_value = []
+        app.dependency_overrides[get_vehicle_service] = lambda: mock
+
+        response = await async_client.get("/api/v1/vehicles/Toyota/Corolla/common-issues")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["issues"] == []
+        assert data["make"] == "Toyota"
+        assert data["year"] is None
+
+    @pytest.mark.asyncio
+    async def test_common_issues_without_year(self, async_client: AsyncClient, app):
+        mock = AsyncMock()
+        mock.get_vehicle_common_issues.return_value = [
+            {
+                "code": "P0171",
+                "description_en": "System Too Lean",
+                "description_hu": "Rendszer tul sovany",
+                "severity": "medium",
+                "frequency": "common",
+                "occurrence_count": 10,
+            },
+        ]
+        app.dependency_overrides[get_vehicle_service] = lambda: mock
+
+        response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/common-issues")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["year"] is None
+        assert data["issues"][0]["code"] == "P0171"

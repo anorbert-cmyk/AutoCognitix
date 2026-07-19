@@ -29,7 +29,8 @@ from app.api.v1.schemas.dtc import (
     DTCCreate,
     DTCSearchResult,
 )
-from app.core.log_sanitizer import sanitize_log
+from app.core.config import settings
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.api.v1.endpoints.auth import require_role
 from app.db.postgres.models import DTCCode as DTCCodeModel
 from app.db.postgres.models import User
@@ -487,11 +488,18 @@ async def search_dtc_codes(
             code_score_map: Dict[str, float] = {}
             for result in semantic_results:
                 payload = result.get("payload", {})
-                code = payload.get("code", "")
+                # Canonicalize to uppercase so the payload code matches the
+                # uppercase PostgreSQL enrichment keys (a lowercase code would miss
+                # the lookup and degrade the score to the 0.5 default).
+                code = payload.get("code", "").upper()
                 if code and code not in existing_codes:
-                    code_score_map[code] = result.get("score", 0.5)
+                    # Raw cosine is in [-1, 1] but DTCSearchResult.relevance_score is
+                    # bounded [0, 1]; clamp so an out-of-range hit can't raise a
+                    # ValidationError and silently drop us to lexical-only results.
+                    code_score_map[code] = min(1.0, max(0.0, result.get("score", 0.5)))
 
             # Batch fetch all codes in a single query
+            semantic_dtcs: List[DTCCodeModel] = []
             if code_score_map:
                 semantic_dtcs = await repository.get_by_codes(list(code_score_map.keys()))
                 for semantic_dtc in semantic_dtcs:
@@ -502,8 +510,22 @@ async def search_dtc_codes(
                     )
                     existing_codes.add(semantic_dtc.code)
 
+            # Success-path telemetry: makes a silent-empty semantic result
+            # (collection drift, empty index) diagnosable in prod without a redeploy.
+            logger.info(
+                "semantic dtc search: collection=%s type=dtc hits=%d pg_matched=%d",
+                settings.QDRANT_UNIFIED_COLLECTION,
+                len(semantic_results),
+                len(semantic_dtcs),
+            )
+
         except Exception as e:
-            logger.warning(f"Semantic search failed, using text results only: {e}")
+            # Qdrant failure/empty must never 500 the endpoint: fall back to the
+            # lexical results already collected above (or an empty list).
+            logger.warning(
+                f"Semantic search failed for query '{sanitize_log(query)}', "
+                f"falling back to lexical results: {sanitize_exception(e)}"
+            )
 
     # Sort by relevance score
     results.sort(key=lambda x: x.relevance_score, reverse=True)
