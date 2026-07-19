@@ -59,7 +59,6 @@ interface VehicleCardProps {
 function VehicleCard({ vehicle, onDelete, isDeleting }: VehicleCardProps) {
   const navigate = useNavigate()
   const displayName = vehicle.nickname || `${vehicle.make} ${vehicle.model}`
-  const healthScore = vehicle.health_score ?? 75
   const remindersCount = vehicle.upcoming_reminders_count ?? 0
 
   return (
@@ -85,16 +84,33 @@ function VehicleCard({ vehicle, onDelete, isDeleting }: VehicleCardProps) {
 
       {/* Health score */}
       <div className="flex items-center gap-3">
-        <div
-          className={`text-3xl font-black leading-none ${getHealthScoreColorClass(healthScore)}`}
-          aria-label={`Állapot: ${healthScore}`}
-        >
-          {healthScore}
-        </div>
-        <div>
-          <div className="text-xs font-semibold text-slate-700">Állapot</div>
-          <div className="text-xs text-slate-500">{formatHealthScore(healthScore)}</div>
-        </div>
+        {vehicle.health_score != null ? (
+          <>
+            <div
+              className={`text-3xl font-black leading-none ${getHealthScoreColorClass(vehicle.health_score)}`}
+              aria-label={`Állapot: ${vehicle.health_score}`}
+            >
+              {vehicle.health_score}
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700">Állapot</div>
+              <div className="text-xs text-slate-500">{formatHealthScore(vehicle.health_score)}</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              className="text-3xl font-black leading-none text-slate-400"
+              aria-label="Állapot: nincs adat"
+            >
+              —
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-slate-700">Állapot</div>
+              <div className="text-xs text-slate-500">Nincs adat</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Stats row */}

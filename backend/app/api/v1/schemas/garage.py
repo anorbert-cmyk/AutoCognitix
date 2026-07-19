@@ -4,7 +4,8 @@ Pydantic schemas for the Garage API (vehicles, reminders, maintenance costs).
 
 from datetime import date, datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -43,6 +44,25 @@ REMINDER_TYPE_LABELS = {
     "brake_pads": "Fékbetét csere",
     "custom": "Egyedi emlékeztető",
 }
+
+
+# ─── Shared base ─────────────────────────────────────────────────────────────
+
+
+class UUIDStrModel(BaseModel):
+    """ORM Uuid oszlopok str mezőkre koercálása (Pydantic v2 nem koercál UUID→str)."""
+
+    @field_validator(
+        "id",
+        "user_id",
+        "vehicle_id",
+        "diagnosis_session_id",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def _uuid_to_str(cls, v: Any) -> Any:
+        return str(v) if isinstance(v, UUID) else v
 
 
 # ─── UserVehicle ─────────────────────────────────────────────────────────────
@@ -95,7 +115,7 @@ class UserVehicleUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
 
 
-class UserVehicleResponse(BaseModel):
+class UserVehicleResponse(UUIDStrModel):
     id: str
     user_id: str
     nickname: Optional[str]
@@ -147,7 +167,7 @@ class MaintenanceReminderUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=1000)
 
 
-class MaintenanceReminderResponse(BaseModel):
+class MaintenanceReminderResponse(UUIDStrModel):
     id: str
     vehicle_id: str
     user_id: str
@@ -191,7 +211,7 @@ class MaintenanceCostCreate(BaseModel):
     diagnosis_session_id: Optional[str] = Field(None, description="Kapcsolódó diagnózis session ID")
 
 
-class MaintenanceCostResponse(BaseModel):
+class MaintenanceCostResponse(UUIDStrModel):
     id: str
     vehicle_id: str
     user_id: str

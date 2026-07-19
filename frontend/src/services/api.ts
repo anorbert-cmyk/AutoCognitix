@@ -346,7 +346,9 @@ export interface DiagnosisHistoryItem {
   vehicle_make: string
   vehicle_model: string
   vehicle_year: number
+  vehicle_vin?: string | null
   dtc_codes: string[]
+  symptoms_text: string
   confidence_score: number
   created_at: string
 }

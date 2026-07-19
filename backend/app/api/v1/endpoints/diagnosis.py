@@ -59,6 +59,7 @@ logger = get_logger(__name__)
 # Streaming endpoint protection constants
 STREAM_TIMEOUT_SECONDS = 300  # 5-minute max duration per stream
 MAX_CONCURRENT_STREAMS = 10  # Limit concurrent long-running streams
+PARTS_ENRICH_TIMEOUT_SECONDS = 5.0  # bound parts enrichment so a slow source can't stall the stream
 _stream_semaphore: Optional[asyncio.Semaphore] = None
 
 
@@ -1016,6 +1017,27 @@ async def analyze_vehicle_stream(
         async for event in _stream_results(rag_result, diagnosis_id):
             yield event
 
+        # Step 6.5: Enrich with parts prices - parity with analyze_vehicle Step 5.5.
+        # Failure-isolated + time-boxed: a slow/broken parts source must never break the stream.
+        parts_data: Optional[dict] = None
+        try:
+            parts_data = await asyncio.wait_for(
+                service._enrich_with_parts_prices(
+                    dtc_codes=diag_request.dtc_codes,
+                    vehicle_make=diag_request.vehicle_make,
+                    vehicle_model=diag_request.vehicle_model,
+                    vehicle_year=diag_request.vehicle_year,
+                ),
+                timeout=PARTS_ENRICH_TIMEOUT_SECONDS,
+            )
+        # asyncio.TimeoutError is an Exception (caught here); CancelledError is a
+        # BaseException, so cooperative cancellation still propagates as intended.
+        except Exception as e:
+            logger.warning(
+                "Parts enrichment skipped in stream (degraded mode)",
+                extra={"diagnosis_id": str(diagnosis_id), "error_type": type(e).__name__},
+            )
+
         # Step 7: Build, save, and complete
         response = service._build_response(
             diagnosis_id=diagnosis_id,
@@ -1024,6 +1046,7 @@ async def analyze_vehicle_stream(
             rag_result=rag_result,
             recalls=recalls,
             complaints=complaints,
+            parts_data=parts_data,
         )
         await service._save_diagnosis_session(
             diagnosis_id=diagnosis_id,
@@ -1042,6 +1065,7 @@ async def analyze_vehicle_stream(
                     "repairs_count": len(response.recommended_repairs),
                     "recalls_count": len(response.related_recalls),
                     "complaints_count": len(response.similar_complaints),
+                    "parts_count": len(response.parts_with_prices),
                     "message": "Diagnosztika befejezve",
                 },
                 diagnosis_id=diagnosis_id,

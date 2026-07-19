@@ -8,6 +8,8 @@ Tests the complete diagnosis flow including:
 - Error handling
 """
 
+import json
+
 import pytest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -18,7 +20,7 @@ from pathlib import Path
 backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
-from app.api.v1.endpoints.auth import get_current_user_from_token
+from app.api.v1.endpoints.auth import get_current_user_from_token, get_optional_current_user
 
 
 class TestDiagnosisAnalyzeEndpoint:
@@ -619,3 +621,160 @@ class TestDiagnosisResponseFormat:
                 assert data["vehicle_make"] == diagnosis_request_data["vehicle_make"]
                 assert data["vehicle_model"] == diagnosis_request_data["vehicle_model"]
                 assert data["vehicle_year"] == diagnosis_request_data["vehicle_year"]
+
+
+class TestStreamingPartsParity:
+    """Streaming diagnosis must enrich parts prices with parity to /analyze.
+
+    Regression guard for Sprint 2 item 1.2: the streaming pipeline (_run_pipeline)
+    previously skipped Step 5.5 parts enrichment, so streamed diagnoses showed
+    "Alkatresz arinformacio nem elerheto". These tests assert the streamed path
+    persists parts + total cost, degrades gracefully when the parts source fails,
+    and that the non-streaming path is unchanged.
+    """
+
+    def _stream_payload(self) -> dict:
+        """Minimal valid request; P0171 maps to static parts in DTC_PARTS_MAPPING."""
+        return {
+            "vehicle_make": "Volkswagen",
+            "vehicle_model": "Golf",
+            "vehicle_year": 2018,
+            "dtc_codes": ["P0171"],
+            "symptoms": "A motor egyenetlenul jar alapjaraton, reszletes leiras.",
+        }
+
+    @staticmethod
+    def _parse_sse_events(raw: str) -> list:
+        """Parse an SSE stream body into a list of event-data dicts."""
+        events = []
+        for block in raw.split("\n\n"):
+            block = block.strip()
+            if not block:
+                continue
+            data_payload = None
+            for line in block.splitlines():
+                if line.startswith("data:"):
+                    data_payload = line[len("data:") :].strip()
+            if data_payload:
+                events.append(json.loads(data_payload))
+        return events
+
+    @pytest.mark.asyncio
+    async def test_stream_persists_parts_and_total_cost(
+        self,
+        app,
+        async_client,
+        seeded_db,
+        mock_nhtsa_service,
+        mock_rag_service,
+        mock_authenticated_user,
+    ):
+        """The streamed diagnosis persists parts + total cost, just like /analyze."""
+        app.dependency_overrides[get_optional_current_user] = lambda: mock_authenticated_user
+        app.dependency_overrides[get_current_user_from_token] = lambda: mock_authenticated_user
+
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
+            stream_response = await async_client.post(
+                "/api/v1/diagnosis/analyze/stream",
+                json=self._stream_payload(),
+            )
+
+            assert stream_response.status_code == 200
+            events = self._parse_sse_events(stream_response.text)
+            event_types = [e["event_type"] for e in events]
+            assert "complete" in event_types
+            assert "error" not in event_types
+
+            complete_event = next(e for e in events if e["event_type"] == "complete")
+            assert complete_event["data"]["parts_count"] > 0
+            diagnosis_id = complete_event["diagnosis_id"]
+
+            # Persisted record must carry the enriched parts + total cost estimate.
+            get_response = await async_client.get(f"/api/v1/diagnosis/{diagnosis_id}")
+            assert get_response.status_code == 200
+            persisted = get_response.json()
+            assert persisted["parts_with_prices"], "streamed diagnosis must persist parts"
+            assert persisted["total_cost_estimate"] is not None
+
+    @pytest.mark.asyncio
+    async def test_stream_completes_when_parts_enrichment_fails(
+        self,
+        app,
+        async_client,
+        seeded_db,
+        mock_nhtsa_service,
+        mock_rag_service,
+        mock_authenticated_user,
+    ):
+        """A failing parts source must not break the stream: complete emitted, no error."""
+        from app.services.diagnosis_service import DiagnosisService
+
+        app.dependency_overrides[get_optional_current_user] = lambda: mock_authenticated_user
+        app.dependency_overrides[get_current_user_from_token] = lambda: mock_authenticated_user
+
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+            patch.object(
+                DiagnosisService,
+                "_enrich_with_parts_prices",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("parts backend down"),
+            ),
+        ):
+            stream_response = await async_client.post(
+                "/api/v1/diagnosis/analyze/stream",
+                json=self._stream_payload(),
+            )
+
+            assert stream_response.status_code == 200
+            events = self._parse_sse_events(stream_response.text)
+            event_types = [e["event_type"] for e in events]
+            assert "complete" in event_types
+            assert "error" not in event_types
+
+            complete_event = next(e for e in events if e["event_type"] == "complete")
+            assert complete_event["data"]["parts_count"] == 0
+            diagnosis_id = complete_event["diagnosis_id"]
+
+            # Degraded but persisted: empty parts, no cost estimate.
+            get_response = await async_client.get(f"/api/v1/diagnosis/{diagnosis_id}")
+            assert get_response.status_code == 200
+            persisted = get_response.json()
+            assert persisted["parts_with_prices"] == []
+            assert persisted["total_cost_estimate"] is None
+
+    @pytest.mark.asyncio
+    async def test_nonstreaming_analyze_still_includes_parts(
+        self,
+        async_client,
+        seeded_db,
+        mock_nhtsa_service,
+        mock_rag_service,
+    ):
+        """Regression guard: the non-streaming /analyze path keeps enriching parts."""
+        with (
+            patch("app.services.nhtsa_service.get_nhtsa_service", return_value=mock_nhtsa_service),
+            patch(
+                "app.services.diagnosis_service.get_nhtsa_service", return_value=mock_nhtsa_service
+            ),
+            patch("app.services.rag_service.diagnose", new=mock_rag_service.diagnose),
+        ):
+            response = await async_client.post(
+                "/api/v1/diagnosis/analyze",
+                json=self._stream_payload(),
+            )
+
+            assert response.status_code == 201
+            data = response.json()
+            assert data["parts_with_prices"], "non-streaming /analyze must include parts"
+            assert data["total_cost_estimate"] is not None
