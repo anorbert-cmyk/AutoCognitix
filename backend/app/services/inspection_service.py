@@ -367,7 +367,10 @@ class InspectionService:
             cost_max = 0
             fix_recommendation = f"{issue} - szakszervizes vizsgálat szükséges"
 
-            if isinstance(parts_result, Exception):
+            if isinstance(parts_result, BaseException):
+                # BaseException (not just Exception) so a CancelledError from a
+                # gather task is treated as "no parts" instead of falling to the
+                # elif and raising on iteration.
                 logger.warning(
                     f"Alkatrész ár lekérés sikertelen: {sanitize_log(dtc_code)} - {sanitize_exception(parts_result)}",
                     extra={"dtc_code": sanitize_log(dtc_code)},
