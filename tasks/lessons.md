@@ -1,5 +1,148 @@
 # Lessons Learned - AutoCognitix
 
+## Sprint S1/S2 + Header Refactor - 2026-07-19 (#22/#23/#24)
+
+### Pydantic v2 NEM koercál UUID→str (CRITICAL, 5 élő 500-as hiba)
+
+**Probléma:** Az ORM `Uuid(as_uuid=True)` oszlop natív `UUID` objektumot ad vissza. Ha a response-séma mezője `str`, a Pydantic v2 **nem** konvertálja automatikusan → `ValidationError` → HTTP 500. Öt garázs-endpoint (vehicles list/detail, reminders, costs, health) élőben törött volt emiatt.
+
+**Root cause:** Pydantic v1 megengedőbb volt (str(UUID) implicit); a v2 szigorúan típusellenőriz, és `UUID` nem `str`.
+
+**Fix — közös before-validator bázis (`backend/app/api/v1/schemas/garage.py`):**
+```python
+class UUIDStrModel(BaseModel):
+    """ORM Uuid oszlopok str mezőkre koercálása (Pydantic v2 nem koercál UUID→str)."""
+
+    @field_validator(
+        "id", "user_id", "vehicle_id", "diagnosis_session_id",
+        mode="before",
+        check_fields=False,  # nem minden leszármazottnak van mindegyik mezője
+    )
+    @classmethod
+    def _uuid_to_str(cls, v: Any) -> Any:
+        return str(v) if isinstance(v, UUID) else v
+```
+Minden ORM-alapú response modell ebből a bázisból származik.
+
+**Szabály:** ORM `Uuid` oszlopot `str` response-mezőre kötő minden sémának a `UUIDStrModel` legyen az őse. Új UUID-mező hozzáadásakor bővítsd a `@field_validator` mezőlistáját. `check_fields=False` kötelező, mert nem minden leszármazottnak van mind a négy mezője.
+
+---
+
+### SQLAlchemy `Uuid(as_uuid=True)` bind CSAK UUID objektummal
+
+**Probléma:** str értékkel bindolva a `Uuid` oszlopot a SQLite teszt-harness elhasal: `'str' object has no attribute 'hex'` (a SQLite dialect a `value.hex`-et olvassa a BLOB tároláshoz). Éles Postgres elnyelte, teszt nem.
+
+**Fix — `_as_uuid()` helper (`backend/app/services/vehicle_garage_service.py`):**
+```python
+def _as_uuid(value: Union[str, UUID]) -> UUID:
+    """Uuid columns bind through ``value.hex`` under the SQLite test harness,
+    which fails on plain strings; normalize every bind param to a UUID."""
+    return value if isinstance(value, UUID) else UUID(value)
+```
+Minden bind-paraméter és WHERE-feltétel `_as_uuid(...)`-on megy át (`UserVehicle.id == _as_uuid(vehicle_id)`, `user_id=_as_uuid(user_id)`, stb.). Rossz formátumú id → `ValueError` → a service 404-et ad (nem 500-at).
+
+**Szabály:** `Uuid` oszlopra soha ne bindolj nyers stringet. Bemenő route-paramétert (`str`) a service határán normalizálj `UUID`-ra; a hibás formátum 404, nem 500.
+
+---
+
+### Teszt-app router hiányok elrejtik a törött endpointokat
+
+**Probléma:** A fenti 500-ak azért maradtak észrevétlenek, mert a teszt-FastAPI-app nem regisztrálta az összes routert → a smoke-tesztek nem is hívták a garázs-endpointokat.
+
+**Fix:** `backend/tests/api/conftest.py`-ban **minden** production router regisztrálva (a `main.py`-vel paritásban), így minden endpoint a teszt-lefedettség alá esik.
+
+**Szabály:** A teszt-app router-készlete legyen paritásban a `main.py`-vel. Endpoint, amit egyetlen teszt sem hív, gyakorlatilag nem tesztelt — a router regisztrációja az első védvonal.
+
+---
+
+### AsyncSession tiltja a konkurrens query-t → egy csoportosított aggregátum
+
+**Probléma:** Több jármű reminder-számának lekérése `asyncio.gather()`-rel párhuzamos `session.execute()` hívásokban `InterfaceError`-t dob — egy `AsyncSession` egyszerre csak egy query-t futtathat. N+1 külön query szintén rossz.
+
+**Fix — egyetlen csoportosított feltételes aggregátum:**
+```python
+def _count_where(condition) -> ...:
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+stmt = (
+    select(rem.vehicle_id, _count_where(overdue_cond), _count_where(upcoming_cond), ...)
+    .where(and_(rem.vehicle_id.in_([_as_uuid(v) for v in vehicle_ids]),
+                rem.user_id == _as_uuid(user_id)))
+    .group_by(rem.vehicle_id)
+)
+```
+Egy DB-kör az összes jármű összes bontásához.
+
+**Szabály:** Ugyanazon `AsyncSession`-ön SOHA ne `gather()`-elj query-ket. Per-entitás számlálást csoportosított `SUM(CASE WHEN ...)` aggregátummal oldj meg, ne N darab külön query-vel vagy párhuzamos futtatással.
+
+---
+
+### Grouped aggregate = list↔health paritás (tiszta scoring)
+
+**Probléma:** Korábban a járműlista és a health-endpoint külön úton számolt pontszámot → a két nézet eltérő health-et mutathatott ugyanarra a járműre.
+
+**Fix:** Közös, **tiszta** (side-effect mentes) scoring függvény, amit a lista és a health-endpoint is UGYANABBÓL az aggregátumból hív. Egy forrás → garantált paritás.
+
+**Szabály:** Ha két nézet ugyanazt a származtatott értéket mutatja, közös tiszta függvény + közös adatforrás. Ne duplikáld a scoring-logikát nézetenként.
+
+---
+
+### Kitalált UI-adat = bizalmi hiba (truthful UI)
+
+**Probléma:** A ResultPage kitalált tartalmat renderelt valós adat nélkül: fabrikált "főtengely" mondat, hamis "ONLINE" badge, kitalált #4829 azonosító. Ez félrevezeti a felhasználót — bizalmi (nem csak kozmetikai) hiba.
+
+**Fix:**
+- Minden fabrikált érték eltávolítva; csak a backend által ténylegesen visszaadott mezők renderelve (`urgency`, `safety_warnings`, `diagnostic_steps`, `sources`, `similar_complaints`).
+- Hiányzó adat → **igazmondó üres állapot** (empty state), nem placeholder-kitöltés.
+- Külső linkek csak `http`/`https` séma-allowlist után.
+
+```tsx
+// HELYTELEN - kitalált érték, ha nincs adat
+<Badge>ONLINE</Badge>
+<p>A hiba a főtengely-érzékelőben van (#4829)</p>
+
+// HELYES - csak valós mező, különben üres állapot
+{result.safety_warnings?.length
+  ? result.safety_warnings.map(...)
+  : <EmptyState message="Nincs biztonsági figyelmeztetés." />}
+```
+
+**Szabály:** Soha ne renderelj kitalált/placeholder adatot valós forrás nélkül. Hiányzó mező → őszinte üres állapot. A megjelenített adat a backend-válaszban ellenőrizhető legyen.
+
+---
+
+### Publikus oldal ne hívjon védett endpointot
+
+**Probléma:** A HomePage nem-bejelentkezett látogatóként is meghívta az emlékeztető-lekérő (védett) endpointot → 401 minden landoláskor.
+
+**Fix:** A hívás `isAuthenticated` mögé zárva (feltételes query enable / guard).
+
+**Szabály:** Publikus route-ról induló adat-lekérés előbb ellenőrizze az auth állapotot; a védett endpoint hívása csak bejelentkezett usernek fusson.
+
+---
+
+### Streaming parts enrichment — time-box + hiba-izoláció
+
+**Probléma:** A streaming (SSE) diagnózis-pipeline parts-dúsítása blokkolhatja vagy elháríthatja a teljes streamet, ha a parts-forrás lassú/hibázik.
+
+**Fix:** A parts-dúsítás 5s **time-box**-szal fut; a hiba **izolált** (a stream nem esik el, parts nélkül fejeződik be); a perzisztált eredmény **paritásban** van a streamelttel (a mentett és a felhasználónak streamelt válasz nem tér el).
+
+**Szabály:** Streaming pipeline opcionális dúsító lépése mindig legyen time-boxolt és failure-isolated; a perzisztált és a streamelt kimenet paritása kötelező.
+
+---
+
+### Munkamodell: orchestrator/implementer + 5-lencsés review
+
+Fable orchestrator + Opus 4.8 max-thinking implementer ágensek. Folyamat:
+1. **Specifikáció** előre (csökkenti a kétértelműséget)
+2. **Párhuzamos implementáció DISZJUNKT fájl-tulajdonlással** (egy fájl = egy ágens, nincs átfedés)
+3. **5-lencsés review**: Security / Logic-Correctness / Concurrency-Async / Data-Migration / Operational-Observability
+4. **Konszolidált javító kör** a review találatokra
+
+**Tanulság:** A diszjunkt fájl-tulajdonlás a párhuzamos ágens-munka kulcsa (nincs merge-ütközés); az 5-lencsés review pont ezeket a hibákat fogta meg (UUID koercálás, konkurrens session, fabrikált UI).
+
+---
+
 ## Sprint 9/10 Post-Sprint Review Audit - 2026-03-20
 
 ### Bevezetett kötelező folyamat: Post-Sprint Review Protocol

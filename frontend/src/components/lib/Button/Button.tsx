@@ -27,7 +27,7 @@ const variantStyles = {
   ghost:
     'bg-transparent text-foreground hover:bg-muted active:bg-muted/80 focus-visible:ring-muted',
   destructive:
-    'bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80 focus-visible:ring-destructive',
+    'bg-red-600 text-white hover:bg-red-700 active:bg-red-800 focus-visible:ring-red-500',
 };
 
 const sizeStyles = {

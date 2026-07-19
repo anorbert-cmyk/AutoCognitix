@@ -18,6 +18,7 @@ import {
   CreditCard,
   BookOpen,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -181,12 +182,20 @@ export default function Layout() {
                             </p>
                           </div>
                           <div className="py-1">
+                            <Link
+                              to="/settings"
+                              onClick={() => setUserMenuOpen(false)}
+                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:bg-muted"
+                            >
+                              <Settings className="h-4 w-4" aria-hidden="true" />
+                              Beállítások
+                            </Link>
                             <button
                               onClick={handleLogout}
                               disabled={isLoading}
                               className="w-full flex items-center gap-2 px-4 py-2 text-sm text-status-error hover:bg-muted transition-colors focus-visible:outline-none focus-visible:bg-muted"
                             >
-                              <LogOut className="h-4 w-4" />
+                              <LogOut className="h-4 w-4" aria-hidden="true" />
                               Kijelentkezés
                             </button>
                           </div>
@@ -283,6 +292,15 @@ export default function Layout() {
                       </p>
                     </div>
                   </div>
+                  <Link to="/settings" onClick={closeMobileMenu}>
+                    <Button
+                      variant="outline"
+                      fullWidth
+                      leftIcon={<Settings className="h-4 w-4" />}
+                    >
+                      Beállítások
+                    </Button>
+                  </Link>
                   <Button
                     variant="outline"
                     fullWidth

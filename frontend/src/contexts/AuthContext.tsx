@@ -26,6 +26,7 @@ import {
   getCurrentUser,
   updateProfile as updateProfileApi,
   changePassword as changePasswordApi,
+  deleteAccount as deleteAccountApi,
   isAuthenticated as checkAuth,
   clearTokens,
   refreshCsrfToken,
@@ -46,6 +47,7 @@ interface AuthContextType {
   logout: () => Promise<void>
   updateProfile: (data: UpdateProfileData) => Promise<void>
   changePassword: (data: ChangePasswordData) => Promise<void>
+  deleteAccount: () => Promise<void>
   clearError: () => void
   refreshUser: () => Promise<void>
 }
@@ -180,6 +182,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [])
 
+  const deleteAccount = useCallback(async () => {
+    setError(null)
+
+    try {
+      await deleteAccountApi()
+      clearTokens()
+      setUser(null)
+    } catch (err) {
+      const apiError = err as ApiError
+      setError(apiError.detail || 'Fiók törlési hiba')
+      throw err
+    }
+  }, [])
+
   const clearError = useCallback(() => {
     setError(null)
   }, [])
@@ -206,6 +222,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     logout,
     updateProfile,
     changePassword,
+    deleteAccount,
     clearError,
     refreshUser,
   }

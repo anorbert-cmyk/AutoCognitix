@@ -104,7 +104,7 @@ describe('HistoryPage', () => {
       refetch: vi.fn(),
     });
     render(<HistoryPage />);
-    expect(screen.getByLabelText('Betöltés...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
   it('should render error state with retry button on fetch failure', () => {

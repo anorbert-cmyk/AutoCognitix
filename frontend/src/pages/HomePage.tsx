@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { useDiagnosisHistory, useUpcomingReminders, useVehicles } from '@/services/hooks'
 import { cn } from '@/lib/utils'
+import { EmptyState, Skeleton } from '@/components/ui'
 
 // Shared focus ring for links/buttons on light surfaces
 const focusRing =
@@ -35,7 +36,7 @@ export default function HomePage() {
   if (isLoading) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8" role="status" aria-busy="true">
-        <span className="sr-only">Betöltés…</span>
+        <span className="sr-only">Betöltés...</span>
         <div className="h-44 animate-pulse rounded-2xl bg-muted" aria-hidden="true" />
       </div>
     )
@@ -365,7 +366,11 @@ function DashboardHome() {
             footerLabel="Garázs megnyitása"
           >
             {vehiclesLoading ? (
-              <CardSkeleton rows={2} />
+              <div className="space-y-2" role="status">
+                <span className="sr-only">Betöltés...</span>
+                <Skeleton className="h-14 rounded-xl" />
+                <Skeleton className="h-14 rounded-xl" />
+              </div>
             ) : vehicles.length > 0 ? (
               <ul className="space-y-2">
                 {vehicles.map((vehicle) => (
@@ -406,11 +411,10 @@ function DashboardHome() {
                 ))}
               </ul>
             ) : (
-              <CardEmpty
+              <EmptyState
                 icon={<Car className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
-                text="Még nincs jármű a garázsban."
-                actionTo="/garage"
-                actionLabel="Jármű hozzáadása"
+                title="Még nincs jármű a garázsban."
+                action={{ label: 'Jármű hozzáadása', to: '/garage' }}
               />
             )}
           </DashboardCard>
@@ -423,7 +427,11 @@ function DashboardHome() {
             footerLabel="Összes előzmény"
           >
             {historyLoading ? (
-              <CardSkeleton rows={2} />
+              <div className="space-y-2" role="status">
+                <span className="sr-only">Betöltés...</span>
+                <Skeleton className="h-14 rounded-xl" />
+                <Skeleton className="h-14 rounded-xl" />
+              </div>
             ) : recentDiagnoses.length > 0 ? (
               <ul className="space-y-2">
                 {recentDiagnoses.map((item) => (
@@ -470,11 +478,10 @@ function DashboardHome() {
                 ))}
               </ul>
             ) : (
-              <CardEmpty
+              <EmptyState
                 icon={<History className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
-                text="Még nincs diagnózis."
-                actionTo="/diagnosis"
-                actionLabel="Első diagnózis indítása"
+                title="Még nincs diagnózis."
+                action={{ label: 'Első diagnózis indítása', to: '/diagnosis' }}
               />
             )}
           </DashboardCard>
@@ -487,7 +494,11 @@ function DashboardHome() {
             footerLabel="Emlékeztetők kezelése"
           >
             {remindersLoading ? (
-              <CardSkeleton rows={2} />
+              <div className="space-y-2" role="status">
+                <span className="sr-only">Betöltés...</span>
+                <Skeleton className="h-14 rounded-xl" />
+                <Skeleton className="h-14 rounded-xl" />
+              </div>
             ) : reminders.length > 0 ? (
               <ul className="space-y-2">
                 {reminders.map((reminder) => (
@@ -621,41 +632,3 @@ function DashboardCard({ icon, title, badge, footerTo, footerLabel, children }: 
   )
 }
 
-function CardSkeleton({ rows }: { rows: number }) {
-  return (
-    <div className="space-y-2" aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="h-14 animate-pulse rounded-xl bg-muted" />
-      ))}
-    </div>
-  )
-}
-
-interface CardEmptyProps {
-  icon: React.ReactNode
-  text: string
-  actionTo: string
-  actionLabel: string
-}
-
-function CardEmpty({ icon, text, actionTo, actionLabel }: CardEmptyProps) {
-  return (
-    <div className="flex flex-col items-center gap-3 py-6 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        {icon}
-      </span>
-      <p className="text-sm text-muted-foreground">{text}</p>
-      <Link
-        to={actionTo}
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground',
-          'transition-colors duration-150 hover:border-primary-200 hover:bg-primary-50/50',
-          focusRing
-        )}
-      >
-        <Plus className="h-4 w-4" aria-hidden="true" />
-        {actionLabel}
-      </Link>
-    </div>
-  )
-}

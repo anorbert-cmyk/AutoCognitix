@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Car, Plus, Loader2, Trash2, ChevronRight, Stethoscope, X } from 'lucide-react'
+import { EmptyState, Skeleton } from '../components/ui'
 import { useToast } from '../contexts/ToastContext'
 import {
   useVehicles,
@@ -224,7 +225,7 @@ export default function GaragePage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc]">
-      <main className="w-full max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
+      <div className="w-full max-w-5xl mx-auto p-4 md:p-8 lg:p-12">
 
         {/* Header */}
         <div className="flex items-start justify-between mb-10">
@@ -243,8 +244,14 @@ export default function GaragePage() {
 
         {/* Loading state */}
         {isLoading && (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="h-8 w-8 animate-spin text-[#2563eb]" aria-label="Betöltés..." />
+          <div
+            role="status"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+          >
+            <span className="sr-only">Betöltés...</span>
+            <Skeleton className="h-48 rounded-2xl" />
+            <Skeleton className="h-48 rounded-2xl" />
+            <Skeleton className="h-48 rounded-2xl" />
           </div>
         )}
 
@@ -258,20 +265,12 @@ export default function GaragePage() {
 
         {/* Empty state */}
         {!isLoading && !error && vehicles.length === 0 && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-16 flex flex-col items-center gap-4 text-center">
-            <div className="text-5xl" aria-hidden="true">🚗</div>
-            <h2 className="text-xl font-bold text-slate-800">Még nincs jármű hozzáadva</h2>
-            <p className="text-slate-500 max-w-xs">
-              Add hozzá első járműved és kövesd nyomon a karbantartási teendőket!
-            </p>
-            <button
-              onClick={handleOpenModal}
-              className="mt-2 flex items-center gap-2 h-11 px-6 rounded-xl bg-[#2563eb] text-white font-bold text-sm hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              Jármű hozzáadása
-            </button>
-          </div>
+          <EmptyState
+            icon={<Car className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
+            title="Még nincs jármű hozzáadva"
+            description="Add hozzá első járműved és kövesd nyomon a karbantartási teendőket!"
+            action={{ label: 'Jármű hozzáadása', onClick: handleOpenModal }}
+          />
         )}
 
         {/* Vehicle grid */}
@@ -287,7 +286,7 @@ export default function GaragePage() {
             ))}
           </div>
         )}
-      </main>
+      </div>
 
       {/* Add Vehicle Modal */}
       {showAddModal && (
