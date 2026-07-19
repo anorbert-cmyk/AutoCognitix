@@ -283,6 +283,15 @@ const DASHBOARD_TOOLS = [
   { icon: History, label: 'Előzmények', to: '/history' },
 ]
 
+// Per-band tinted health chip. -800 text on -100 bg clears WCAG AA (>=4.5:1) at
+// text-xs, unlike bg-muted + -600 text. Bands mirror getHealthScoreColorClass.
+function healthChipClasses(score: number): string {
+  if (score >= 80) return 'bg-green-100 text-green-800'
+  if (score >= 60) return 'bg-yellow-100 text-yellow-800'
+  if (score >= 40) return 'bg-orange-100 text-orange-800'
+  return 'bg-red-100 text-red-800'
+}
+
 function DashboardHome() {
   const { user } = useAuth()
   const { data: vehiclesData, isLoading: vehiclesLoading } = useVehicles()
@@ -378,6 +387,16 @@ function DashboardHome() {
                           {vehicle.license_plate ? ` · ${vehicle.license_plate}` : ''}
                         </span>
                       </span>
+                      {vehicle.health_score != null && (
+                        <span
+                          className={cn(
+                            'ml-2 shrink-0 rounded-full px-2 py-0.5 text-xs font-bold',
+                            healthChipClasses(vehicle.health_score)
+                          )}
+                        >
+                          {vehicle.health_score}
+                        </span>
+                      )}
                       <ChevronRight
                         className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none"
                         aria-hidden="true"

@@ -30,6 +30,7 @@ from app.db.postgres.models import MaintenanceReminder, User, UserVehicle
 from app.db.postgres.session import get_db
 from app.services.vehicle_garage_service import (
     VehicleGarageServiceError,
+    compute_health_score,
     get_vehicle_garage_service,
 )
 
@@ -48,7 +49,11 @@ async def _get_vehicle_or_404(
     db: AsyncSession,
 ) -> UserVehicle:
     service = get_vehicle_garage_service()
-    vehicle = await service.get_vehicle(db, vehicle_id, user_id)
+    try:
+        vehicle = await service.get_vehicle(db, vehicle_id, user_id)
+    except ValueError:
+        # Malformed UUID path param — surface as 404 rather than a 500.
+        vehicle = None
     if not vehicle:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -128,6 +133,13 @@ async def list_vehicles(
             db, str(current_user.id), skip=skip, limit=limit
         )
 
+        # Real per-vehicle health + upcoming-reminder counts (one grouped query).
+        today = date_type.today()
+        vehicle_ids = [str(v.id) for v in vehicles]
+        aggregates = await service.get_reminder_aggregates(
+            db, vehicle_ids, today, str(current_user.id)
+        )
+
         logger.info(
             "Járművek listázva",
             extra={
@@ -136,7 +148,17 @@ async def list_vehicles(
             },
         )
 
-        vehicle_responses = [UserVehicleResponse.model_validate(v) for v in vehicles]
+        # UserVehicleResponse inherits UUIDStrModel, whose before-validator coerces the
+        # ORM's uuid.UUID id/user_id into the schema's str fields — so model_validate is
+        # safe on both PostgreSQL and SQLite. health_score / upcoming_reminders_count are
+        # derived per-vehicle and set after validation.
+        vehicle_responses: List[UserVehicleResponse] = []
+        for v in vehicles:
+            a = aggregates.get(str(v.id), {"overdue": 0, "completed_6mo": 0, "upcoming": 0})
+            resp = UserVehicleResponse.model_validate(v)
+            resp.health_score = compute_health_score(a["overdue"], a["completed_6mo"])
+            resp.upcoming_reminders_count = a["upcoming"]
+            vehicle_responses.append(resp)
         return UserVehicleListResponse(vehicles=vehicle_responses, total=total)
 
     except VehicleGarageServiceError as exc:

@@ -13,10 +13,18 @@ vi.mock('react-router-dom', async () => {
 
 const mockUseDiagnosisHistory = vi.fn();
 const mockUseDiagnosisStats = vi.fn();
+const mockDelete = vi.fn();
 
 vi.mock('@/services/hooks', () => ({
   useDiagnosisHistory: (...args: unknown[]) => mockUseDiagnosisHistory(...args),
   useDiagnosisStats: (...args: unknown[]) => mockUseDiagnosisStats(...args),
+  useDeleteDiagnosis: () => ({ mutateAsync: mockDelete, isPending: false }),
+}));
+
+// test-utils has no ToastProvider, so the real useToast would throw. Mock it
+// per-file, mirroring the page's relative import path (../contexts/ToastContext).
+vi.mock('../../contexts/ToastContext', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
 
 const apiHistoryFixture = {
@@ -26,7 +34,10 @@ const apiHistoryFixture = {
       vehicle_make: 'Volkswagen',
       vehicle_model: 'Golf',
       vehicle_year: 2020,
+      vehicle_vin: 'WVWZZZ1KZAW000001',
       dtc_codes: ['P0301'],
+      symptoms_text: 'Rángatás gyorsításkor és alapjáraton.',
+      confidence_score: 0.91,
       created_at: '2026-01-15',
     },
     {
@@ -34,22 +45,31 @@ const apiHistoryFixture = {
       vehicle_make: 'Skoda',
       vehicle_model: 'Octavia',
       vehicle_year: 2019,
+      vehicle_vin: null,
       dtc_codes: ['P0420'],
+      symptoms_text: 'Katalizátor hatásfok a küszöb alatt.',
+      confidence_score: 0.78,
       created_at: '2026-01-10',
     },
   ],
   total: 2,
+  skip: 0,
+  limit: 10,
+  has_more: false,
 };
+
+const historyResult = (data: unknown) => ({
+  data,
+  isLoading: false,
+  error: null,
+  refetch: vi.fn(),
+});
 
 describe('HistoryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockDelete.mockResolvedValue(undefined);
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(undefined));
     mockUseDiagnosisStats.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -84,7 +104,7 @@ describe('HistoryPage', () => {
       refetch: vi.fn(),
     });
     render(<HistoryPage />);
-    expect(screen.getByText('Betöltés...')).toBeInTheDocument();
+    expect(screen.getByLabelText('Betöltés...')).toBeInTheDocument();
   });
 
   it('should render error state with retry button on fetch failure', () => {
@@ -105,12 +125,7 @@ describe('HistoryPage', () => {
   });
 
   it('should render history items from API when available', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
     expect(screen.getByText('Volkswagen Golf')).toBeInTheDocument();
     expect(screen.getByText('Skoda Octavia')).toBeInTheDocument();
@@ -118,46 +133,117 @@ describe('HistoryPage', () => {
     expect(screen.getByText('P0420')).toBeInTheDocument();
   });
 
-  it('should filter API items based on search query', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+  it('should render the real symptoms_text as the main symptom', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
-    const searchInput = screen.getByPlaceholderText(
-      'Keresés rendszám, alvázszám vagy tünet alapján...',
-    );
-    fireEvent.change(searchInput, { target: { value: 'Skoda' } });
-    expect(screen.getByText('Skoda Octavia')).toBeInTheDocument();
-    expect(screen.queryByText('Volkswagen Golf')).not.toBeInTheDocument();
+    expect(screen.getByText('Rángatás gyorsításkor és alapjáraton.')).toBeInTheDocument();
+    expect(screen.getByText('Katalizátor hatásfok a küszöb alatt.')).toBeInTheDocument();
   });
 
-  it('should show no-match empty state when search yields no results', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+  it('should render the VIN column and fall back to em-dash when VIN is null', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
-    const searchInput = screen.getByPlaceholderText(
-      'Keresés rendszám, alvázszám vagy tünet alapján...',
+    expect(screen.getByText('WVWZZZ1KZAW000001')).toBeInTheDocument();
+    // api-2 has vehicle_vin: null → its row falls back to an em-dash
+    const skodaRow = screen.getByText('Skoda Octavia').closest('tr');
+    expect(skodaRow).toHaveTextContent('—');
+  });
+
+  it('should not render any fabricated status/plate/symptom placeholders', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    expect(screen.queryByText('Javítva')).not.toBeInTheDocument();
+    expect(screen.queryByText('Folyamatban')).not.toBeInTheDocument();
+    expect(screen.queryByText('Függőben')).not.toBeInTheDocument();
+    expect(screen.queryByText('N/A')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nincs megadva')).not.toBeInTheDocument();
+  });
+
+  it('does not filter until "Szűrők alkalmazása" is clicked', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    fireEvent.change(screen.getByLabelText('Gyártó szűrő'), { target: { value: 'Skoda' } });
+    // No client-side filtering: both rows remain rendered.
+    expect(screen.getByText('Volkswagen Golf')).toBeInTheDocument();
+    expect(screen.getByText('Skoda Octavia')).toBeInTheDocument();
+    // The query hook was never invoked with the (unapplied) draft make.
+    const calledWithMake = mockUseDiagnosisHistory.mock.calls.some(
+      (c) => (c[0] as { vehicleMake?: string })?.vehicleMake === 'Skoda',
     );
-    fireEvent.change(searchInput, { target: { value: 'nonexistent-query-xyz' } });
-    expect(
-      screen.getByText('A keresés nem hozott eredményt. Próbáljon más szűrőfeltételeket!'),
-    ).toBeInTheDocument();
+    expect(calledWithMake).toBe(false);
+  });
+
+  it('sends server-side params when filters are applied', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    fireEvent.change(screen.getByLabelText('Gyártó szűrő'), { target: { value: 'Skoda' } });
+    fireEvent.click(screen.getByText('Szűrők alkalmazása'));
+    const calls = mockUseDiagnosisHistory.mock.calls;
+    const lastParams = calls[calls.length - 1][0];
+    expect(lastParams).toEqual(expect.objectContaining({ vehicleMake: 'Skoda', skip: 0 }));
+  });
+
+  it('applies dateTo as an inclusive end-of-day timestamp', () => {
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    fireEvent.change(screen.getByLabelText('Záró dátum'), { target: { value: '2026-01-31' } });
+    fireEvent.click(screen.getByText('Szűrők alkalmazása'));
+    const calls = mockUseDiagnosisHistory.mock.calls;
+    const lastParams = calls[calls.length - 1][0];
+    expect(lastParams).toEqual(
+      expect.objectContaining({ dateTo: '2026-01-31T23:59:59', skip: 0 }),
+    );
+  });
+
+  it('shows the filtered-empty message when active filters match nothing', () => {
+    mockUseDiagnosisHistory.mockReturnValue(
+      historyResult({ items: [], total: 0, skip: 0, limit: 10, has_more: false }),
+    );
+    render(<HistoryPage />);
+    fireEvent.change(screen.getByLabelText('Gyártó szűrő'), { target: { value: 'NincsIlyen' } });
+    fireEvent.click(screen.getByText('Szűrők alkalmazása'));
+    expect(screen.getByText('Nincs a szűrőknek megfelelő találat.')).toBeInTheDocument();
+  });
+
+  it('disables the Next button when has_more is false', () => {
+    mockUseDiagnosisHistory.mockReturnValue(
+      historyResult({ ...apiHistoryFixture, has_more: false }),
+    );
+    render(<HistoryPage />);
+    expect(screen.getByLabelText('Következő oldal')).toBeDisabled();
+  });
+
+  it('enables the Next button when has_more is true', () => {
+    mockUseDiagnosisHistory.mockReturnValue(
+      historyResult({ ...apiHistoryFixture, has_more: true }),
+    );
+    render(<HistoryPage />);
+    expect(screen.getByLabelText('Következő oldal')).not.toBeDisabled();
+  });
+
+  it('deletes a diagnosis after confirmation', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    fireEvent.click(screen.getByLabelText('Törlés: Volkswagen Golf'));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockDelete).toHaveBeenCalledWith('api-1');
+    await Promise.resolve();
+    confirmSpy.mockRestore();
+  });
+
+  it('does not delete when confirmation is cancelled', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
+    render(<HistoryPage />);
+    fireEvent.click(screen.getByLabelText('Törlés: Volkswagen Golf'));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it('should navigate to diagnosis detail when row is clicked', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
     const row = screen.getByText('Volkswagen Golf').closest('tr');
     expect(row).toBeTruthy();
@@ -166,12 +252,7 @@ describe('HistoryPage', () => {
   });
 
   it('should navigate via "Részletek" button click', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
     const detailButtons = screen.getAllByText('Részletek');
     fireEvent.click(detailButtons[0]);
@@ -197,12 +278,7 @@ describe('HistoryPage', () => {
   });
 
   it('should display record count in pagination footer', () => {
-    mockUseDiagnosisHistory.mockReturnValue({
-      data: apiHistoryFixture,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
+    mockUseDiagnosisHistory.mockReturnValue(historyResult(apiHistoryFixture));
     render(<HistoryPage />);
     expect(screen.getByText(/Megjelenítve:/)).toBeInTheDocument();
   });

@@ -123,6 +123,29 @@ describe('HomePage — dashboard (logged in)', () => {
     expect(screen.getByText('1 jármű')).toBeInTheDocument();
   });
 
+  it('shows a health-score chip for a garage vehicle that has one', () => {
+    loginAs('Barna Norbert');
+    hooksState.vehicles = {
+      data: {
+        vehicles: [
+          {
+            id: 'v1',
+            make: 'Volkswagen',
+            model: 'Golf',
+            year: 2018,
+            license_plate: 'ABC-123',
+            nickname: null,
+            health_score: 90,
+          },
+        ],
+        total: 1,
+      },
+      isLoading: false,
+    };
+    render(<HomePage />);
+    expect(screen.getByText('90')).toBeInTheDocument();
+  });
+
   it('shows an add-vehicle empty state when the garage is empty', () => {
     loginAs('Barna Norbert');
     hooksState.vehicles = { data: { vehicles: [], total: 0 }, isLoading: false };

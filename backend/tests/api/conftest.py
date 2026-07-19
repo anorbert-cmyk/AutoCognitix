@@ -688,12 +688,14 @@ def app(
     from app.api.v1.endpoints.vehicles import router as vehicles_router
     from app.api.v1.endpoints.auth import router as auth_router
     from app.api.v1.endpoints.health import router as health_router
+    from app.api.v1.endpoints.garage import router as garage_router
 
     test_app.include_router(dtc_router, prefix="/api/v1/dtc", tags=["DTC"])
     test_app.include_router(diagnosis_router, prefix="/api/v1/diagnosis", tags=["Diagnosis"])
     test_app.include_router(vehicles_router, prefix="/api/v1/vehicles", tags=["Vehicles"])
     test_app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
     test_app.include_router(health_router, prefix="/api/v1", tags=["Health"])
+    test_app.include_router(garage_router, prefix="/api/v1/garage", tags=["Garage"])
 
     return test_app
 
