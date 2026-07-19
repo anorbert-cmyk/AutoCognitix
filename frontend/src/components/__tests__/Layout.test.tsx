@@ -73,14 +73,36 @@ describe('Layout — grouped navigation', () => {
     expect(screen.getByRole('link', { name: /Járműveim/ })).toHaveAttribute('href', '/garage');
   });
 
-  it('no longer renders the dead /settings link', () => {
+  it('keeps Beállítások out of the main grouped navigation', () => {
+    authState.value = {
+      user: { full_name: 'Barna Norbert', email: 'barna@example.com' },
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    };
     render(<Layout />);
-    // Open every group; none should expose the removed Beállítások/settings link.
+    // Open every intent group; the flat Beállítások link must not live in the main nav.
     ['Diagnosztika', 'Garázs', 'Szerviz & Árak', 'Tudástár'].forEach((label) => {
       fireEvent.click(screen.getByRole('button', { name: label }));
     });
-    expect(screen.queryByText('Beállítások')).not.toBeInTheDocument();
+    const mainNav = screen.getByRole('navigation', { name: 'Fő navigáció' });
+    expect(within(mainNav).queryByText('Beállítások')).not.toBeInTheDocument();
+    expect(within(mainNav).queryByRole('link', { name: /Beállítások/ })).not.toBeInTheDocument();
+  });
+
+  it('exposes a Beállítások link to /settings in the desktop account menu when authenticated', () => {
+    authState.value = {
+      user: { full_name: 'Barna Norbert', email: 'barna@example.com' },
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    };
+    render(<Layout />);
+    // Account menu is collapsed initially → no settings link exposed yet.
     expect(document.querySelector('a[href="/settings"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Fiók menü' }));
+    const settingsLink = screen.getByRole('link', { name: /Beállítások/ });
+    expect(settingsLink).toHaveAttribute('href', '/settings');
   });
 
   it('closes an open group when Escape is pressed', () => {

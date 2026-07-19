@@ -147,7 +147,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 
         {/* Error Message */}
         {hasError && (
-          <p id={errorId} className="text-sm text-destructive" role="alert">
+          <p id={errorId} className="text-sm text-red-600" role="alert">
             {error}
           </p>
         )}

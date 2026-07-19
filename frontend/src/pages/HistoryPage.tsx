@@ -4,7 +4,7 @@
  */
 
 import { useState, type MouseEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Filter,
@@ -13,10 +13,8 @@ import {
   BarChart3,
   Zap,
   PlusCircle,
-  Bell,
-  Wrench,
   Trash2,
-  Loader2,
+  History,
 } from 'lucide-react';
 
 import {
@@ -25,6 +23,7 @@ import {
   useDeleteDiagnosis,
 } from '@/services/hooks';
 import { formatDate, type HistoryParams } from '@/services/diagnosisService';
+import { EmptyState, Skeleton } from '@/components/ui';
 import { useToast } from '../contexts/ToastContext';
 
 const PAGE_SIZE = 10;
@@ -113,54 +112,9 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      {/* Header */}
-      <header className="flex items-center justify-between whitespace-nowrap border-b border-slate-300 px-6 py-3 bg-white sticky top-0 z-50">
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-8 bg-[#0055d4] flex items-center justify-center rounded-lg shadow-sm">
-            <Wrench className="w-5 h-5 text-white" />
-          </div>
-          <h2 className="text-slate-900 text-lg font-bold leading-tight tracking-tight uppercase italic">
-            MechanicAI <span className="text-[#0055d4]">Pro</span>
-          </h2>
-        </div>
-        <div className="flex flex-1 justify-end gap-8 items-center">
-          <nav className="hidden md:flex items-center gap-8">
-            <Link
-              to="/"
-              className="text-slate-700 hover:text-[#0055d4] text-sm font-bold uppercase tracking-wider transition-colors"
-            >
-              Vezérlőpult
-            </Link>
-            <Link
-              to="/diagnosis"
-              className="text-slate-700 hover:text-[#0055d4] text-sm font-bold uppercase tracking-wider transition-colors"
-            >
-              Diagnosztika
-            </Link>
-            <Link
-              to="/history"
-              className="text-[#0055d4] text-sm font-black uppercase tracking-wider border-b-2 border-[#0055d4] py-1"
-            >
-              Előzmények
-            </Link>
-          </nav>
-          <div className="flex gap-3">
-            <button
-              aria-label="Értesítések"
-              className="flex w-10 h-10 cursor-pointer items-center justify-center rounded bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 transition-colors"
-            >
-              <Bell className="w-5 h-5" />
-            </button>
-            <div className="h-10 w-10 rounded-full border-2 border-[#0055d4] p-0.5">
-              <div className="bg-slate-200 rounded-full w-full h-full" />
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
+    <div className="bg-white text-slate-900">
+      {/* Main Content — page chrome (header/nav/footer) is provided by Layout */}
+      <div className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
         {/* Page Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
           <div className="flex flex-col gap-1">
@@ -303,12 +257,13 @@ export default function HistoryPage() {
               <tbody className="divide-y divide-slate-200">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center">
-                      <Loader2
-                        className="h-6 w-6 animate-spin mx-auto text-[#0055d4]"
-                        role="img"
-                        aria-label="Betöltés..."
-                      />
+                    <td colSpan={6} className="px-6 py-12" role="status">
+                      <span className="sr-only">Betöltés...</span>
+                      <div className="space-y-3">
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                        <Skeleton className="h-10 w-full" />
+                      </div>
                     </td>
                   </tr>
                 ) : error ? (
@@ -327,23 +282,18 @@ export default function HistoryPage() {
                   </tr>
                 ) : rows.length === 0 && hasActiveFilter ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                      Nincs a szűrőknek megfelelő találat.
+                    <td colSpan={6}>
+                      <EmptyState title="Nincs a szűrőknek megfelelő találat." />
                     </td>
                   </tr>
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center">
-                      <p className="text-slate-500 font-medium mb-3">
-                        Még nincs diagnosztikai előzmény.
-                      </p>
-                      <Link
-                        to="/diagnosis"
-                        className="inline-flex items-center justify-center rounded-lg h-10 bg-[#0055d4] text-white px-5 font-bold uppercase tracking-widest text-xs hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 gap-2"
-                      >
-                        <PlusCircle className="w-4 h-4" />
-                        Új diagnózis indítása
-                      </Link>
+                    <td colSpan={6}>
+                      <EmptyState
+                        icon={<History className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
+                        title="Még nincs diagnosztikai előzmény."
+                        action={{ label: 'Új diagnózis indítása', to: '/diagnosis' }}
+                      />
                     </td>
                   </tr>
                 ) : (
@@ -486,39 +436,7 @@ export default function HistoryPage() {
             </div>
           </div>
         </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-300 px-6 py-6 mt-12 bg-white">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 bg-slate-500 rounded-sm" />
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">
-              © 2023 MechanicAI Diagnosztikai Rendszerek
-            </p>
-          </div>
-          <div className="flex gap-6">
-            <a
-              href="#"
-              className="text-slate-500 hover:text-[#0055d4] text-xs font-bold uppercase tracking-widest transition-colors"
-            >
-              Dokumentáció
-            </a>
-            <a
-              href="#"
-              className="text-slate-500 hover:text-[#0055d4] text-xs font-bold uppercase tracking-widest transition-colors"
-            >
-              Támogatás
-            </a>
-            <a
-              href="#"
-              className="text-slate-500 hover:text-[#0055d4] text-xs font-bold uppercase tracking-widest transition-colors"
-            >
-              API Státusz
-            </a>
-          </div>
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }

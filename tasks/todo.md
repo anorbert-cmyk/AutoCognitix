@@ -1,7 +1,7 @@
 # AutoCognitix Sprint Tracker
 
-**Utolsó frissítés:** 2026-03-29
-**Aktuális sprint:** Sprint 11 (Frontend Testing + MEDIUM audit fixes)
+**Utolsó frissítés:** 2026-07-19
+**Aktuális sprint:** Sprint S3 befejezve — Settings/GDPR + megosztott állapot-komponensek + chrome-dedup
 
 ## Sprint Státusz Összefoglaló
 
@@ -14,8 +14,68 @@
 | 9 | ✅ KÉSZ | Post-Sprint audit: 3 CRITICAL + 6 HIGH javítva |
 | 9.1 | ✅ KÉSZ | Garage CI: tuple fix, Pydantic→dict, cascade, migration |
 | 10 | ✅ KÉSZ | Leaflet map, NHTSA recalls, MyPy, CodeQL log injection |
-| 11 | 🔄 FOLYAMATBAN | Frontend tesztek (5/93 → 40+), MEDIUM audit fixek |
-| 12 | 📋 TERVEZETT | SSE streaming, email auth, jelszó erősség |
+| Nav (#22) | ✅ KÉSZ | Header: 11 elem → 4 intent-alapú dropdown + fiók menü, /settings törölve |
+| S1 (#23) | ✅ KÉSZ | Igazmondó ResultPage, Panaszok tab, HomePage redesign, NewDiagnosisPage törölve |
+| S2 (#24) | ✅ KÉSZ | Valós garázs health, igazmondó HistoryPage, streaming parts, 5 UUID→str 500 fix |
+| S3 | ✅ KÉSZ | Settings/Profil oldal, GDPR export/törlés UI, megosztott állapot-komponensek + chrome-dedup |
+
+---
+
+# Header Refactor - Navigáció (#22) (2026-07-19)
+
+## Status: ✅ COMPLETED
+
+### Summary
+A 11 elemű, lapos header átcsoportosítva 4 intent-alapú dropdown menübe + fiók menübe.
+
+### Változások
+- [x] 4 dropdown: **Diagnosztika**, **Garázs**, **Szerviz & Árak**, **Tudástár** + account menü
+- [x] Akadálymentes `NavDropdown` komponens (disclosure pattern: aria-expanded, billentyűzet-navigáció)
+- [x] Halott `/settings` link eltávolítva (nincs mögötte oldal → S3-ban pótlandó)
+
+---
+
+# Sprint S1 - Igazmondó Frontend (#23) (2026-07-19)
+
+## Status: ✅ COMPLETED
+
+### Summary
+A frontend megtisztítva a kitalált/placeholder adatoktól; minden nézet csak a backend által ténylegesen visszaadott mezőket jeleníti meg.
+
+### ResultPage truthfulness
+- [x] Fabrikált "főtengely" mondat, hamis ONLINE badge és kitalált #4829 azonosító **eltávolítva**
+- [x] Valós mezők renderelve: `urgency`, `safety_warnings`, `diagnostic_steps`, `sources`, `similar_complaints`
+- [x] Külső linkek csak `http`/`https` allowlist után jeleníthetők meg
+
+### Egyéb
+- [x] VehicleDetailPage "Panaszok" (complaints) tab
+- [x] HomePage teljes redesign: marketing szekció + bejelentkezett dashboard, őszinte stat strip (26 816 node / 35 000+ vektor)
+- [x] `NewDiagnosisPage.tsx` törölve (halott route)
+- [x] Publikus HomePage többé nem indít nem-hitelesített reminder-hívást (nincs 401 a landolón)
+
+---
+
+# Sprint S2 - Valós Garázs + Streaming Parts (#24) (2026-07-19)
+
+## Status: ✅ COMPLETED
+
+### Summary
+A garázs valós, aggregátum-alapú health pontszámot ad; a history igazmondó; a streaming diagnózis parts-dúsítást kapott. Bónuszként 5 élőben törött endpoint javítva.
+
+### Valós garázs-adatok
+- [x] Valós `health_score` és `upcoming_reminders_count` egyetlen csoportosított feltételes aggregátumból (`func.sum(case(...))` + `group_by`)
+- [x] Közös, tiszta scoring függvény → **list↔health paritás** (a lista és a detail nézet ugyanazt a pontszámot adja)
+
+### Igazmondó HistoryPage
+- [x] Valós `vehicle_vin` és `symptoms_text` megjelenítése
+- [x] Élő szerver-oldali szűrők, `has_more` alapú lapozás, rekord törlés
+
+### Streaming parts + bugfix
+- [x] Parts-dúsítás a streaming (SSE) pipeline-ban: 5s time-box, hiba-izoláció, perzisztálás-paritás a streamelttel
+- [x] BONUS: 5 élőben törött garázs-endpoint javítva (Pydantic UUID→str 500-ak) közös `UUIDStrModel` before-validator bázissal; hibás id → 404
+
+### Munkamodell
+Fable orchestrator + Opus 4.8 max-thinking implementer ágensek: specifikáció → párhuzamos implementáció diszjunkt fájl-tulajdonlással → 5-lencsés review → konszolidált javító kör.
 
 ---
 

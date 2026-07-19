@@ -25,6 +25,7 @@ const PricingPage = lazy(() => import('./pages/PricingPage'))
 const BlogPage = lazy(() => import('./pages/BlogPage'))
 const GaragePage = lazy(() => import('./pages/GaragePage'))
 const VehicleDetailPage = lazy(() => import('./pages/VehicleDetailPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 // Auth pages
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -108,6 +109,14 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <VehicleDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="settings"
+                  element={
+                    <ProtectedRoute>
+                      <SettingsPage />
                     </ProtectedRoute>
                   }
                 />

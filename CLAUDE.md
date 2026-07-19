@@ -4,7 +4,7 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint 10 befejezve - Leaflet térkép + NHTSA visszahívás badge + Garage CI javítások
+**Státusz:** Sprint S3 befejezve — Settings/GDPR + megosztott állapot-komponensek + chrome-dedup
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
@@ -283,7 +283,7 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 | `POST /api/v1/vehicles/decode-vin` | ✅ Kész | VIN dekódolás |
 | `POST /api/v1/auth/login` | ✅ Kész | Bejelentkezés (JWT) |
 | `GET /demo` | ✅ Kész | Demo bemutató oldal (P0300 szimuláció, valós árak) |
-| `GET /api/v1/garage/vehicles` | ✅ Kész | Felhasználó járműveinek listázása |
+| `GET /api/v1/garage/vehicles` | ✅ Kész | Felhasználó járműveinek listázása (valós `health_score` + `upcoming_reminders_count`, list↔health paritás) |
 | `POST /api/v1/garage/vehicles` | ✅ Kész | Jármű hozzáadása garázshoz |
 | `GET /api/v1/garage/vehicles/{id}/recalls` | ✅ Kész | Jármű NHTSA visszahívásai |
 | `GET /api/v1/garage/vehicles/{id}/health` | ✅ Kész | Jármű egészségi pontszám |
@@ -312,6 +312,18 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-07-19 - Sprint S1/S2 + Header Refactor (#22/#23/#24)
+
+- **Pydantic v2 nem koercál UUID→str**: ORM `Uuid` oszlop `str` mezőre validálva `ValidationError`-t / 500-at dob. Megoldás: közös `UUIDStrModel` bázis `@field_validator(..., mode="before", check_fields=False)`-szal (`schemas/garage.py`), ami minden ORM-alapú response modell őse. Öt élőben törött garázs-endpoint javult ettől (BONUS #24).
+- **SQLAlchemy `Uuid(as_uuid=True)` bind UUID objektummal**: str bind eltörik a SQLite teszt-harness alatt (`'str' object has no attribute 'hex'`). Megoldás: `_as_uuid()` helper (`vehicle_garage_service.py`), minden bind-paraméter és WHERE-feltétel `UUID`-ra konvertálva. Hibás id → 404 (nem 500).
+- **Teszt-app router hiányok elrejtik a törött endpointokat**: a garázs-endpointok 500-ai azért maradtak rejtve, mert a teszt-app nem regisztrálta minden routert. Szabály: `tests/api/conftest.py`-ban MINDEN router regisztrálva legyen, hogy a smoke-tesztek lássák őket.
+- **AsyncSession tiltja a konkurrens query-t**: `asyncio.gather()` több `session.execute()`-tal `InterfaceError`-t okoz. Megoldás: egyetlen csoportosított feltételes aggregátum — `func.coalesce(func.sum(case((cond, 1), else_=0)), 0)` + `.group_by(vehicle_id)` — a per-jármű reminder számláláshoz (N+1 és gather helyett).
+- **Kitalált UI-adat = bizalmi hiba**: a ResultPage fabrikált mondatot ("főtengely"), ONLINE badge-et és #4829 azonosítót jelenített meg valós adat nélkül. Szabály: soha ne renderelj kitalált értéket — igazmondó üres állapotok (empty state), csak a backend által ténylegesen visszaadott mezők. Külső linkek csak `http`/`https` allowlist után.
+- **Publikus oldal ne hívjon védett endpointot**: a HomePage nem-bejelentkezett látogatóként reminder-hívást indított (401). Fix: a hívás csak `isAuthenticated` mögött fut.
+- **Grouped aggregate = list↔health paritás**: a járműlista és a health-endpoint UGYANAZT a tiszta scoring függvényt használja ugyanabból az aggregátumból → nincs eltérés a két nézet pontszáma között.
+- **Streaming parts enrichment izolációval**: az SSE pipeline parts-dúsítása 5s time-box-szal fut, a hiba izolálva (a stream nem esik el), és a perzisztált eredmény paritásban van a streamelttel.
+- **Munkamodell**: Fable orchestrator + Opus 4.8 max-thinking implementer ágensek. Specifikáció → párhuzamos implementáció DISZJUNKT fájl-tulajdonlással → 5-lencsés review (Security / Logic / Concurrency / Data / Ops) → konszolidált javító kör.
 
 ### 2026-03-29 - Sprint 9/10 CI Javítások
 
@@ -408,6 +420,32 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - [x] MyPy type: ignore fix (SQLAlchemy + Pydantic no-any-return)
 - [x] CodeQL log injection fix (4 HIGH severity sanitize_log)
 - [x] Alembic unused globals fix (branch_labels/depends_on eltávolítva, lgtm suppress)
+
+### Header Refactor - Navigáció (#22): ✅ BEFEJEZVE
+- [x] 11 elemű header → 4 intent-alapú dropdown (Diagnosztika / Garázs / Szerviz & Árak / Tudástár) + fiók menü
+- [x] Akadálymentes `NavDropdown` (disclosure pattern)
+- [x] Halott `/settings` link eltávolítva
+
+### Sprint S1 - Igazmondó Frontend (#23): ✅ BEFEJEZVE
+- [x] ResultPage truthfulness: fabrikált "főtengely" mondat / ONLINE badge / #4829 azonosító eltávolítva
+- [x] ResultPage: `urgency`, `safety_warnings`, `diagnostic_steps`, `sources`, `similar_complaints` renderelése (http/https allowlist)
+- [x] VehicleDetailPage "Panaszok" (complaints) tab
+- [x] HomePage teljes redesign: marketing + bejelentkezett dashboard, őszinte stat strip (26 816 / 35 000+)
+- [x] `NewDiagnosisPage.tsx` törölve
+- [x] Publikus HomePage nem indít nem-hitelesített reminder-hívást
+
+### Sprint S2 - Valós Garázs + Streaming Parts (#24): ✅ BEFEJEZVE
+- [x] Valós `health_score` / `upcoming_reminders_count` egyetlen csoportosított aggregátumból (közös tiszta scoring, list↔health paritás)
+- [x] Igazmondó HistoryPage: valós `vehicle_vin` / `symptoms_text`, élő szerver-oldali szűrők, `has_more` lapozás, törlés
+- [x] Parts-dúsítás a streaming pipeline-ban (5s time-box, hiba-izoláció, perzisztálás-paritás)
+- [x] BONUS: 5 élőben törött garázs-endpoint javítva (Pydantic UUID→str 500-ak) közös `UUIDStrModel` before-validator bázissal; hibás id → 404
+
+### Sprint S3 - Settings/Profil + GDPR: ✅ BEFEJEZVE
+- [x] Settings/Profil oldal (a #22-ben eltávolított `/settings` pótlása valós funkcióval)
+- [x] GDPR: adat-export + fiók törlés UI a meglévő backend flow-ra kötve
+- [x] Megosztott állapotok (shared loading/empty/error state komponensek) egységesítése + HistoryPage chrome-dedup
+- [ ] Follow-up: app-szintű main→div landmark rendezés (5 további oldal)
+- [ ] Follow-up: tegezés/magázás egységesítés
 
 ## Deployment - Railway
 

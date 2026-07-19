@@ -58,6 +58,20 @@ export interface ResetPasswordData {
   new_password: string
 }
 
+export interface UserDataExport {
+  gdpr_article: string
+  export_date: string
+  user: {
+    id: string
+    email: string
+    full_name: string | null
+    role: string
+    created_at: string | null
+    last_login_at: string | null
+  }
+  diagnosis_sessions: Array<Record<string, unknown>>
+}
+
 // =============================================================================
 // Auth State (cookie-based - no localStorage)
 // =============================================================================
@@ -206,6 +220,23 @@ export async function changePassword(data: ChangePasswordData): Promise<void> {
 }
 
 /**
+ * Export all of the current user's personal data.
+ * Backed by GDPR Article 20 (data portability) — returns a machine-readable JSON.
+ */
+export async function exportData(): Promise<UserDataExport> {
+  const response = await api.get<UserDataExport>('/auth/me/export')
+  return response.data
+}
+
+/**
+ * Permanently delete the current user's account and all associated data.
+ * The backend takes no request body.
+ */
+export async function deleteAccount(): Promise<void> {
+  await api.delete('/auth/me')
+}
+
+/**
  * Request a password reset email.
  * Always returns success for security (doesn't reveal if email exists).
  */
@@ -233,6 +264,8 @@ export const authService = {
   getCurrentUser,
   updateProfile,
   changePassword,
+  exportData,
+  deleteAccount,
   forgotPassword,
   resetPassword,
   getAccessToken,

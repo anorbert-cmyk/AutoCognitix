@@ -16,16 +16,18 @@ AutoCognitix is an intelligent vehicle diagnostic platform that combines AI-powe
 
 ## Key Features
 
-- **AI-Powered Diagnosis** - Uses RAG (Retrieval-Augmented Generation) with LangChain for intelligent problem analysis
+- **AI-Powered Diagnosis** - Uses RAG (Retrieval-Augmented Generation) with LangChain for intelligent problem analysis, streamed to the UI with live parts-price enrichment (time-boxed, failure-isolated)
 - **DTC Code Lookup** - Comprehensive database of OBD-II diagnostic trouble codes with Hungarian descriptions
 - **Symptom Analysis** - Natural language processing for Hungarian symptom descriptions using huBERT embeddings
 - **Knowledge Graph** - Neo4j-based diagnostic paths connecting DTCs, symptoms, components, and repairs
 - **Vector Search** - Semantic similarity search using Qdrant for finding related issues
 - **VIN Decoding** - Decode Vehicle Identification Numbers using NHTSA API
 - **Recall Information** - Access to NHTSA recall database and historical complaint data
-- **Vehicle Garage** - Personal vehicle management with maintenance reminders, health scoring, and cost tracking
+- **Vehicle Garage** - Personal vehicle management with maintenance reminders, cost tracking, and real health scores derived from live reminder data (list and detail views stay in sync)
+- **Diagnosis History** - Truthful history of past diagnoses with real vehicle VIN and symptom text, server-side filtering, pagination, and delete
 - **Interactive Service Map** - Leaflet-powered map to find and compare nearby repair shops
 - **NHTSA Recall Alerts** - Real-time recall badge on diagnosis results, linked to specific vehicles in garage
+- **Intent-Based Navigation** - Header grouped into four accessible dropdowns (Diagnostics, Garage, Service & Prices, Knowledge Base) plus an account menu
 
 ## Tech Stack
 
@@ -134,9 +136,9 @@ Automatic dependency updates:
 | `/api/v1/dtc/search` | GET | Search DTC codes |
 | `/api/v1/dtc/{code}` | GET | Get DTC details |
 | `/api/v1/vehicles/decode-vin` | POST | Decode VIN via NHTSA |
-| `/api/v1/garage/vehicles` | GET / POST | List or add vehicles to garage |
+| `/api/v1/garage/vehicles` | GET / POST | List (with real health score & upcoming reminder count) or add vehicles to garage |
 | `/api/v1/garage/vehicles/{id}` | GET / PUT / DELETE | Vehicle CRUD |
-| `/api/v1/garage/vehicles/{id}/health` | GET | Vehicle health score |
+| `/api/v1/garage/vehicles/{id}/health` | GET | Vehicle health score (aggregate-based, matches list view) |
 | `/api/v1/garage/vehicles/{id}/recalls` | GET | NHTSA recalls for vehicle |
 | `/api/v1/garage/reminders` | GET / POST | Maintenance reminders |
 | `/api/v1/garage/costs` | GET / POST | Maintenance cost tracking |
