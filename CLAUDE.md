@@ -4,25 +4,35 @@
 
 **Cél:** AI-alapú gépjármű-diagnosztikai platform magyar nyelvtámogatással, hardver nélküli manuális DTC kód és tünet bevitellel.
 
-**Státusz:** Sprint S3 befejezve — Settings/GDPR + megosztott állapot-komponensek + chrome-dedup
+**Státusz:** Sprint S4 befejezve — Szemantikus keresés helyreállítva (ONNX embedding + Qdrant collection-drift + DTC szabály egységesítés)
 
 **Deployment:** Railway (PostgreSQL + Redis) + Neo4j Aura + Qdrant Cloud
 
-## Aktuális Adatbázis Állapot (2026-02-08)
+## Aktuális Adatbázis Állapot
 
-| Adatbázis | Tartalom | Méret |
-|-----------|----------|-------|
-| **Neo4j Aura** | Vehicles, DTC, Complaints, Recalls | 26,816 node |
-| **Qdrant Cloud** | HuBERT embeddings (768-dim) | 35,000+ vector |
-| **PostgreSQL** | Users, Sessions, History | Kész |
-| **Redis** | Cache, Session | Kész |
+> ⚠️ **A repó forrásai ELLENTMONDANAK egymásnak.** Ezek dokumentált értékek, nem élő mérések — egyik szám sem lett Qdrant/Neo4j lekérdezéssel megerősítve ebben a sprintben. Amíg valaki nem futtat egy `GET /collections`-t a Qdrant Cloudon és egy node-count Cyphert a Neo4j Aurán, mindkét oszlop bizonytalan. **Ne írd át egyiket sem "rendrakásból" — előbb mérd meg.**
+
+| Adatbázis | Tartalom | Méret | Forrás |
+|-----------|----------|-------|--------|
+| **Neo4j Aura** | Vehicles, DTC, Complaints, Recalls | **26,816 node** *vagy* **65,207 node** | 26,816: ez a sor + `docs/DATABASE_MAP.md`, `docs/project-description-hu.md`, `docs/ARCHITECTURE.md` (mind ezt a táblát idézi vissza). 65,207: `docs/TECHNICAL_DESCRIPTION.md` §2.2 és `docs/COWORK_BRIEF.md` — **típusonkénti bontással** (DTCCode 6 814 + Vehicle 7 289 + Engine 1 104 + Complaint 50 000). |
+| **Qdrant Cloud** | HuBERT embeddings (768-dim), **egyetlen `autocognitix` collection** | **35,000+ vector** *vagy* **54,652 vector** | 35,000+: ez a sor + `docs/project-description-hu.md`. 54,652: `docs/COWORK_BRIEF.md` és `backend/tests/unit/test_qdrant_client.py`; a kód `~54k`-ként hivatkozik rá (`backend/app/core/config.py` `HUBERT_REVISION` komment, `backend/app/services/embedding_service.py` modul-docstring). |
+| **PostgreSQL** | Users, Sessions, History, NHTSA panaszok | Kész (`docs/COWORK_BRIEF.md`: 751 422 panasz) | — |
+| **Redis** | Cache, Session | Kész | — |
+
+**Amit tudni érdemes a bontásról:** a 65,207-es és az 54,652-es szám **típusonkénti bontással együtt** szerepel, a 26,816 / 35,000+ nem. Ez nem bizonyíték, csak jelzés arról, melyik forrás áll közelebb egy valódi lekérdezéshez. A `docs/EMBEDDING_ARCHITECTURE_DECISION.md` §8.6.2 nyitott kérdésként tartja nyilván.
+
+**Egy külön szám, ami MÉRVE lett:** a Neo4j gráf ~**107** `MENTIONS_DTC` élt tartalmazott (complaint → DTC), ami miatt a `common-issues` DTC-ága gyakorlatilag üres volt. Forrás: `scripts/sync_neo4j_sprint9.py`. Ez volt a bizonyíték arra, hogy a feature egy hamis feltevésre épült (hogy a fogyasztói panaszok idéznek DTC kódokat).
 
 ### HuBERT Embedding - Miért használjuk?
 A **SZTAKI-HLT/hubert-base-cc** modell magyar nyelvre optimalizált BERT változat:
 - **Szemantikus keresés**: Panasz/tünet → hasonló DTC/recall keresés
 - **768-dim vektorok**: Qdrant-ban tárolva, cosine similarity alapú keresés
-- **Lokális futás**: Nincs API limit (Groq kimerült), GPU/MPS gyorsítás
+- **Lokális futás**: Nincs API limit (Groq kimerült)
 - **RAG alapja**: A diagnosztikai AI innen keres releváns információt
+
+**Runtime (2026-07-25 óta):** a production **ONNX Runtime fp32**-vel futtatja a huBERT-et — torch és transformers **nélkül**. A modell commit SHA-ra van pinelve (`HUBERT_REVISION`), a gráfot a `Dockerfile.prod` `onnx-export` stage-e exportálja, és minden build bebizonyítja, hogy a gráf reprodukálja a `backend/tests/fixtures/hubert_reference_vectors.json` befagyasztott vektorait. Részletek: **`docs/EMBEDDING_ARCHITECTURE_DECISION.md`**.
+
+**Qdrant collection-modell:** minden vektor a **`autocognitix`** collectionben van, `type` payload-diszkriminátorral (`dtc` / `complaint` / `recall`). Az öt `*_hu` collection létezik, de **üres**. `type = "symptom"` nem létezik — a RAG symptom-lába `type="complaint"`-re képez.
 
 ## Tech Stack
 
@@ -278,8 +288,9 @@ Teammate 3: Compatibility (Python 3.9, browser support, Railway)
 
 | Végpont | Státusz | Leírás |
 |---------|---------|--------|
-| `POST /api/v1/diagnosis/analyze` | ✅ Kész | Fő diagnosztika (LLM + RAG + PartsPriceService) |
-| `GET /api/v1/dtc/search` | ✅ Kész | DTC keresés |
+| `POST /api/v1/diagnosis/analyze` | ✅ Kész | Fő diagnosztika (LLM + RAG + PartsPriceService). A RAG a unified `autocognitix` collectiont kérdezi `type=dtc` és `type=complaint` lábbal |
+| `GET /api/v1/dtc/search` | ✅ Kész | DTC keresés. A találatok ugyanazon a SAE J2012 validátoron mennek át, mint a részletek-endpoint — nem lehet olyat találni, amit utána nem lehet megnyitni |
+| `GET /api/v1/vehicles/{make}/{model}/common-issues` | ✅ Kész | Jármű gyakori problémái. **Két független rangsor:** `components` (NHTSA panasz-komponens gyakoriság PostgreSQL-ből, `share` + crash/fire/injury/death számokkal) és `issues` (DTC-k a Neo4j gráfból — ritkán van benne adat). Plusz `total_complaints` (a `share` nevezője) és `sources` (forrásonkénti betöltési státusz, hogy egy adattár-kiesés megkülönböztethető legyen a valódi üres eredménytől). `limit` query paraméter. Kiesésnél **200 + igazmondó üres lista**, nem 500 |
 | `POST /api/v1/vehicles/decode-vin` | ✅ Kész | VIN dekódolás |
 | `POST /api/v1/auth/login` | ✅ Kész | Bejelentkezés (JWT) |
 | `GET /demo` | ✅ Kész | Demo bemutató oldal (P0300 szimuláció, valós árak) |
@@ -312,6 +323,19 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - CarAPI, CarMD
 
 ## Tanulságok és Döntések
+
+### 2026-07-25 - Sprint S4: Szemantikus keresés helyreállítása
+
+- **A csendes fallback hónapokig elrejt egy zászlóshajó funkciót.** A prod image-ből hiányzó torch miatt az `embed_text()` `[0.0]*768`-at adott vissza. A nullvektor **típushelyes** (768 float), tehát minden dimenzió- és típusellenőrzés átengedte — cosine keresésnél viszont minden score 0.0, amit a `score_threshold` üres listává alakít. **Az üres lista pedig egy keresőben legitim válasz.** Három egymásra rakódó csendes fallback (embedding → RAG `except` → `_fallback_diagnosis()`) minden szinten hibát üres eredménnyé alakított. Szabály: **a hiba legyen megkülönböztethető a valóban-üres eredménytől, és a megkülönböztetés érjen el az API kontraktusig, ne csak egy log-sztringig.** Ezért kapott a `common-issues` egy `sources` státusz-objektumot, és ezért dob ma `EmbeddingUnavailableError`-t a hiányzó backend.
+- **MINDEN mai javítás először FÉL javítás volt.** Nem egy-egy elnézés, hanem visszatérő minta: a retrieval-lábat átirányítottuk, de a **fogyasztóját** nem (a `similar_cases` payload `description` kulcsot olvasott, amit a complaint payloadok nem hordoznak → öt üres bejegyzés a magyar promptban); a DTC szabályt szigorítottuk a részletek-úton, de a **keresésen** nem (a user megtalálta a `PEACE`-t, aztán nem tudta megnyitni); az olvasási utakat átvittük a unified collectionre, de a **GDPR törlést** nem (a törlés semmit nem törölt, miközben sikert jelentett). Szabály: **a bug megtalálása nem a munka — minden hívó végigjárása az.** Grep az egész repóra, ne egy listából dolgozz.
+- **Egy őr, ami soha nem fut le, nem őr.** A befagyasztott referenciavektor-teszt `skipif`-fel indult, ami **minden környezetben** skippelt (a `.onnx` sehol nincs meg CI-ben és dev gépen sem) — nulla környezetben futott. Egy másik drift-teszt egy hiányzó függőség miatt volt véglegesen skippelve. Javítás: az egyikből **Docker build-kapu** lett (a `Dockerfile.prod` `onnx-export` stage-e minden buildnél assertálja), a másikból **agreement-teszt**: a `scripts/` importerek ma valóban importálják a kanonikus `app.core.dtc_codes` modult (nincs másolt regex), és egy teszt assertálja, hogy a két független extraction pipeline azonos kimenetet ad.
+- **A duplikáció volt a root cause, nem stíluskérdés.** A DTC szabály **tíz** független regexként létezett (két request-séma, metrics middleware, hat `scripts/` importer), és csak egy volt helyes; a collection-név szintén több helyen — ezért lett egyetlen fogalmi javításból három commit. Az ok, amiért a másolatok egyáltalán léteztek: az `app/core/__init__.py` **import-időben építette a `Settings` objektumot**, ami `SECRET_KEY` nélkül nem áll össze, így a `scripts/` alól a stdlib-only `app.core.dtc_codes` sem volt importálható. Javítás: PEP 562 lazy re-export → az `app.core` import mellékhatás-mentes, a scriptek a közös modult használják.
+- **A feltevéseket a valódi korpuszon ellenőrizd, ne a kódból következtess.** A `common-issues` arra épült, hogy a fogyasztói panaszok idéznek DTC kódokat. A gráfban **~107** `MENTIONS_DTC` él volt összesen. 26 237 valódi NHTSA narratíván mérve: a szigorú regex 373 találat (15 hamis pozitív), a laza 478 (39 hamis), a helyes SAE J2012 szabály (2. karakter `0-3`) 443 találat **0 megfigyelt hamis pozitívval**. A ranking ezért a **panasz-KOMPONENS gyakoriságra** épült át, ami valódi lefedettségű adat.
+- **Egy nullvektor sosem juthat be egy similarity search-be.** `qdrant_client._validate_query_vector()` `ValueError`-t dob üres vagy `norm < 1e-6` vektorra. Szándékosan `ValueError`, nem `QdrantException`: nem a Qdranttal van baj, a hívó adott át érvénytelen vektort.
+- **ONNX Runtime = drop-in torch csere, ha a pooling a modellen kívül van.** A pooling és az L2 a gráfon KÍVÜL, numpy-ban fut, ezért az ONNX csak a forward passt cseréli. Mért paritás a pinelt környezetben: `cos ≥ 0,9999991`. Image −720 MB, RSS −208 MB/worker, query ~1,7× gyorsabb. **Feltétel:** a `transformers` NEM kerülhet be a prod image-be (behúzza a torchot, +367 MB RSS → rosszabb, mint a tiszta torch).
+- **Verziózott cache-névtér manuális Redis-takarítás helyett.** `EMBEDDING_CACHE_VERSION` + backend név a kulcsban → a mérgezett nullvektor-bejegyzések a deploy pillanatában elérhetetlenné válnak. Nincs `SCAN`+`DEL`, nincs egyórás TTL-ablak, amiben a javítás törötten néz ki.
+- **Health státusz ≠ belső próba-státusz.** A `self_test()` `"ok"`-ot ad, a `/health/detailed` viszont `"healthy"`-ra képezi (és `"unavailable"`-t `"degraded"`-re, mert az API a lexikai úton tovább szolgál). Runbookban `status == "healthy"`-ra ellenőrizz.
+- **A rank fusion helyben írta felül a score-okat.** A fúzió a `1/(60+rank)` értéket az itemekre írta, felülírva a cosine similarityt, amit utána a confidence számítás olvasott — 36% helyett 0,7% jelent meg a felhasználónak. Javítás: a fúzió **másolatokat ad vissza**, így a korrupció strukturálisan lehetetlen, nem a hívó fegyelmén múlik.
 
 ### 2026-07-19 - Sprint S1/S2 + Header Refactor (#22/#23/#24)
 
@@ -446,6 +470,31 @@ A `/demo` útvonalon elérhető bemutató oldal teljes diagnosztikai jelentést 
 - [x] Megosztott állapotok (shared loading/empty/error state komponensek) egységesítése + HistoryPage chrome-dedup
 - [ ] Follow-up: app-szintű main→div landmark rendezés (5 további oldal)
 - [ ] Follow-up: tegezés/magázás egységesítés
+
+### Sprint S4 - Szemantikus keresés helyreállítása: ✅ BEFEJEZVE
+
+**A sprint tárgya: három egymástól független hiba, amitől a zászlóshajó funkció (magyar szemantikus keresés) hónapok óta némán nem működött.**
+
+- [x] **R1 — Production tud embedelni.** huBERT **ONNX Runtime fp32**-n (`EMBEDDING_BACKEND=onnx`), torch/transformers nélkül. Export egy eldobott `Dockerfile.prod` build-stage-ben, SHA-ra pinelt `HUBERT_REVISION`-ből
+- [x] **R1b — A nullvektor-fallback megszüntetve.** Hiányzó backend → `EmbeddingUnavailableError` (`app/core/exceptions.py`, 503), soha nem `[0.0]*768`
+- [x] **R2 — Qdrant collection-drift javítva.** A RAG a unified `autocognitix` collectiont kérdezi `type=dtc` / `type=complaint` lábbal; a halott `vehicle_make` szűrő eltávolítva
+- [x] **R2b — A drift MARADÉK hívói is átirányítva:** `chat_service` (DTC-kontextus) és `consistency_service` (az admin konzisztencia-ellenőrzés maga is a drift áldozata volt — permanensen 0 vektort jelentett)
+- [x] **R3 — Safety guardok.** Qdrant query-vektor norm guard (`ValueError` nullvektorra), `/health/detailed` embedding self-test, verziózott embedding cache-névtér (`EMBEDDING_CACHE_VERSION`)
+- [x] **Build-kapu:** minden Docker build assertálja, hogy az exportált ONNX gráf reprodukálja a befagyasztott referenciavektorokat (`backend/tests/fixtures/hubert_reference_vectors.json` + `pooling_reference.json`)
+- [x] **DTC szabály egységesítés:** `backend/app/core/dtc_codes.py` = single source of truth (SAE J2012, 2. karakter `0-3`). Tíz divergens regex kivezetve; `app/core/__init__.py` lazy re-exportra állítva, hogy a `scripts/` is importálhassa
+- [x] **`common-issues` javítva:** 500 helyett 200; a rangsor NHTSA panasz-**komponens** gyakoriságra épül (`components`, `total_complaints`, `share`); `sources` státusz-objektum kiesés vs. valódi üres megkülönböztetésére; index a komponens-lekérdezéshez (`020_complaint_component_index.py`)
+- [x] **Complaint → DTC import javítva:** a szigorú regex kihagyta a valódi hex kódokat, a mintavétel pedig a legkevésbé DTC-valószínű panaszokat választotta ki
+- [x] **GDPR erasure javítva:** a `delete_by_user()` elsőként a unified collectiont törli és a hibákat **propagálja** (korábban csak üres legacy collectionöket söpört, minden hibát elnyelt, és sikert jelentett)
+- [x] **Brand egységesítés:** MechanicAI / MechanicAI PRO → AutoCognitix
+- [x] **10-szempontú adverzariális review** a sprint SAJÁT commitjain — confidence-score korrupció (rank fusion in-place írás), embedding singleton race, search↔detail DTC eltérés javítva
+- [x] Dokumentáció: `docs/EMBEDDING_ARCHITECTURE_DECISION.md` tervből **ADR**-ré átírva (a szállított állapotot írja le), `ARCHITECTURE` / `DATABASE_MAP` / `DATA_FLOW` / `MIGRATIONS` collection-modell pontosítva
+
+**Nyitott follow-upok (nem blokkoló):**
+- [ ] `semantic_search_available` / `degraded_reason` a `/diagnosis/analyze` **válaszában** — ma a degradáció csak logban és a health endpointon látszik, a felhasználó felé nem
+- [ ] Legacy `*_hu` collectionök kivezetése (az `initialize_collections()` még létrehozza őket üresen; `get_storage_stats()` **csak** ezeket nézi, a valódi vektortárolót nem)
+- [ ] A `search_similar_symptoms()` / `search_components()` / `search_repairs()` halott kód eltávolítása (a legacy üres collectionökre mutatnak)
+- [ ] **Élő adatbázis-számlálás** — a node/vektor számok forrásai ellentmondanak (ld. "Aktuális Adatbázis Állapot")
+- [ ] Magyar retrieval kiértékelő halmaz (50–100 `query → várt DTC` pár) — enélkül semmilyen retrieval-minőség állítás nem bizonyítható
 
 ## Deployment - Railway
 

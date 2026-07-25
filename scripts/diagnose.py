@@ -49,8 +49,12 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 DATA_DIR = PROJECT_ROOT / "data" / "dtc_codes"
 DTC_DATA_FILE = DATA_DIR / "all_codes_merged.json"
 
-# DTC code format validation
-DTC_PATTERN = re.compile(r"^[PBCU]\d{4}$", re.IGNORECASE)
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. Importing `app.core` no longer constructs the
+# FastAPI Settings object, so this runs with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core import dtc_codes as dtc_rules  # noqa: E402
 
 # Category mappings
 CATEGORY_MAP = {
@@ -588,8 +592,8 @@ console = Console()
 
 
 def validate_dtc_code(code: str) -> bool:
-    """Validate DTC code format."""
-    return bool(DTC_PATTERN.match(code.upper()))
+    """Validate DTC code format (see backend/app/core/dtc_codes.py)."""
+    return bool(dtc_rules.is_valid_dtc_code(code))
 
 
 def get_formatter(format_type: OutputFormat, console: Console) -> OutputFormatter:

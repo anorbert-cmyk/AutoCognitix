@@ -21,6 +21,15 @@ from typing import Any, Dict, List, Optional
 # Project root path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied.
+# This module's validate_dtc_code() is the one every scraper/importer calls, so
+# the pattern it used to carry (r'^[PCBU][0-9A-F]{4}$') was the widest-reach
+# copy in scripts/: too loose, it admitted PEACE / PACED / U760E / PC861 into
+# the merged corpus. backend/app/core/dtc_codes.py holds the rationale.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import dtc_category, is_valid_dtc_code  # noqa: E402
+
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -118,7 +127,12 @@ def sanitize_text(
 
 def validate_dtc_code(code: str) -> bool:
     """
-    Validate DTC code format.
+    Validate DTC code format (SAE J2012).
+
+    Delegates to the canonical rule in backend/app/core/dtc_codes.py, so this
+    accepts real hex codes (P26B7, P090C, P0A94, B00A0) and rejects the
+    hex-shaped non-codes the old pattern let through (PEACE, PACED, U760E,
+    PC861, P9324).
 
     Args:
         code: DTC code string to validate.
@@ -126,12 +140,7 @@ def validate_dtc_code(code: str) -> bool:
     Returns:
         True if valid DTC code format, False otherwise.
     """
-    if not code:
-        return False
-
-    # Standard OBD-II DTC format: [PCBU][0-9A-F]{4}
-    pattern = r'^[PCBU][0-9A-F]{4}$'
-    return bool(re.match(pattern, code.upper()))
+    return is_valid_dtc_code(code)
 
 
 def get_category_from_code(code: str) -> str:
@@ -147,14 +156,7 @@ def get_category_from_code(code: str) -> str:
     if not code:
         return "unknown"
 
-    prefix = code[0].upper()
-    categories = {
-        "P": "powertrain",
-        "C": "chassis",
-        "B": "body",
-        "U": "network",
-    }
-    return categories.get(prefix, "unknown")
+    return dtc_category(code)
 
 
 def get_severity_from_code(code: str) -> str:

@@ -4,6 +4,126 @@
 # ============================================
 
 # ============================================
+# Stage 0: ONNX export - HEAVY, DISCARDED
+# ============================================
+# torch + transformers live ONLY here. This stage exports the huBERT graph to
+# ONNX fp32 and is thrown away; nothing from it reaches the runtime image except
+# the .onnx file and vocab.txt. That is what lets production run Hungarian
+# embeddings with onnxruntime + tokenizers alone (~176 MB) instead of the
+# ~894 MB torch stack, and ~208 MB less RSS per gunicorn worker.
+#
+# The revision is PINNED to a commit SHA, not "main": the ~54k vectors already
+# indexed in Qdrant were produced from these weights, and the same value is the
+# default of settings.HUBERT_REVISION, so the image and the index cannot drift.
+FROM python:3.11-slim-bookworm AS onnx-export
+
+ARG HUBERT_MODEL=SZTAKI-HLT/hubert-base-cc
+ARG HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
+# Optional: pass the expected .onnx digest to make an unexpected export fail the
+# build instead of silently shipping different weights.
+ARG HUBERT_ONNX_SHA256=""
+
+ENV HUBERT_MODEL=${HUBERT_MODEL} \
+    HUBERT_REVISION=${HUBERT_REVISION} \
+    PYTHONUTF8=1 \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1
+
+# `tokenizers` is resolved INDEPENDENTLY here and in the runtime image. If the
+# two ever land on different versions, the token-ID proof below describes a
+# tokenizer that production does not run. Take the pin from the single source of
+# truth instead of re-listing it, and fail the build if that line disappears.
+COPY requirements.prod.txt /tmp/requirements.prod.txt
+
+# CPU-only torch wheel (178 MB) - the default PyPI wheel would pull the whole
+# CUDA stack (2,640 MB) for nothing; this stage never sees a GPU.
+# torch==2.2.0+cpu also fixes this stage to amd64: that local-version wheel is
+# not published for aarch64 (see the platforms: comment in .github/workflows/cd.yml).
+# Every version here is exact - an unpinned `onnx` would let a future release
+# change the exported graph under an unchanged Dockerfile.
+RUN TOKENIZERS_PIN="$(grep -E '^tokenizers==' /tmp/requirements.prod.txt)" && \
+    test -n "${TOKENIZERS_PIN}" && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.2.0+cpu" \
+        "transformers==4.37.2" \
+        "onnx==1.15.0" \
+        "onnxruntime==1.28.0" \
+        "${TOKENIZERS_PIN}" \
+        "numpy==1.26.4"
+
+# The FROZEN reference vectors that the ~54k indexed Qdrant points were produced
+# from. Copied in so the export can be checked against the INDEX, not merely
+# against a torch model re-downloaded at the same (possibly wrong) revision.
+COPY tests/fixtures/hubert_reference_vectors.json /fixtures/hubert_reference_vectors.json
+
+# Export + VERIFY in one step. The verification is the whole point of doing this
+# in a build stage: it re-proves, on every build, that
+#   (a) tokenizers/BertWordPieceTokenizer(vocab.txt, lowercase=False) yields the
+#       exact same token IDs as AutoTokenizer (do_lower_case is false for this
+#       model, so a wrong lowercase flag would silently degrade embeddings) -
+#       including on an over-512-token text, i.e. that truncation agrees too,
+#   (b) the ONNX graph reproduces the torch reference embedding - the same torch
+#       path that produced the indexed Qdrant vectors - to cosine > 0.9999, on
+#       single texts AND on a mixed-length batch (which is what exercises
+#       padding + mask-weighted pooling together), and
+#   (c) the graph reproduces the FROZEN reference vectors committed in
+#       tests/fixtures/hubert_reference_vectors.json.
+# (c) is the one that cannot be faked. (b) compares the export against a torch
+# model re-downloaded at the SAME revision, so a WRONG revision pin passes it
+# perfectly while shipping weights that never produced the indexed vectors. The
+# fixture is anchored to the ~54k points actually in Qdrant, so a wrong pin
+# fails the BUILD instead of quietly emptying semantic search in production.
+# (tests/unit/test_embedding_backends.py runs the same assertion, but skips
+# wherever the .onnx is absent - which is every environment except this one.)
+# Pooling/normalization below is a literal copy of app/services/embedding_service.py.
+RUN python -c "\
+import os, json, numpy as np, torch, onnxruntime as ort; \
+from transformers import AutoModel, AutoTokenizer; \
+from tokenizers import BertWordPieceTokenizer; \
+torch.set_grad_enabled(False); \
+M=os.environ['HUBERT_MODEL']; R=os.environ['HUBERT_REVISION']; O='/models/hubert_fp32.onnx'; \
+os.makedirs('/models', exist_ok=True); \
+tok=AutoTokenizer.from_pretrained(M, revision=R, use_fast=True); \
+model=AutoModel.from_pretrained(M, revision=R, torch_dtype=torch.float32).eval(); \
+tok.save_pretrained('/models'); \
+s=tok('Teszt szoveg', return_tensors='pt'); \
+ax={'input_ids':{0:'batch',1:'seq'},'attention_mask':{0:'batch',1:'seq'},'token_type_ids':{0:'batch',1:'seq'},'last_hidden_state':{0:'batch',1:'seq'}}; \
+torch.onnx.export(model,(s['input_ids'],s['attention_mask'],s['token_type_ids']),O,input_names=['input_ids','attention_mask','token_type_ids'],output_names=['last_hidden_state'],dynamic_axes=ax,opset_version=14,do_constant_folding=True); \
+pool=lambda h,m: (lambda p: p/np.clip(np.linalg.norm(p,ord=2,axis=1,keepdims=True),1e-12,None))((h.astype(np.float32)*m[...,None].astype(np.float32)).sum(axis=1)/np.clip(m[...,None].astype(np.float32).sum(axis=1),1e-9,None)); \
+refb=lambda ts: (lambda e: pool(model(**e).last_hidden_state.numpy(), e['attention_mask'].numpy()))(tok(ts,padding=True,truncation=True,max_length=512,return_tensors='pt')).astype(np.float64); \
+so=ort.SessionOptions(); so.intra_op_num_threads=1; \
+sess=ort.InferenceSession(O,so,providers=['CPUExecutionProvider']); \
+bt=BertWordPieceTokenizer('/models/vocab.txt', lowercase=False); bt.enable_truncation(max_length=512); bt.enable_padding(); \
+onxb=lambda ts: (lambda es: pool(sess.run(['last_hidden_state'],{'input_ids':np.array([e.ids for e in es],dtype=np.int64),'attention_mask':np.array([e.attention_mask for e in es],dtype=np.int64),'token_type_ids':np.array([e.type_ids for e in es],dtype=np.int64)})[0], np.array([e.attention_mask for e in es],dtype=np.int64)))(bt.encode_batch(ts)).astype(np.float64); \
+ref=lambda t: refb([t])[0]; onx=lambda t: onxb([t])[0]; \
+LONG='A jármű gyorsításkor rángat, a motorkontroll lámpa villog, és hidegindítás után kék füst jön a kipufogóból. ' * 40; \
+T=['rángat a motor gyorsításkor','P0300 - Több hengeres égéskimaradás','Kék füst jön a kipufogóból hidegindításkor.','ÁRAMSZÜNET! Ékezetes, NAGYBETŰS teszt: ŐRÜLT ŰRHAJÓ.','fék',LONG]; \
+assert len(tok(LONG)['input_ids']) > 512, 'the truncation probe is no longer over 512 tokens - it proves nothing'; \
+ids_ok=all(tok(t,truncation=True,max_length=512)['input_ids']==bt.encode(t).ids for t in T); \
+cos=min(float(np.dot(ref(t), onx(t))) for t in T); \
+B=['fék', T[0], LONG]; \
+cosb=min(float(np.dot(a,b)) for a,b in zip(refb(B), onxb(B))); \
+fx=json.load(open('/fixtures/hubert_reference_vectors.json')); \
+assert fx['model']==M and fx['revision']==R, 'frozen fixture was produced by %s@%s but this build pins %s@%s - regenerate the fixture AND reindex Qdrant, or fix the pin' % (fx['model'],fx['revision'],M,R); \
+cosf=min(float(np.dot(onx(v['text']), np.asarray(v['vector'],dtype=np.float64))) for v in fx['vectors']); \
+print('EXPORT VERIFY: token_ids_identical=%s min_cosine=%.10f min_cosine_batch=%.10f min_cosine_vs_indexed=%.10f' % (ids_ok, cos, cosb, cosf), flush=True); \
+assert ids_ok, 'tokenizers vs AutoTokenizer token ID mismatch (vocab/lowercase/truncation drift)'; \
+assert cos > 0.9999, 'ONNX export drifted from the torch reference embedding space: %r' % cos; \
+assert cosb > 0.9999, 'ONNX export drifted on a mixed-length BATCH (padding/pooling): %r' % cosb; \
+assert cosf > 0.9999, 'ONNX export does NOT reproduce the frozen vectors the ~54k indexed Qdrant points were built from - wrong HUBERT_REVISION or a shifted embedding space: %r' % cosf"
+
+# Ship only what the runtime actually reads: the graph and the WordPiece vocab.
+RUN rm -f /models/tokenizer.json /models/tokenizer_config.json /models/special_tokens_map.json && \
+    if [ -n "${HUBERT_ONNX_SHA256}" ]; then \
+        echo "${HUBERT_ONNX_SHA256}  /models/hubert_fp32.onnx" | sha256sum -c -; \
+    else \
+        sha256sum /models/hubert_fp32.onnx; \
+    fi && \
+    ls -la /models
+
+# ============================================
 # Stage 1: Builder - Compile dependencies
 # ============================================
 FROM python:3.11-slim-bookworm AS builder
@@ -22,8 +142,8 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-# Use pre-built requirements.prod.txt (without torch/ML libraries)
-# Embeddings are pre-computed and stored in Qdrant Cloud
+# requirements.prod.txt carries onnxruntime + tokenizers but NOT torch/transformers:
+# the huBERT graph is exported in the `onnx-export` stage above and copied in.
 COPY requirements.prod.txt .
 
 # Install production dependencies (lightweight, no ML)
@@ -67,9 +187,18 @@ COPY --chown=appuser:appgroup alembic.ini .
 # Copy seed data for database initialization
 COPY --chown=appuser:appgroup data/dtc_codes_seed.json ./data/dtc_codes_seed.json
 
+# Copy the exported huBERT ONNX graph + WordPiece vocab from the discarded
+# export stage. ~440 MB .onnx + ~0.7 MB vocab.txt; no torch, no transformers,
+# and no HuggingFace network access at runtime.
+COPY --from=onnx-export --chown=appuser:appgroup /models ./models
+
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /app/tmp && \
     chown -R appuser:appgroup /app
+
+# Re-declare the pin so the running app and the exported graph can never
+# disagree about which model revision produced the vectors.
+ARG HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
 
 # Environment variables
 ENV PYTHONPATH=/app \
@@ -77,7 +206,12 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HUBERT_REVISION=${HUBERT_REVISION} \
+    HUBERT_ONNX_PATH=/app/models/hubert_fp32.onnx \
+    HUBERT_VOCAB_PATH=/app/models/vocab.txt \
+    EMBEDDING_BACKEND=onnx \
+    EMBEDDING_ORT_THREADS=1
 
 # Switch to non-root user
 USER appuser
@@ -86,13 +220,31 @@ USER appuser
 EXPOSE 8000
 
 # No Docker HEALTHCHECK - Railway handles health checks via railway.toml (healthcheckPath = "/health")
+#
+# Startup budget vs. Railway's healthcheckTimeout = 100 s (railway.toml):
+#   * /health is static JSON - it touches no database and no embedding backend.
+#   * The ONNX session is built LAZILY on the first embed call (~0.9 s cold),
+#     NOT at import and NOT in the FastAPI lifespan. warmup() is deliberately
+#     not wired into startup.
+#   * The only added boot cost is `import onnxruntime` (~0.2-0.5 s) - two orders
+#     of magnitude cheaper than the torch import it replaces.
+# Boot therefore stays dominated by `alembic upgrade head`, exactly as before.
+#
+# RAM: measured 594.5 MB peak RSS per worker on the ONNX path (vs 802.5 MB on
+# torch) => ~1.19 GB steady for 2 workers, and ~2 GB transiently while both
+# cold-load the graph. The worker count is therefore a RAILWAY VARIABLE
+# (WEB_CONCURRENCY), not a baked-in literal: railway.toml sets
+# restartPolicyMaxRetries = 3, so three OOM kills stop the restarts for good,
+# and at that point "rebuild with fewer workers" is not a recovery option.
+# WEB_CONCURRENCY=1 in the dashboard + restart is. See docs/RAILWAY_DEPLOYMENT.md.
 
 # Run Alembic migrations then start Gunicorn
 # Using exec to make gunicorn PID 1 for proper signal handling
-# Shell form for $PORT expansion (Railway injects PORT env var)
+# Shell form (no JSON array) so ${PORT} and ${WEB_CONCURRENCY} are expanded by
+# /bin/sh at container start - Railway injects PORT, WEB_CONCURRENCY is ours.
 CMD alembic upgrade head && exec gunicorn app.main:app \
      --bind "0.0.0.0:${PORT:-8000}" \
-     --workers 2 \
+     --workers "${WEB_CONCURRENCY:-2}" \
      --worker-class uvicorn.workers.UvicornWorker \
      --timeout 120 \
      --graceful-timeout 30 \

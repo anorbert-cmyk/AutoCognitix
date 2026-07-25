@@ -40,6 +40,12 @@ from scripts.utils import (
     get_system_from_code,
 )
 
+# Free-text mining needs the canonical EXTRACTOR (boundary-guarded), which is
+# a different entry point from the single-code validator above.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import extract_dtc_codes  # noqa: E402
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -125,32 +131,35 @@ async def scrape_database_index(client: httpx.AsyncClient) -> List[str]:
             href = a.get("href", "")
             text = a.get_text(strip=True)
 
-            # Check for DTC code pattern in href or text
-            match = re.search(r'([PCBU][0-9]{4})', href.upper())
-            if match:
-                codes.append(match.group(1))
+            # href / link text are free text, so use the canonical EXTRACTOR:
+            # it is boundary-guarded (the old unanchored r'([PCBU][0-9]{4})'
+            # happily matched inside longer tokens) and it finds hex codes the
+            # decimal-only pattern dropped.
+            found = extract_dtc_codes(href)
+            if found:
+                codes.extend(found)
                 continue
 
-            match = re.search(r'([PCBU][0-9]{4})', text.upper())
-            if match:
-                codes.append(match.group(1))
+            found = extract_dtc_codes(text)
+            if found:
+                codes.extend(found)
 
         # Also look for code tables
         for table in soup.find_all("table"):
             for row in table.find_all("tr"):
                 cells = row.find_all(["td", "th"])
                 for cell in cells:
+                    # A whole table cell that IS a code -> strict validator.
                     text = cell.get_text(strip=True).upper()
-                    match = re.match(r'^([PCBU][0-9]{4})$', text)
-                    if match:
-                        codes.append(match.group(1))
+                    if validate_dtc_code(text):
+                        codes.append(text)
 
-        # Look for codes in any list
+        # Look for codes in any list ("P0301 - Cylinder 1 misfire"): the code
+        # is the first whitespace-delimited token -> strict validator.
         for li in soup.find_all("li"):
-            text = li.get_text(strip=True).upper()
-            match = re.match(r'^([PCBU][0-9]{4})\s', text)
-            if match:
-                codes.append(match.group(1))
+            first_token = li.get_text(strip=True).upper().split(maxsplit=1)
+            if first_token and validate_dtc_code(first_token[0]):
+                codes.append(first_token[0])
 
     except Exception as e:
         logger.error(f"Error fetching database index: {e}")

@@ -9,6 +9,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from typing import List, Set
 
 logger = logging.getLogger(__name__)
@@ -132,8 +133,16 @@ class ConsistencyService:
         return await asyncio.to_thread(_run)
 
     async def _get_qdrant_vector_count(self) -> int:
-        """Get total vector count from Qdrant DTC embedding collections."""
+        """Count the DTC vectors in the unified Qdrant collection.
+
+        The huBERT DTC vectors live in ``settings.QDRANT_UNIFIED_COLLECTION``
+        behind a ``{"type": "dtc"}`` payload discriminator - the legacy
+        ``dtc_embeddings_hu`` / ``dtc_embeddings`` collections were never
+        populated, so counting those reported 0 vectors and made this check
+        declare a permanent, bogus cross-DB inconsistency.
+        """
         from qdrant_client import QdrantClient
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         from app.core.config import settings
 
@@ -150,14 +159,13 @@ class ConsistencyService:
                 timeout=10,
             )
 
-        # Try Hungarian collection first, fall back to legacy English name
-        total = 0
-        for collection_name in ("dtc_embeddings_hu", "dtc_embeddings"):
-            try:
-                info = await asyncio.to_thread(client.get_collection, collection_name)
-                total += info.points_count or 0
-            except Exception:
-                # Collection may not exist; skip
-                pass
-
-        return total
+        dtc_only = Filter(must=[FieldCondition(key="type", match=MatchValue(value="dtc"))])
+        result = await asyncio.to_thread(
+            partial(
+                client.count,
+                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
+                count_filter=dtc_only,
+                exact=True,
+            )
+        )
+        return int(result.count or 0)

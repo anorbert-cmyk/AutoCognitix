@@ -45,6 +45,7 @@ from starlette.types import ASGIApp
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.metrics_paths import dtc_segment_label
 
 logger = get_logger(__name__)
 
@@ -162,7 +163,10 @@ class EndpointNormalizer:
     )
     NUMERIC_ID_PATTERN = re.compile(r"^\d+$")
     VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$", re.IGNORECASE)
-    DTC_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$", re.IGNORECASE)
+    # DTC segments are labelled via app.core.metrics_paths.dtc_segment_label,
+    # which recognises codes with app.core.dtc_codes.is_valid_dtc_code (SAE
+    # J2012), so this middleware can drift neither from the API validators nor
+    # from the normalizer in app/core/metrics.py.
 
     # Known static paths that should not be normalized
     STATIC_PATHS: Set[str] = {
@@ -197,22 +201,29 @@ class EndpointNormalizer:
         # Split path and normalize each segment
         segments = path.split("/")
         normalized = []
+        previous: Optional[str] = None
 
         for segment in segments:
             if not segment:
                 continue
 
-            # Check patterns in order of specificity
+            # Check patterns in order of specificity. The numeric-id check moved
+            # ahead of the DTC rule, which is a no-op: a valid DTC always starts
+            # with P/B/C/U, so the two can never match the same segment.
             if cls.UUID_PATTERN.match(segment):
                 normalized.append("{uuid}")
             elif cls.VIN_PATTERN.match(segment):
                 normalized.append("{vin}")
-            elif cls.DTC_PATTERN.match(segment):
-                normalized.append("{dtc_code}")
             elif cls.NUMERIC_ID_PATTERN.match(segment):
                 normalized.append("{id}")
             else:
-                normalized.append(segment)
+                # Shared with app/core/metrics.py via app.core.metrics_paths so
+                # the two normalizers cannot drift: a valid code becomes
+                # {dtc_code}, and anything else in the /dtc/{code} slot becomes
+                # {invalid_dtc} instead of opening its own time series.
+                normalized.append(dtc_segment_label(segment, previous) or segment)
+
+            previous = segment
 
         result = "/" + "/".join(normalized) if normalized else "/"
         return result

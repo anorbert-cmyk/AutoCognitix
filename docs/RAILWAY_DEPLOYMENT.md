@@ -155,9 +155,70 @@ QDRANT_API_KEY=<qdrant-api-key>
 ANTHROPIC_API_KEY=<anthropic-key>
 # vagy
 OPENAI_API_KEY=<openai-key>
+
+# Magyar embedding (huBERT). A modell revíziója COMMIT SHA-ra van pinelve:
+# a Qdrantban lévő ~54 000 vektor EZEKKEL a súlyokkal készült. Ha ezt a
+# változót "main"-re állítod, felülírod a pint és szétcsúszik az embedding-tér.
+HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
+# ONNX Runtime intra-op szálak SESSION-önként (minden workernek saját session-je van).
+EMBEDDING_ORT_THREADS=1
+
+# Gunicorn worker-ek száma. Lásd 5.3 – ez a RAM-szabályozó.
+WEB_CONCURRENCY=2
 ```
 
-### 5.3 Deploy
+### 5.3 Embedding Backend, Memória és Worker-ek
+
+A backend a magyar embeddingeket **ONNX Runtime**-mal futtatja: a huBERT gráf a
+`Dockerfile.prod` eldobott `onnx-export` stage-ében készül, és a runtime image
+`onnxruntime` + `tokenizers` párost visz, **torch nélkül**.
+
+#### RAM-igény
+
+| Tétel | Mért érték |
+|-------|-----------|
+| Csúcs RSS / worker (ONNX út) | ~595 MB |
+| `WEB_CONCURRENCY=2`, állandósult | ~1,2 GB |
+| `WEB_CONCURRENCY=2`, tranziens (mindkét worker egyszerre tölti be a gráfot) | ~2 GB |
+
+A modell **worker-enként** töltődik be, tehát a RAM lineárisan skálázódik a
+worker-számmal. **Minimum 2 GB** RAM kell, **4 GB kényelmes**. A `/health`
+statikus JSON, az ONNX session pedig lustán, az első embed híváskor épül fel
+(~0,9 s) – a boot költségét továbbra is az `alembic upgrade head` dominálja.
+
+#### Új environment változók
+
+| Változó | Alapérték | Mire való |
+|---------|-----------|-----------|
+| `WEB_CONCURRENCY` | `2` | Gunicorn worker-ek száma. **Változó, nem beépített literál** – lásd a recovery runbookot. |
+| `EMBEDDING_BACKEND` | `onnx` (az image állítja be) | `onnx` / `disabled`. **A `torch` a prod image-ben NEM működik** (nincs telepítve torch), tehát ez kill switch, nem backend-váltó. |
+| `HUBERT_ONNX_PATH` | `/app/models/hubert_fp32.onnx` | Az exportált gráf helye. Env-ből állítható, hogy egy rossz útvonal Railway-változó-javítás legyen, ne rebuild. |
+| `HUBERT_VOCAB_PATH` | `/app/models/vocab.txt` | WordPiece vocab (`lowercase=False`). |
+| `EMBEDDING_ORT_THREADS` | `1` | ORT intra-op szálak **session-önként**. A teljes szálbüdzsé szorzat: `WEB_CONCURRENCY × embedding pool (2) × EMBEDDING_ORT_THREADS`. 2 vCPU-n az alapérték 4 szálat jelent. |
+| `HUBERT_REVISION` | pinelt commit SHA | **Soha ne legyen `main`.** Változtatása = fixture-újragenerálás + teljes Qdrant reindex. |
+
+#### Recovery runbook
+
+A `railway.toml`-ban `restartPolicyMaxRetries = 3`: **három OOM-kill után a
+Railway végleg abbahagyja az újraindítást**, tehát az „építsünk újat kevesebb
+workerrel" nem recovery-opció. Sorrendben:
+
+1. **OOM / memóriaszűke** → `WEB_CONCURRENCY=1` a Dashboard Variables alatt +
+   restart. Nincs rebuild, ~30 s. Ha ez sem elég, nagyobb plan.
+2. **Az embedding rossz eredményt ad, de a service él** →
+   `EMBEDDING_BACKEND=disabled` + restart. A build megmarad, a szemantikus
+   keresés kikapcsol, a lexikai és a Neo4j út tovább szolgál, és a
+   `/health/detailed` `degraded`-ként jelzi. Ez **nem** a régi néma nullvektor:
+   a rendszer tudja és jelenti, hogy degradált.
+3. **A deploy egésze rossz** → **Railway Dashboard → Deployments → Rollback** az
+   előző image-re. Ez az egyetlen valódi rebuild nélküli teljes visszaállás; a
+   `EMBEDDING_BACKEND` csak a szemantikus ágat kapcsolja ki.
+4. **Diagnózis** → `GET /health/detailed` (auth kell) megmondja, melyik backend
+   aktív (`onnx` / `torch` / `none`) és lefuttat egy élő self-testet. Az
+   embedding-próbának saját 5 s-os időkerete van, tehát egy lassú modellbetöltés
+   nem rántja magával a többi adatbázis health-státuszát.
+
+### 5.4 Deploy
 
 ```bash
 cd backend

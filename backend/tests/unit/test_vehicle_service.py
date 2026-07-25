@@ -5,11 +5,18 @@ Mocks Neo4j (neomodel_db) and PostgreSQL (async_session_maker) to test
 all service methods without real database connections.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
-from app.services.vehicle_service import VehicleService, get_vehicle_service
+from app.services.vehicle_service import (
+    VehicleService,
+    _make_spelling_variants,
+    _neo4j_make_variants,
+    get_vehicle_service,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1042,12 +1049,96 @@ class TestGetVehicleCommonIssues:
         assert issues == []
 
     @pytest.mark.asyncio
-    async def test_neo4j_error_returns_empty_not_raise(self, service):
-        """Driver/query error degrades to [] so the endpoint never returns 500."""
+    async def test_neo4j_error_returns_none_not_raise(self, service):
+        """Driver/query error degrades to None so the endpoint never returns 500.
+
+        None (source did not answer), NOT [] (source answered, nothing to show):
+        the endpoint maps the two onto `sources.issues` so the UI can tell a
+        graph outage from a vehicle that genuinely has no DTC mentions.
+        """
         with patch("asyncio.to_thread", side_effect=Exception("Neo4j down")):
             issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
 
+        assert issues is None
+
+    @pytest.mark.asyncio
+    async def test_neo4j_error_logs_at_error_level(self, service, caplog):
+        """A Neo4j outage must be greppable at ERROR as well as visible in the
+        return value - the log is the operator's channel, None is the client's.
+        """
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=RuntimeError("ServiceUnavailable: Aura paused")),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        assert issues is None  # never raises; the caller still gets a value
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        message = errors[0].getMessage()
+        assert "common-issues neo4j QUERY FAILED" in message
+        assert "RuntimeError" in message
+        assert "Aura paused" in message
+        # The genuine-empty INFO marker must NOT be emitted on the failure path
+        assert not [r for r in caplog.records if "common-issues neo4j OK" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_error_log_sanitizes_user_input(self, service, caplog):
+        """Log-injection guard: user-derived make/model and the exception text are
+        sanitized before reaching the ERROR record (CWE-117).
+        """
+        with (
+            caplog.at_level(logging.ERROR, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=Exception("boom\nFAKE ERROR line")),
+        ):
+            await service.get_vehicle_common_issues("VW\nINJECTED", "Golf\rX")
+
+        message = caplog.records[0].getMessage()
+        assert "\n" not in message
+        assert "\r" not in message
+        assert "\\nINJECTED" in message
+
+    @pytest.mark.asyncio
+    async def test_genuine_empty_logs_info_not_error(self, service, caplog):
+        """Zero rows from a healthy graph logs INFO with rows=0 and no ERROR."""
+
+        async def _to_thread(fn, *args, **kwargs):
+            return [], None
+
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=_to_thread),
+        ):
+            issues = await service.get_vehicle_common_issues("Mazda", "MX-5")
+
+        # [] not None: the graph ANSWERED, it just has nothing for this vehicle.
+        # This is the half of the pair that may be shown as an absence of data.
         assert issues == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+        infos = [r for r in caplog.records if "common-issues neo4j OK" in r.getMessage()]
+        assert len(infos) == 1  # exactly one success marker - no double logging
+        assert "rows=0" in infos[0].getMessage()
+
+    @pytest.mark.asyncio
+    async def test_blank_model_short_circuits_without_querying_the_graph(self, service):
+        """A blank model must never reach Cypher.
+
+        ``'golf gti' STARTS WITH ''`` is true for EVERY row, so an empty model is
+        not a narrower filter - it is no filter at all. Unguarded, this returned
+        the top DTC codes across the make's ENTIRE complaint history labelled as
+        the caller's model, off an unbounded aggregation on the graph. The
+        PostgreSQL sibling has always been guarded; this pins the Neo4j half.
+
+        Genuine absence, so ``[]`` (not ``None``): nothing was down.
+        """
+        with patch("asyncio.to_thread") as to_thread:
+            assert await service.get_vehicle_common_issues("Volkswagen", "   ") == []
+            assert await service.get_vehicle_common_issues("Volkswagen", "") == []
+            assert await service.get_vehicle_common_issues("   ", "Golf") == []
+
+        to_thread.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_postgres_enrichment_error_falls_back_to_graph(self, service):
@@ -1094,8 +1185,9 @@ class TestGetVehicleCommonIssues:
 
     @pytest.mark.asyncio
     async def test_uses_bare_label_aggregation_query(self, service):
-        """Revert guard: the Cypher must use the bare-label complaint aggregation,
-        never the dead VehicleNode / HAS_COMMON_ISSUE / DTCNode path.
+        """Revert guard: the Cypher must use the bare-label complaint aggregation
+        filtered directly on the Complaint node, never the dead VehicleNode /
+        HAS_COMMON_ISSUE / DTCNode path and no longer the optional HAS_COMPLAINT hop.
 
         This test fails if the label fix is reverted.
         """
@@ -1111,8 +1203,6 @@ class TestGetVehicleCommonIssues:
 
         query = captured["query"]
         # New bare-label schema is present
-        assert "(v:Vehicle)" in query
-        assert "HAS_COMPLAINT" in query
         assert "(c:Complaint)" in query
         assert "MENTIONS_DTC" in query
         assert "MENTIONED_IN" in query
@@ -1123,9 +1213,108 @@ class TestGetVehicleCommonIssues:
         assert "VehicleNode" not in query
         assert "HAS_COMMON_ISSUE" not in query
         assert "DTCNode" not in query
-        # Year filters on the complaint
+        # make/model/year all filter on the Complaint node itself - the
+        # HAS_COMPLAINT hop (loaded last, so the likeliest incomplete edge set)
+        # is no longer a dependency
+        assert "HAS_COMPLAINT" not in query
+        assert "(v:Vehicle)" not in query
+        # make is compared against the BARE property so the :Complaint(make)
+        # index can serve it; model stays case-folded on purpose (see
+        # test_make_predicate_is_sargable_and_model_stays_case_insensitive)
+        assert "c.make IN $make_variants" in query
+        assert "toLower(c.model) STARTS WITH toLower($model)" in query
         assert "c.year" in query
         assert captured["params"]["year"] == 2018
+
+    @pytest.mark.asyncio
+    async def test_query_never_interpolates_user_values(self, service):
+        """Security guard: make/model/year/limit are bound as parameters only -
+        no caller-controlled value may appear in the Cypher string.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            captured["params"] = args[1] if len(args) > 1 else None
+            return [], None
+
+        evil_make = "Volkswagen' OR 1=1 //"
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues(evil_make, "Golf", year=2018, limit=7)
+
+        query = captured["query"]
+        assert evil_make not in query
+        assert "Golf" not in query
+        assert "2018" not in query
+        assert "7" not in query
+        assert set(captured["params"]) == {"make_variants", "model", "year", "limit"}
+        assert captured["params"]["model"] == "Golf"
+        assert captured["params"]["year"] == 2018
+        assert captured["params"]["limit"] == 7
+        # The make is expanded into stored-spelling variants, but every one of
+        # them still travels as a BOUND list value - never as Cypher text.
+        assert evil_make in captured["params"]["make_variants"]
+        for variant in captured["params"]["make_variants"]:
+            assert variant not in query
+
+    @pytest.mark.asyncio
+    async def test_make_predicate_is_sargable_and_model_stays_case_insensitive(self, service):
+        """Regression guard for the non-sargable-filter fix.
+
+        ``toLower(c.make) = toLower($make)`` wrapped the PROPERTY in a function,
+        which no index on :Complaint(make) can serve - every call was a full
+        label scan over the whole Complaint set. The make predicate must keep
+        the property bare so it stays an index seek.
+
+        The model predicate deliberately does NOT get the same treatment:
+        load_all_to_neo4j / load_neo4j_robust write Title-Case models straight
+        from the NHTSA API dumps, and model case cannot be enumerated safely
+        (str.title() mangles RAV4 -> Rav4, CR-V -> Cr-V, GLC -> Glc). Folding it
+        on the property side is the correct trade - it is only a post-filter
+        over the make-scoped seek result. This test pins BOTH halves so neither
+        is "optimised" into losing rows.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        query = captured["query"]
+        # The make property is never wrapped - the predicate stays index-usable
+        assert "toLower(c.make)" not in query
+        assert "toUpper(c.make)" not in query
+        assert "c.make IN $make_variants" in query
+        # ...and the model half is NOT "fixed" into dropping Title-Case rows
+        assert "toUpper($model)" not in query
+        assert "c.model STARTS WITH $model" not in query
+        assert "toLower(c.model) STARTS WITH toLower($model)" in query
+
+    @pytest.mark.asyncio
+    async def test_make_variants_cover_both_nhtsa_mercedes_spellings(self, service):
+        """The graph holds MERCEDES-BENZ and MERCEDES BENZ as separate makes
+        (17,347 / 11,134 rows), in uppercase from the flat file and Title-Case
+        from the API dumps. All four must be sought or ~39% of the brand's
+        complaints silently vanish - the same split the PostgreSQL ranking
+        already handles via _make_spelling_variants.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["params"] = args[1]
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Mercedes-Benz", "GLC")
+
+        variants = captured["params"]["make_variants"]
+        assert "MERCEDES-BENZ" in variants
+        assert "MERCEDES BENZ" in variants
+        assert "Mercedes-Benz" in variants
+        assert "Mercedes Benz" in variants
 
     @pytest.mark.asyncio
     async def test_no_year_omits_year_filter(self, service):
@@ -1153,6 +1342,315 @@ class TestGetVehicleCommonIssues:
         assert service._frequency_bucket(1) == "rare"
         assert service._frequency_bucket(0) == "rare"
         assert service._frequency_bucket(None) == "rare"
+
+
+# ===========================================================================
+# get_vehicle_complaint_components
+# ===========================================================================
+
+
+class TestGetVehicleComplaintComponents:
+    """NHTSA complaint-component ranking straight out of PostgreSQL.
+
+    This is the ranking with real coverage: the DTC path above can only see
+    complaints whose narrative literally quotes a fault code (~107 edges in the
+    whole graph), while every complaint row carries a component.
+    """
+
+    @staticmethod
+    def _row(component, count, crash=0, fire=0, injuries=0, deaths=0, total=None):
+        """One aggregation row as returned by ``result.mappings().all()``."""
+        return {
+            "component": component,
+            "complaint_count": count,
+            "crash_count": crash,
+            "fire_count": fire,
+            "injury_count": injuries,
+            "death_count": deaths,
+            "total_complaints": total,
+        }
+
+    @classmethod
+    def _mock_pg_session(cls, rows):
+        """Mock async_session_maker() -> session whose execute() yields `rows`."""
+        mock_mappings = MagicMock()
+        mock_mappings.all.return_value = rows
+
+        mock_result = MagicMock()
+        mock_result.mappings.return_value = mock_mappings
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        return mock_ctx
+
+    @pytest.mark.asyncio
+    async def test_ranked_components_with_counts_and_shares(self, service):
+        pg = self._mock_pg_session(
+            [
+                self._row("ELECTRICAL SYSTEM", 412, crash=3, fire=1, injuries=2, total=800),
+                self._row("SERVICE BRAKES", 288, crash=11, injuries=6, deaths=1, total=800),
+                self._row("SOME UNMAPPED WIDGET", 100, total=800),
+            ]
+        )
+
+        with patch("app.services.vehicle_service.async_session_maker", return_value=pg):
+            components, total = await service.get_vehicle_complaint_components(
+                "Volkswagen", "Golf", year=2018
+            )
+
+        assert total == 800
+        assert [c["component"] for c in components] == [
+            "ELECTRICAL SYSTEM",
+            "SERVICE BRAKES",
+            "SOME UNMAPPED WIDGET",
+        ]
+        assert components[0]["complaint_count"] == 412
+        assert components[0]["share"] == 0.515  # 412/800
+        assert components[0]["crash_count"] == 3
+        assert components[0]["fire_count"] == 1
+        assert components[0]["injury_count"] == 2
+        assert components[0]["death_count"] == 0
+        assert components[1]["share"] == 0.36  # 288/800
+        assert components[1]["death_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_hungarian_label_mapped_or_null_never_invented(self, service):
+        """Known NHTSA components get a verified Hungarian label; unknown ones get
+        None so the client falls back to the raw English value. A guessed
+        translation would be worse than no translation.
+        """
+        pg = self._mock_pg_session(
+            [
+                self._row("ELECTRICAL SYSTEM", 5, total=10),
+                self._row("power train", 3, total=10),  # lookup is case-insensitive
+                self._row("SOME UNMAPPED WIDGET", 2, total=10),
+            ]
+        )
+
+        with patch("app.services.vehicle_service.async_session_maker", return_value=pg):
+            components, _ = await service.get_vehicle_complaint_components("Volkswagen", "Golf")
+
+        assert components[0]["component_hu"] == "Elektromos rendszer"
+        assert components[1]["component_hu"] == "Hajtáslánc"
+        assert components[2]["component_hu"] is None
+        # The raw English label is always preserved alongside
+        assert components[2]["component"] == "SOME UNMAPPED WIDGET"
+
+    @pytest.mark.asyncio
+    async def test_zero_complaint_vehicle_returns_empty_and_zero_total(self, service, caplog):
+        """A vehicle with no NHTSA complaints is a truthful empty, logged at INFO."""
+        pg = self._mock_pg_session([])
+
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("app.services.vehicle_service.async_session_maker", return_value=pg),
+        ):
+            components, total = await service.get_vehicle_complaint_components("Skoda", "Octavia")
+
+        assert components == []
+        assert total == 0
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+        infos = [r for r in caplog.records if "common-issues components OK" in r.getMessage()]
+        assert len(infos) == 1  # exactly one success marker - no double logging
+        assert "rows=0" in infos[0].getMessage()
+        assert "total=0" in infos[0].getMessage()
+
+    @pytest.mark.asyncio
+    async def test_db_error_returns_none_and_logs_error(self, service, caplog):
+        """A PostgreSQL outage must degrade to (None, 0), never raise, and must be
+        distinguishable from a genuine empty result in the RETURN VALUE as well
+        as in the logs - the client cannot read our logs, and an empty list it
+        cannot explain is what made the UI claim the car was never sold in the US.
+        """
+        broken_ctx = AsyncMock()
+        broken_ctx.__aenter__ = AsyncMock(side_effect=Exception("PG down"))
+        broken_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("app.services.vehicle_service.async_session_maker", return_value=broken_ctx),
+        ):
+            components, total = await service.get_vehicle_complaint_components(
+                "Volkswagen", "Golf", year=2018
+            )
+
+        assert components is None
+        assert total == 0
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1  # no double logging
+        assert "common-issues components QUERY FAILED" in errors[0].getMessage()
+        # The failure path must NOT also emit the success marker
+        assert not [r for r in caplog.records if "components OK" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_error_log_sanitizes_user_input(self, service, caplog):
+        """Log-injection guard (CWE-117) on the components path too."""
+        broken_ctx = AsyncMock()
+        broken_ctx.__aenter__ = AsyncMock(side_effect=Exception("boom\nFAKE ERROR line"))
+        broken_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            caplog.at_level(logging.ERROR, logger="app.services.vehicle_service"),
+            patch("app.services.vehicle_service.async_session_maker", return_value=broken_ctx),
+        ):
+            await service.get_vehicle_complaint_components("VW\nINJECTED", "Golf\rX")
+
+        message = caplog.records[0].getMessage()
+        assert "\n" not in message
+        assert "\r" not in message
+        assert "\\nINJECTED" in message
+
+    @pytest.mark.asyncio
+    async def test_blank_model_short_circuits_without_querying(self, service):
+        """A blank model would compile to LIKE '%' and silently aggregate the make's
+        ENTIRE complaint history under the user's chosen model. Guarded, and the
+        DB is never touched.
+        """
+        pg = self._mock_pg_session([self._row("ENGINE", 999, total=999)])
+
+        with patch("app.services.vehicle_service.async_session_maker", return_value=pg) as maker:
+            assert await service.get_vehicle_complaint_components("Volkswagen", "   ") == ([], 0)
+            assert await service.get_vehicle_complaint_components("   ", "Golf") == ([], 0)
+
+        maker.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_query_shape_is_index_friendly_and_prefix_matched(self, service):
+        """Revert guard for the matching + index strategy.
+
+        NHTSA stores UPPERCASE, trim-qualified model names ("GOLF GTI",
+        "GLC-CLASS"), so the predicate must be a case-folded PREFIX match. It
+        must use ``lower(col) = / LIKE`` - NOT ``ILIKE``, which can never use the
+        ``lower(make), lower(model)`` btree from migration 020.
+        """
+        captured = {}
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                captured["sql"] = str(
+                    stmt.compile(
+                        dialect=postgresql.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = []
+                return result
+
+        with patch("app.services.vehicle_service.async_session_maker", return_value=_FakeSession()):
+            await service.get_vehicle_complaint_components("Mercedes-Benz", "GLC", year=2018)
+
+        sql = captured["sql"]
+        assert "FROM vehicle_complaints" in sql
+        assert "lower(vehicle_complaints.make) IN" in sql
+        assert "lower(vehicle_complaints.model) LIKE" in sql
+        assert "ILIKE" not in sql
+        # NHTSA ships BOTH spellings of this brand as separate makes
+        assert "'mercedes-benz'" in sql
+        assert "'mercedes benz'" in sql
+        # Prefix, not exact: 'GLC' must reach 'GLC-CLASS'
+        assert "'glc%" in sql
+        # Grouped aggregation with the pre-LIMIT grand total on the SAME query
+        # (concurrent execute() on one AsyncSession raises InterfaceError)
+        assert "GROUP BY" in sql
+        assert "sum(count(*)) OVER ()" in sql
+        assert "ORDER BY complaint_count DESC" in sql
+        assert "model_year = 2018" in sql
+
+    @pytest.mark.asyncio
+    async def test_year_filter_omitted_when_year_is_none(self, service):
+        captured = {}
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def execute(self, stmt):
+                captured["sql"] = str(stmt.compile(dialect=postgresql.dialect()))
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = []
+                return result
+
+        with patch("app.services.vehicle_service.async_session_maker", return_value=_FakeSession()):
+            await service.get_vehicle_complaint_components("Volkswagen", "Golf")
+
+        assert "model_year" not in captured["sql"]
+
+    def test_make_spelling_variants(self):
+        assert _make_spelling_variants("Mercedes-Benz") == ["mercedes-benz", "mercedes benz"]
+        assert _make_spelling_variants("Mercedes Benz") == ["mercedes benz", "mercedes-benz"]
+        assert _make_spelling_variants("Volkswagen") == ["volkswagen"]
+        assert _make_spelling_variants("  Land   Rover  ") == ["land rover", "land-rover"]
+        assert _make_spelling_variants("   ") == []
+
+
+class TestNeo4jMakeVariants:
+    """Stored-spelling enumeration that keeps ``c.make`` bare (index-seekable).
+
+    Neo4j's Complaint.make is NOT uniformly uppercase: sync_neo4j_sprint9 writes
+    .upper(), but load_all_to_neo4j and load_neo4j_robust pass through the
+    Title-Case makes that import_nhtsa_complaints / sync_nhtsa stamp onto their
+    API dumps. Both cases must be sought.
+    """
+
+    def test_single_spelling_make_yields_upper_title_lower(self):
+        assert _neo4j_make_variants("Volkswagen") == ["Volkswagen", "VOLKSWAGEN", "volkswagen"]
+
+    def test_covers_both_nhtsa_mercedes_spellings_in_both_cases(self):
+        variants = _neo4j_make_variants("Mercedes-Benz")
+        for expected in (
+            "MERCEDES-BENZ",
+            "Mercedes-Benz",
+            "MERCEDES BENZ",
+            "Mercedes Benz",
+        ):
+            assert expected in variants
+
+    def test_acronym_make_survives_title_casing(self):
+        """str.title() turns "bmw" into "Bmw", which is in no loader's output.
+        The .upper() variant is what actually matches the stored "BMW".
+        """
+        assert "BMW" in _neo4j_make_variants("bmw")
+
+    def test_reuses_spelling_knowledge_from_postgres_helper(self):
+        """Every lowercase spelling the PostgreSQL ranking looks for must have a
+        Neo4j counterpart - the two rankings may not disagree on which
+        spellings belong to a brand.
+        """
+        for make in ("Mercedes Benz", "Land Rover", "Volkswagen"):
+            lowered = _make_spelling_variants(make)
+            variants = _neo4j_make_variants(make)
+            assert lowered  # sanity: the helper found spellings at all
+            for spelling in lowered:
+                assert spelling.upper() in variants
+                assert spelling in variants
+
+    def test_deduplicated_and_order_stable(self):
+        variants = _neo4j_make_variants("Volkswagen")
+        assert len(variants) == len(set(variants))
+        assert variants[0] == "Volkswagen"  # caller's own spelling first
+
+    def test_blank_make_yields_empty_list(self):
+        """``c.make IN []`` matches nothing, which is the honest answer for a
+        blank make - never an unscoped scan of the whole Complaint set.
+        """
+        assert _neo4j_make_variants("   ") == []
+        assert _neo4j_make_variants("") == []
 
 
 # ===========================================================================

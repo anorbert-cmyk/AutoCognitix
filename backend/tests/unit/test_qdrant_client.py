@@ -477,19 +477,135 @@ class TestDeleteOperations:
         await service.delete_collection("test_collection")
         service.client.delete_collection.assert_called_once()
 
+
+# ---------------------------------------------------------------------------
+# GDPR Article 17 erasure (delete_by_user)
+#
+# Two independent defects lived here. The sweep iterated ONLY the legacy
+# per-type collections - every one of them documented as never populated -
+# while every write path had moved to settings.QDRANT_UNIFIED_COLLECTION, so
+# erasure provably touched nothing. And each per-collection failure was
+# absorbed by `except Exception: logger.warning`, which left cleanup_errors
+# empty in DELETE /api/v1/auth/me and reported a failed purge to the data
+# subject as a completed one.
+# ---------------------------------------------------------------------------
+
+
+def _collections(*names):
+    """Fake `get_collections()` response listing `names`."""
+    return SimpleNamespace(collections=[SimpleNamespace(name=n) for n in names])
+
+
+class TestDeleteByUserGDPR:
     @pytest.mark.asyncio
-    async def test_delete_by_user_processes_all_collections(self, service):
+    async def test_deletes_from_the_unified_collection(self, service):
+        """The collection that actually holds the vectors must be purged."""
         service.client.delete = AsyncMock()
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
         result = await service.delete_by_user("user-123")
-        assert result == 5  # 5 collections
-        assert service.client.delete.call_count == 5
+
+        targeted = [c.kwargs["collection_name"] for c in service.client.delete.call_args_list]
+        assert settings.QDRANT_UNIFIED_COLLECTION in targeted
+        assert result == 1  # unified only: no legacy collection exists here
 
     @pytest.mark.asyncio
-    async def test_delete_by_user_continues_on_error(self, service):
-        # First call fails, rest succeed
-        service.client.delete = AsyncMock(side_effect=[Exception("fail"), None, None, None, None])
+    async def test_filters_on_the_user_id(self, service):
+        service.client.delete = AsyncMock()
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
+        await service.delete_by_user("user-123")
+
+        selector = service.client.delete.call_args.kwargs["points_selector"]
+        assert selector.filter.must[0].key == "user_id"
+        assert selector.filter.must[0].match.value == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_sweeps_legacy_collections_that_still_exist(self, service):
+        """An instance seeded before the unification can still hold points."""
+        service.client.delete = AsyncMock()
+        service.client.get_collections = AsyncMock(
+            return_value=_collections(service.DTC_COLLECTION, service.SYMPTOM_COLLECTION)
+        )
+
         result = await service.delete_by_user("user-123")
-        assert result == 4  # 4 successful out of 5
+
+        targeted = [c.kwargs["collection_name"] for c in service.client.delete.call_args_list]
+        assert targeted[0] == settings.QDRANT_UNIFIED_COLLECTION
+        assert set(targeted[1:]) == {service.DTC_COLLECTION, service.SYMPTOM_COLLECTION}
+        assert result == 3
+
+    @pytest.mark.asyncio
+    async def test_skips_legacy_collections_that_do_not_exist(self, service):
+        """Deleting from a missing collection is a 404, not an erasure failure."""
+        service.client.delete = AsyncMock()
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
+        await service.delete_by_user("user-123")
+
+        targeted = [c.kwargs["collection_name"] for c in service.client.delete.call_args_list]
+        assert targeted == [settings.QDRANT_UNIFIED_COLLECTION]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_purge_is_not_reported_as_success(self, service):
+        """The GDPR-critical contract: failure must reach the caller.
+
+        A swallowed failure is what let DELETE /api/v1/auth/me answer 200 while
+        the user's vectors were still in Qdrant.
+        """
+        service.client.delete = AsyncMock(side_effect=Exception("qdrant down"))
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
+        with pytest.raises(QdrantException) as exc_info:
+            await service.delete_by_user("user-123")
+
+        assert settings.QDRANT_UNIFIED_COLLECTION in exc_info.value.details["failed_collections"]
+
+    @pytest.mark.asyncio
+    async def test_a_partial_failure_still_raises(self, service):
+        """Purging 2 of 3 collections is a partial deletion, not a success."""
+        service.client.delete = AsyncMock(side_effect=[None, Exception("boom"), None])
+        service.client.get_collections = AsyncMock(
+            return_value=_collections(service.DTC_COLLECTION, service.SYMPTOM_COLLECTION)
+        )
+
+        with pytest.raises(QdrantException) as exc_info:
+            await service.delete_by_user("user-123")
+
+        assert exc_info.value.details["deleted_collections"] == 2
+        assert len(exc_info.value.details["failed_collections"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_account_deletion_endpoint_turns_that_into_a_500(self):
+        """End of the contract: the raise must land in `cleanup_errors`.
+
+        Mirrors the try/except in endpoints/auth.py::delete_user_account, which
+        aborts before the PostgreSQL commit when the external cleanup failed.
+        """
+        cleanup_errors: list = []
+        qdrant = AsyncMock()
+        qdrant.delete_by_user = AsyncMock(side_effect=QdrantException(message="nope"))
+
+        try:
+            await qdrant.delete_by_user("user-123")
+        except Exception as e:  # mirrors endpoints/auth.py verbatim
+            cleanup_errors.append(f"Qdrant: {e}")
+
+        assert cleanup_errors, "a failed erasure must not leave cleanup_errors empty"
+
+    @pytest.mark.asyncio
+    async def test_an_unlistable_qdrant_still_purges_the_unified_collection(self, service):
+        """A probe failure must not block the delete that actually matters."""
+        service.client.delete = AsyncMock()
+        service.client.get_collections = AsyncMock(side_effect=Exception("list failed"))
+
+        result = await service.delete_by_user("user-123")
+
+        assert result == 1
+        assert (
+            service.client.delete.call_args.kwargs["collection_name"]
+            == settings.QDRANT_UNIFIED_COLLECTION
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -290,9 +290,15 @@ class ChatService:
         return message
 
     async def _fetch_rag_context(self, dtc_codes: List[str]) -> Optional[str]:
-        """Fetch DTC context from RAG service for the given codes."""
+        """Fetch DTC context from RAG service for the given codes.
+
+        Uses ``type_="dtc"``, NOT ``collection=QdrantService.DTC_COLLECTION``:
+        the huBERT vectors live in the unified ``settings.QDRANT_UNIFIED_COLLECTION``
+        with a ``{"type": "dtc"}`` payload discriminator, while the legacy
+        ``dtc_embeddings_hu`` collection was never populated and would silently
+        return nothing.
+        """
         try:
-            from app.db.qdrant_client import QdrantService
             from app.services.rag_service import get_rag_service
 
             rag_service = get_rag_service()
@@ -301,9 +307,7 @@ class ChatService:
             # Retrieve per-code context concurrently to avoid serial latency
             results_per_code = await asyncio.gather(
                 *(
-                    rag_service.retrieve_from_qdrant(
-                        query=code, collection=QdrantService.DTC_COLLECTION, top_k=3
-                    )
+                    rag_service.retrieve_from_qdrant(query=code, type_="dtc", top_k=3)
                     for code in codes
                 )
             )

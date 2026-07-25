@@ -13,8 +13,11 @@ Tests:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.postgres.models import DTCCode
 from app.db.qdrant_client import QdrantService
 
 
@@ -395,6 +398,55 @@ class TestDTCSearch:
             assert 0.0 <= d["relevance_score"] <= 1.0
 
 
+class TestDTCSearchCodeVsFreeTextRouting:
+    """The "is this query a code?" branch that gates the semantic search.
+
+    A true verdict takes the exact-match shortcut and skips the embedding call;
+    a false verdict is what routes Hungarian free text to semantic search. The
+    old test accepted any all-caps string starting with P/B/C/U, so a mechanic
+    typing in capitals silently lost semantic search entirely.
+    """
+
+    async def _search(self, async_client: AsyncClient, query: str):
+        qdrant = _qdrant_with_mocked_search([])
+        embedding = _embedding_service_stub()
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=embedding,
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": query, "use_semantic": "true", "skip_cache": "true"},
+            )
+        assert response.status_code == 200, response.text
+        return embedding
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["P", "P0", "P03", "P030", "P0300", "P26B7", "p26b7"])
+    async def test_code_and_partial_code_skip_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes, query: str
+    ):
+        """A complete code, and a code still being typed, stay on the lexical path.
+
+        The autocomplete fires from two characters, so narrowing this must not
+        start an embedding round-trip on every keystroke.
+        """
+        embedding = await self._search(async_client, query)
+        embedding.embed_text_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["PORLASZTO", "PEACE", "BUXA HANG", "CSAPAGY", "P9324"])
+    async def test_capitalised_free_text_still_reaches_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes, query: str
+    ):
+        """Free text in capitals is not a code and must keep semantic search."""
+        embedding = await self._search(async_client, query)
+        embedding.embed_text_async.assert_called_once()
+
+
 class TestDTCCategories:
     """Tests for GET /api/v1/dtc/categories/list endpoint."""
 
@@ -480,7 +532,10 @@ class TestDTCCodeDetail:
         self, async_client: AsyncClient, sample_dtc_codes
     ):
         """Test getting nonexistent DTC returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999")
+        # Structurally valid (P + 3 + FFF) but not seeded, so the 404 comes from
+        # the database lookup rather than from format validation. "P9999", the
+        # previous probe, is not a DTC under SAE J2012 (second character 9).
+        response = await async_client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
 
@@ -490,6 +545,26 @@ class TestDTCCodeDetail:
         response = await async_client.get("/api/v1/dtc/INVALID")
 
         assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", ["P26B7", "P090C", "P0A94", "B00A0"])
+    async def test_get_dtc_detail_accepts_hex_code_format(
+        self, async_client: AsyncClient, sample_dtc_codes, code: str
+    ):
+        """Real hex DTCs must pass format validation (404, never 400)."""
+        response = await async_client.get(f"/api/v1/dtc/{code}")
+
+        assert response.status_code == 404, response.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("junk", ["PEACE", "P9324", "P9999", "UA80E", "PEACEFUL"])
+    async def test_get_dtc_detail_rejects_junk_before_lookup(
+        self, async_client: AsyncClient, junk: str
+    ):
+        """Junk that merely starts with P/B/C/U must not reach Neo4j or the cache."""
+        response = await async_client.get(f"/api/v1/dtc/{junk}")
+
+        assert response.status_code == 400, response.text
 
     @pytest.mark.asyncio
     async def test_get_dtc_detail_case_insensitive(
@@ -569,7 +644,7 @@ class TestDTCRelatedCodes:
         self, async_client: AsyncClient, sample_dtc_codes
     ):
         """Test getting related codes for nonexistent DTC returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999/related")
+        response = await async_client.get("/api/v1/dtc/P3FFF/related")
 
         assert response.status_code == 404
 
@@ -859,3 +934,172 @@ class TestDTCResponseFormat:
         data = response.json()
 
         assert isinstance(data["diagnostic_steps"], list)
+
+
+# =============================================================================
+# Search / detail / related must agree on what this API can serve
+# =============================================================================
+# The detail path validates through normalize_dtc_code (SAE J2012), so junk
+# answers 400. The LEXICAL search path did not, and the shipped seed corpus
+# still contains five rows that fail the rule - PEACE, PACED, P93AF, UA80E,
+# UA80F, in data/dtc_codes/all_codes_{merged,complete}.json and
+# backend/data/dtc_codes_seed.json. Result before this fix:
+# GET /dtc/search?q=PEACE returned 200 with the row, and clicking it hit
+# GET /dtc/PEACE -> 400. A listed, searchable, permanently un-openable result.
+# =============================================================================
+
+# The exact codes found in the shipped seed files.
+SEEDED_JUNK_CODES = ["PEACE", "PACED", "P93AF", "UA80E", "UA80F"]
+
+
+@pytest_asyncio.fixture
+async def seeded_junk_dtc_codes(db_session: AsyncSession, sample_dtc_codes):
+    """Insert the junk rows the seed corpus really contains.
+
+    Written straight to the session rather than through the API, because the
+    only way they got into production was a bulk import that predates the
+    current validator - reproducing the state, not the route.
+    """
+    rows = []
+    for i, code in enumerate(SEEDED_JUNK_CODES, start=900):
+        row = DTCCode(
+            id=i,
+            code=code,
+            description_en=f"Junk row {code} imported by the old loose pattern",
+            description_hu=f"Ervenytelen sor {code}",
+            category="powertrain",
+            severity="medium",
+            is_generic=True,
+            system="Fuel and Air Metering",
+            symptoms=[],
+            possible_causes=[],
+            diagnostic_steps=[],
+            related_codes=["P0101"],
+        )
+        db_session.add(row)
+        rows.append(row)
+    await db_session.commit()
+    return rows
+
+
+class TestDTCApiSelfConsistency:
+    @pytest.mark.parametrize("junk", SEEDED_JUNK_CODES)
+    @pytest.mark.asyncio
+    async def test_search_does_not_list_a_code_the_detail_endpoint_rejects(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes, junk: str
+    ):
+        """The regression: q=PEACE used to return the PEACE row with a 200."""
+        response = await async_client.get(
+            "/api/v1/dtc/search",
+            params={"q": junk, "use_semantic": "false", "skip_cache": "true"},
+        )
+
+        assert response.status_code == 200
+        assert junk not in [d["code"] for d in response.json()]
+
+    @pytest.mark.asyncio
+    async def test_a_description_search_does_not_surface_junk_either(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes
+    ):
+        """The ILIKE arm matches descriptions too, not just the code column."""
+        response = await async_client.get(
+            "/api/v1/dtc/search",
+            params={"q": "Junk row", "use_semantic": "false", "skip_cache": "true"},
+        )
+
+        assert response.status_code == 200
+        assert [d["code"] for d in response.json()] == []
+
+    @pytest.mark.asyncio
+    async def test_the_semantic_arm_drops_junk_too(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes
+    ):
+        """A Qdrant payload code is just as untrusted as an ILIKE match."""
+        hits = [
+            {
+                "id": 1,
+                "score": 0.95,
+                "payload": {"type": "dtc", "code": "UA80E", "category": "powertrain"},
+            },
+            {
+                "id": 2,
+                "score": 0.80,
+                "payload": {"type": "dtc", "code": "P0101", "category": "powertrain"},
+            },
+        ]
+        with (
+            patch(
+                "app.api.v1.endpoints.dtc_codes.qdrant_client",
+                _qdrant_with_mocked_search(hits),
+            ),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "motor rángatás", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        codes = [d["code"] for d in response.json()]
+        assert "UA80E" not in codes
+        assert "P0101" in codes  # the valid neighbour is untouched
+
+    @pytest.mark.asyncio
+    async def test_every_search_result_can_actually_be_opened(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes
+    ):
+        """The invariant, stated end-to-end: no result is a dead link."""
+        search = await async_client.get(
+            "/api/v1/dtc/search",
+            params={"q": "P", "use_semantic": "false", "limit": 100, "skip_cache": "true"},
+        )
+        assert search.status_code == 200
+        listed = [d["code"] for d in search.json()]
+        assert listed, "need at least one result for this to prove anything"
+
+        for code in listed:
+            detail = await async_client.get(f"/api/v1/dtc/{code}", params={"skip_cache": "true"})
+            assert detail.status_code != 400, f"search listed {code}, detail refuses it"
+
+    @pytest.mark.parametrize("junk", SEEDED_JUNK_CODES)
+    @pytest.mark.asyncio
+    async def test_related_rejects_the_same_codes_as_detail(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes, junk: str
+    ):
+        """/related had NO format validation - it 404'd or served junk instead.
+
+        Both siblings bind the same {code} path parameter; disagreeing on which
+        spellings are legal let junk reach the Neo4j lookup by the back door.
+        """
+        detail = await async_client.get(f"/api/v1/dtc/{junk}", params={"skip_cache": "true"})
+        related = await async_client.get(f"/api/v1/dtc/{junk}/related")
+
+        assert detail.status_code == 400
+        assert related.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_related_still_serves_valid_codes(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes
+    ):
+        """The new gate must not break the happy path, and must not suggest junk.
+
+        P0101's stored related_codes and the P-prefix fallback both reach into
+        the same table the junk rows live in.
+        """
+        response = await async_client.get("/api/v1/dtc/P0101/related", params={"limit": 50})
+
+        assert response.status_code == 200
+        codes = [d["code"] for d in response.json()]
+        assert not set(codes) & set(SEEDED_JUNK_CODES)
+
+    @pytest.mark.parametrize("code", ["P0101", "P26B7", "p0a94"])
+    @pytest.mark.asyncio
+    async def test_related_accepts_every_spelling_detail_accepts(
+        self, async_client: AsyncClient, seeded_junk_dtc_codes, code: str
+    ):
+        """Agreement runs both ways: a real hex code must not be rejected."""
+        related = await async_client.get(f"/api/v1/dtc/{code}/related")
+        assert related.status_code != 400

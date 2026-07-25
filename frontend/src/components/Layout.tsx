@@ -110,10 +110,10 @@ export default function Layout() {
             >
               <Wrench className="h-6 w-6 text-primary-600" />
               <span className="hidden sm:inline">
-                <span className="text-primary-600">MechanicAI</span>
-                <span className="text-foreground"> PRO</span>
+                <span className="text-primary-600">Auto</span>
+                <span className="text-foreground">Cognitix</span>
               </span>
-              <span className="sm:hidden text-primary-600">MechanicAI</span>
+              <span className="sm:hidden text-primary-600">AutoCognitix</span>
             </Link>
 
             {/* Desktop Navigation — four grouped dropdowns */}
@@ -342,10 +342,10 @@ export default function Layout() {
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-2">
               <Wrench className="h-5 w-5 text-primary-600" />
-              <span className="font-semibold text-foreground">MechanicAI PRO</span>
+              <span className="font-semibold text-foreground">AutoCognitix</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} MechanicAI PRO. AI-alapú gépjármű-diagnosztika.
+              © {new Date().getFullYear()} AutoCognitix. AI-alapú gépjármű-diagnosztika.
             </p>
           </div>
         </div>

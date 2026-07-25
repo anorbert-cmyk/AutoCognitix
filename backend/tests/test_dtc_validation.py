@@ -12,16 +12,25 @@ import pytest
 import re
 from typing import Tuple
 
+from app.core.dtc_codes import is_valid_dtc_code
 
-# DTC code validation patterns
-DTC_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$", re.IGNORECASE)
-DTC_GENERIC_PATTERN = re.compile(r"^[PBCU]0[0-9]{3}$", re.IGNORECASE)
+# This module used to carry its OWN copy of the rule
+# (``^[PBCU][0-9A-F]{4}$``) - the too-loose variant that accepts PEACE, PACED,
+# U760E, PC861 and P9324. Structural validation now delegates to the single
+# source of truth in ``app.core.dtc_codes``; every assertion below is unchanged,
+# because none of them exercised a second character outside 0-3.
+#
+# The generic-vs-manufacturer split is a *different* question (is char 2 zero?)
+# and stays local. Its tail is hex, not decimal: ``P0A94`` is a real generic
+# code and the old ``^[PBCU]0[0-9]{3}$`` classified it as neither generic nor
+# manufacturer-specific.
+DTC_GENERIC_PATTERN = re.compile(r"^[PBCU]0[0-9A-F]{3}$", re.IGNORECASE)
 DTC_MANUFACTURER_PATTERN = re.compile(r"^[PBCU][1-3][0-9A-F]{3}$", re.IGNORECASE)
 
 
 def validate_dtc_code(code: str) -> bool:
     """
-    Validate DTC code format.
+    Validate DTC code format (SAE J2012, see ``app.core.dtc_codes``).
 
     Valid formats:
     - P0XXX: Generic Powertrain
@@ -33,9 +42,9 @@ def validate_dtc_code(code: str) -> bool:
     - U0XXX: Generic Network
     - U1XXX-U3XXX: Manufacturer-specific Network
     """
-    if not code or not isinstance(code, str):
+    if not isinstance(code, str):
         return False
-    return bool(DTC_PATTERN.match(code.strip().upper()))
+    return is_valid_dtc_code(code)
 
 
 def get_dtc_category(code: str) -> str:

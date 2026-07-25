@@ -1,5 +1,5 @@
 /**
- * MechanicAI PRO - Component Library
+ * AutoCognitix - Component Library
  *
  * Primitive UI components for building the application.
  * All components are accessible, responsive, and follow the design system.

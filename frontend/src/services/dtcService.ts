@@ -28,6 +28,15 @@ export interface DTCSearchParams {
 
 /**
  * Search for DTC codes by code or description
+ *
+ * The query here is a PARTIAL, in-progress input: `DTCAutocomplete` fires this
+ * from two characters (`"P0"`), and it also accepts free-text descriptions.
+ * It is therefore deliberately NOT run through `isValidDTCFormat()`, which is
+ * an anchored whole-code check - applying it here would break
+ * search-as-you-type by rejecting every prefix short of a full 5-char code.
+ * Guarded by `searchDTCCodes > partial-input regression guard` in
+ * `__tests__/dtcService.test.ts`.
+ *
  * @param params Search parameters
  * @returns List of matching DTC codes
  * @throws ApiError on request failure
@@ -108,25 +117,52 @@ export async function getDTCCategories(): Promise<DTCCategoryInfo[]> {
 // =============================================================================
 
 /**
- * Validate DTC code format
+ * Canonical shape of a single, already-normalised DTC code.
+ *
+ * Canonical rule: backend/app/core/dtc_codes.py (`DTC_CODE_STRICT`, SAE J2012)
+ * - P/B/C/U, then 0-3, then 3 HEX digits. There is no shared module across the
+ * language boundary, so this regex deliberately mirrors it character for
+ * character (the same way `DiagnosisForm.tsx` does).
+ *
+ * Both halves are load-bearing:
+ * - characters 3-5 are HEX, not decimal. The old `\d{4}` tail rejected every
+ *   real hex code a scan tool reports (`P26B7`, `P090C`, `P0A94`, `B00A0`,
+ *   `P17F1`), so `getDTCCodeDetail()` threw before the request was even sent
+ *   and the user could not open the detail page at all.
+ * - character 2 is constrained to `0-3`. Without it, P/B/C/U + hex letters
+ *   spells ordinary English (`PEACE`, `PACED`) and matches campaign ids
+ *   (`P9324`, `UA80E`, `U760E`), which is how junk got into the corpus before.
+ *
+ * Deliberately un-flagged (no `/g`): a `RegExp` with `g` carries `lastIndex`
+ * state across `.test()` calls, which would make this shared constant answer
+ * differently on alternate invocations.
+ */
+const DTC_CODE_STRICT = /^[PBCU][0-3][0-9A-F]{3}$/
+
+/**
+ * Validate a COMPLETE DTC code.
+ *
+ * Mirrors `is_valid_dtc_code()` in backend/app/core/dtc_codes.py, including its
+ * tolerance of surrounding whitespace and lower case: normalisation lives here
+ * (once) so the helper is total for every caller. `validateDiagnosisRequest()`
+ * passes raw, un-normalised user input, while `getDTCCodeDetail()` and
+ * `quickAnalyze()` pass already-uppercased strings - upper-casing an
+ * upper-cased string is idempotent, so there is one rule and no drift.
+ *
+ * This is an ANCHORED, whole-string check. Do NOT use it to gate a
+ * partial/in-progress input such as an autocomplete query: `"P0"` is a
+ * perfectly good search prefix but is not a code, and search-as-you-type
+ * (`searchDTCCodes`) is intentionally not format-validated.
+ *
  * @param code The DTC code to validate
  * @returns true if valid format
  */
 export function isValidDTCFormat(code: string): boolean {
-  if (!code || code.length !== 5) {
+  if (!code) {
     return false
   }
 
-  const prefix = code[0].toUpperCase()
-  const digits = code.substring(1)
-
-  // Valid prefixes: P (Powertrain), B (Body), C (Chassis), U (Network)
-  if (!['P', 'B', 'C', 'U'].includes(prefix)) {
-    return false
-  }
-
-  // Check if remaining characters are digits
-  return /^\d{4}$/.test(digits)
+  return DTC_CODE_STRICT.test(code.trim().toUpperCase())
 }
 
 /**

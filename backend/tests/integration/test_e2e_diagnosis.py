@@ -314,12 +314,19 @@ class TestE2EErrorScenarios:
         mock_nhtsa_service,
         mock_rag_service,
     ):
-        """Test diagnosis with DTC codes not in database."""
+        """Test diagnosis with DTC codes not in database.
+
+        The codes must be structurally VALID but absent from the seed set,
+        otherwise this exercises request validation instead of the intended
+        graceful-degradation path. The previous values ("P999x") are not
+        legal DTCs at all - SAE J2012 fixes the second character to 0-3 - so
+        they now correctly fail validation before reaching the service.
+        """
         request_data = {
             "vehicle_make": "Volkswagen",
             "vehicle_model": "Golf",
             "vehicle_year": 2018,
-            "dtc_codes": ["P9991", "P9992", "P9993"],  # Unknown codes
+            "dtc_codes": ["P3FFF", "P3FFE", "P3FFD"],  # Valid shape, not seeded
             "symptoms": "Motor nehezen indul hidegben",
         }
 

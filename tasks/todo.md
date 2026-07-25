@@ -1,7 +1,7 @@
 # AutoCognitix Sprint Tracker
 
-**Utolsó frissítés:** 2026-07-19
-**Aktuális sprint:** Sprint S3 befejezve — Settings/GDPR + megosztott állapot-komponensek + chrome-dedup
+**Utolsó frissítés:** 2026-07-25
+**Aktuális sprint:** Sprint S4 befejezve — Szemantikus keresés helyreállítva (ONNX embedding + Qdrant collection-drift + DTC szabály egységesítés)
 
 ## Sprint Státusz Összefoglaló
 
@@ -18,6 +18,61 @@
 | S1 (#23) | ✅ KÉSZ | Igazmondó ResultPage, Panaszok tab, HomePage redesign, NewDiagnosisPage törölve |
 | S2 (#24) | ✅ KÉSZ | Valós garázs health, igazmondó HistoryPage, streaming parts, 5 UUID→str 500 fix |
 | S3 | ✅ KÉSZ | Settings/Profil oldal, GDPR export/törlés UI, megosztott állapot-komponensek + chrome-dedup |
+| S4 | ✅ KÉSZ | Szemantikus keresés helyreállítva: ONNX embedding prodban, Qdrant collection-drift, DTC szabály egységesítés, `common-issues` valós adatra |
+
+---
+
+# Sprint S4 - Szemantikus keresés helyreállítása (2026-07-25)
+
+## Status: ✅ COMPLETED
+
+### Summary
+A zászlóshajó funkció — magyar szemantikus keresés — **hónapok óta némán nem működött**, három egymástól független okból. Egyik sem dobott hibát: mindhárom üres találatlistává alakult, ami egy keresőben legitim válasz. A sprint ezt javította, és minden csendes fallbacket hangossá tett.
+
+### R1 — Production tud embedelni
+- [x] huBERT **ONNX Runtime fp32**-n (`EMBEDDING_BACKEND=onnx`), torch és transformers **nélkül** a prod image-ben
+- [x] ONNX export egy eldobott `Dockerfile.prod` build-stage-ben (`onnx-export`), SHA-ra pinelt `HUBERT_REVISION`-ből — az image és az index nem tud szétcsúszni
+- [x] Négy új beállítás: `EMBEDDING_BACKEND` (`auto`/`onnx`/`torch`/`disabled`), `HUBERT_ONNX_PATH`, `HUBERT_VOCAB_PATH`, `EMBEDDING_ORT_THREADS`
+- [x] Mért nyereség: image **−720 MB**, RSS **−208 MB/worker**, query **~1,7× gyorsabb**; paritás a pinelt környezetben `cos ≥ 0,9999991`
+
+### R1b — A csendes nullvektor megszüntetve
+- [x] Hiányzó backend → `EmbeddingUnavailableError` (`app/core/exceptions.py`, HTTP 503) — **soha nem** `[0.0]*768`
+- [x] Verziózott Redis cache-névtér (`EMBEDDING_CACHE_VERSION` + backend név) → a mérgezett nullvektor-bejegyzések a deploy pillanatában elérhetetlenné válnak, nincs manuális `SCAN`+`DEL`
+
+### R2 — Qdrant collection-drift
+- [x] A RAG a unified `autocognitix` collectiont kérdezi `type=dtc` / `type=complaint` lábbal (a `type` szűrő utoljára kerül be, hívói filter nem tudja felülírni)
+- [x] A halott `vehicle_make` szűrő eltávolítva (a payload kulcsa `make`, nyers all-caps NHTSA érték → garantáltan 0 találat)
+- [x] **A maradék hívók is átirányítva:** `chat_service` (DTC-kontextus) és `consistency_service` — utóbbi az admin konzisztencia-ellenőrzés, ami maga is a drift áldozata volt (permanensen 0 vektort jelentett, és emiatt hamis inkonzisztenciát kiáltott)
+
+### R3 — Safety guardok
+- [x] Qdrant query-vektor guard: `ValueError` üres vagy `norm < 1e-6` vektorra (`_validate_query_vector`)
+- [x] `/health/detailed` embedding self-test, saját 5s timeouttal (nehogy egy hideg modellbetöltés az egész adattár-blokkot `unhealthy`-nak jelentse)
+- [x] **Build-kapu:** minden Docker build assertálja, hogy az exportált ONNX gráf reprodukálja a befagyasztott referenciavektorokat (`backend/tests/fixtures/hubert_reference_vectors.json` + `pooling_reference.json`)
+
+### DTC szabály egységesítés
+- [x] `backend/app/core/dtc_codes.py` = single source of truth (SAE J2012, a 2. karakter `0-3` a load-bearing szabály)
+- [x] Tíz divergens regex kivezetve; `app/core/__init__.py` PEP 562 lazy re-exportra állítva, hogy a `scripts/` is importálhassa a stdlib-only modult
+- [x] A `scripts/` importerek ténylegesen importálják a kanonikus modult (nincs másolt regex); agreement-teszt pinnel, hogy a két független pipeline azonos kimenetet ad
+- [x] Mérve 26 237 valódi NHTSA narratíván: szigorú 373 (15 hamis), laza 478 (39 hamis), **új 443 (0 megfigyelt hamis pozitív)**
+
+### common-issues — valós adatra állítva
+- [x] 500 helyett 200; a rangsor NHTSA panasz-**komponens** gyakoriságra épül (`components`, `total_complaints`, `share`, crash/fire/injury/death számok)
+- [x] `sources` státusz-objektum: adattár-kiesés megkülönböztethető a valódi üres eredménytől
+- [x] `limit` query paraméter; index a komponens-lekérdezéshez (`020_complaint_component_index.py`); a két független láb párhuzamosítva
+- [x] Complaint → DTC import javítva (a szigorú regex kihagyta a hex kódokat, a mintavétel a legkevésbé DTC-valószínű panaszokat választotta)
+
+### Egyéb
+- [x] **GDPR erasure javítva:** `delete_by_user()` elsőként a unified collectiont törli és a hibákat **propagálja** (korábban csak üres legacy collectionöket söpört, minden hibát elnyelt, és sikert jelentett)
+- [x] Brand egységesítés: MechanicAI / MechanicAI PRO → AutoCognitix
+- [x] **10-szempontú adverzariális review a sprint SAJÁT commitjain** — confidence-score korrupció (rank fusion in-place írás: 36% helyett 0,7% jelent meg), embedding singleton race, search↔detail DTC eltérés javítva
+- [x] Dokumentáció: `docs/EMBEDDING_ARCHITECTURE_DECISION.md` tervből **ADR**-ré átírva; `ARCHITECTURE` / `DATABASE_MAP` / `DATA_FLOW` / `MIGRATIONS` collection-modellje pontosítva
+
+### Nyitott follow-upok (nem blokkoló)
+- [ ] `semantic_search_available` / `degraded_reason` a `/diagnosis/analyze` **válaszában** — ma a degradáció csak logban és a health endpointon látszik
+- [ ] Legacy `*_hu` collectionök kivezetése (az `initialize_collections()` még létrehozza őket üresen; `get_storage_stats()` **csak** ezeket nézi, a valódi vektortárolót nem)
+- [ ] `search_similar_symptoms()` / `search_components()` / `search_repairs()` halott kód eltávolítása
+- [ ] **Élő adatbázis-számlálás** — a node/vektor számok forrásai ellentmondanak (ld. `CLAUDE.md` "Aktuális Adatbázis Állapot")
+- [ ] Magyar retrieval kiértékelő halmaz (50–100 `query → várt DTC` pár)
 
 ---
 

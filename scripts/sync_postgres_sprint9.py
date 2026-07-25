@@ -63,8 +63,12 @@ BATCH_EPA = 1000
 # Max complaints to load if no sampled file exists
 MAX_COMPLAINTS = 200_000
 
-# DTC extraction regex
-DTC_REGEX = re.compile(r"\b[PBCU][0-9]{4}\b")
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. Importing `app.core` no longer constructs the
+# FastAPI Settings object, so this runs with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_DIR / "backend"))
+
+from app.core import dtc_codes as dtc_rules  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Country mapping for common makes
@@ -163,10 +167,9 @@ def parse_date_str(date_str: Optional[str]) -> Optional[date]:
 
 
 def extract_dtc_codes(text: Optional[str]) -> List[str]:
-    """Extract DTC codes from a text string using regex."""
-    if not text:
-        return []
-    return sorted(set(DTC_REGEX.findall(text.upper())))
+    """Extract DTC codes from free text (see backend/app/core/dtc_codes.py)."""
+    codes: List[str] = dtc_rules.extract_dtc_codes(text)
+    return codes
 
 
 def get_country(make_name: str) -> Optional[str]:

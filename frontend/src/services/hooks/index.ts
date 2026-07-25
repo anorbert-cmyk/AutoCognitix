@@ -29,6 +29,7 @@ export {
   useDecodeVIN,
   usePrefetchVehicleMakes,
   usePrefetchVehicleYears,
+  useVehicleCommonIssues,
   useVehicleComplaints,
   useVehicleMakes,
   useVehicleModels,

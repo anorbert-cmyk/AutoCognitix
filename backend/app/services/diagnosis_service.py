@@ -32,6 +32,7 @@ from app.api.v1.schemas.diagnosis import (
     ToolNeeded,
     TotalCostEstimate,
 )
+from app.core.dtc_codes import normalize_dtc_code
 from app.core.log_sanitizer import sanitize_log
 from app.core.logging import get_logger
 from app.db.postgres.models import DTCCode
@@ -348,11 +349,13 @@ class DiagnosisService:
         validated_codes: List[DTCCode] = []
         unknown_codes: List[str] = []
 
-        # Validate format first, collect valid codes
+        # Validate format first, collect valid codes. Structural rules live in
+        # app.core.dtc_codes (SAE J2012), so manufacturer/hex codes such as
+        # P26B7 survive instead of being silently dropped from the diagnosis.
         valid_format_codes: List[str] = []
         for code in dtc_codes:
-            code_upper = code.upper().strip()
-            if not self._is_valid_dtc_format(code_upper):
+            code_upper = normalize_dtc_code(code)
+            if code_upper is None:
                 logger.warning(f"Invalid DTC format: {sanitize_log(code)}")
                 continue
             valid_format_codes.append(code_upper)
@@ -377,31 +380,6 @@ class DiagnosisService:
             )
 
         return validated_codes
-
-    @staticmethod
-    def _is_valid_dtc_format(code: str) -> bool:
-        """
-        Validate DTC code format.
-
-        Standard DTC format: Letter + 4 digits (e.g., P0101, B1234, C0456, U1000)
-        - P: Powertrain
-        - B: Body
-        - C: Chassis
-        - U: Network/Communication
-
-        Args:
-            code: DTC code string to validate.
-
-        Returns:
-            True if format is valid, False otherwise.
-        """
-        if len(code) != 5:
-            return False
-
-        if code[0] not in "PBCU":
-            return False
-
-        return code[1:].isdigit()
 
     # =========================================================================
     # Symptom Preprocessing

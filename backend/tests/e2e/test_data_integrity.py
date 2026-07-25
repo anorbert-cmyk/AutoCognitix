@@ -6,6 +6,11 @@ Tests data consistency across:
 - Neo4j graph relationships (DTC -> Symptom -> Component -> Repair)
 - Qdrant vector search accuracy
 - Cross-database consistency
+
+The throwaway codes below (P2501, P2701, P2801, ...) are structurally valid
+DTCs per app/core/dtc_codes.py - system letter, then 0-3, then 3 hex digits.
+Keep that shape: GET /api/v1/dtc/{code} validates before it looks anything up,
+so a made-up "P7001" is rejected with 400 and the assertions never run.
 """
 
 import pytest
@@ -29,7 +34,7 @@ class TestPostgreSQLDataIntegrity:
 
         # First create a DTC code
         dtc1 = {
-            "code": "P5001",
+            "code": "P2501",
             "description_en": "First Test Code",
             "category": "powertrain",
             "severity": "medium",
@@ -40,7 +45,7 @@ class TestPostgreSQLDataIntegrity:
 
         # Try to create duplicate
         dtc2 = {
-            "code": "P5001",
+            "code": "P2501",
             "description_en": "Duplicate Code",
             "category": "powertrain",
             "severity": "low",
@@ -110,7 +115,7 @@ class TestPostgreSQLDataIntegrity:
         headers = admin_client["headers"]
 
         invalid_dtc = {
-            "code": "P5555",
+            "code": "P2555",
             "description_en": "Test Code",
             "category": "invalid_category",  # Not in enum
             "severity": "medium",
@@ -126,7 +131,7 @@ class TestPostgreSQLDataIntegrity:
         headers = admin_client["headers"]
 
         invalid_dtc = {
-            "code": "P5556",
+            "code": "P2556",
             "description_en": "Test Code",
             "category": "powertrain",
             "severity": "invalid_severity",  # Not in enum
@@ -532,7 +537,7 @@ class TestDataPersistence:
 
         # Create DTC
         dtc = {
-            "code": "P7001",
+            "code": "P2701",
             "description_en": "Persistent Test Code",
             "description_hu": "Maradando teszt kod",
             "category": "powertrain",
@@ -546,11 +551,11 @@ class TestDataPersistence:
         assert create_response.status_code == 201
 
         # Retrieve it
-        get_response = await client.get("/api/v1/dtc/P7001")
+        get_response = await client.get("/api/v1/dtc/P2701")
         assert get_response.status_code == 200
         data = get_response.json()
 
-        assert data["code"] == "P7001"
+        assert data["code"] == "P2701"
         assert data["description_en"] == "Persistent Test Code"
         assert data["description_hu"] == "Maradando teszt kod"
 
@@ -598,13 +603,13 @@ class TestBulkOperationIntegrity:
         bulk_data = {
             "codes": [
                 {
-                    "code": "P8001",
+                    "code": "P2801",
                     "description_en": "Bulk Test 1",
                     "category": "powertrain",
                     "severity": "medium",
                 },
                 {
-                    "code": "P8002",
+                    "code": "P2802",
                     "description_en": "Bulk Test 2",
                     "category": "powertrain",
                     "severity": "low",
@@ -621,7 +626,7 @@ class TestBulkOperationIntegrity:
         created_count = data["created"]
 
         # Check they exist
-        for code in ["P8001", "P8002"]:
+        for code in ["P2801", "P2802"]:
             check_response = await client.get(f"/api/v1/dtc/{code}")
             if created_count > 0:
                 assert check_response.status_code in [200, 404]
@@ -636,7 +641,7 @@ class TestBulkOperationIntegrity:
         await client.post(
             "/api/v1/dtc/",
             json={
-                "code": "P8100",
+                "code": "P2810",
                 "description_en": "Existing Code",
                 "category": "powertrain",
                 "severity": "medium",
@@ -648,13 +653,13 @@ class TestBulkOperationIntegrity:
         bulk_data = {
             "codes": [
                 {
-                    "code": "P8100",  # Duplicate
+                    "code": "P2810",  # Duplicate
                     "description_en": "Duplicate Attempt",
                     "category": "powertrain",
                     "severity": "medium",
                 },
                 {
-                    "code": "P8101",  # New
+                    "code": "P2811",  # New
                     "description_en": "New Code",
                     "category": "powertrain",
                     "severity": "medium",
@@ -671,7 +676,7 @@ class TestBulkOperationIntegrity:
         assert data["skipped"] >= 0
 
         # Original code should be unchanged
-        check_response = await client.get("/api/v1/dtc/P8100")
+        check_response = await client.get("/api/v1/dtc/P2810")
         assert check_response.status_code == 200
         check_data = check_response.json()
         assert check_data["description_en"] == "Existing Code"
@@ -688,7 +693,7 @@ class TestSearchIndexConsistency:
 
         # Create new DTC
         dtc = {
-            "code": "P9001",
+            "code": "P2901",
             "description_en": "Unique Searchable Code",
             "category": "powertrain",
             "severity": "medium",
@@ -700,13 +705,13 @@ class TestSearchIndexConsistency:
         # Should be immediately searchable
         search_response = await client.get(
             "/api/v1/dtc/search",
-            params={"q": "P9001"},
+            params={"q": "P2901"},
         )
 
         assert search_response.status_code == 200
         data = search_response.json()
         codes = [item["code"] for item in data]
-        assert "P9001" in codes
+        assert "P2901" in codes
 
     @pytest.mark.asyncio
     async def test_text_search_matches_description(self, async_client, seeded_db):
@@ -976,7 +981,7 @@ class TestConcurrentDataAccess:
         headers = admin_client["headers"]
 
         dtc_data = {
-            "code": "P9500",
+            "code": "P2950",
             "description_en": "Concurrent Test Code",
             "category": "powertrain",
             "severity": "medium",
@@ -1026,7 +1031,7 @@ class TestNullHandling:
         headers = admin_client["headers"]
 
         dtc = {
-            "code": "P9600",
+            "code": "P2960",
             "description_en": "Code without Hungarian",
             "description_hu": None,  # Explicitly null
             "category": "powertrain",
@@ -1037,7 +1042,7 @@ class TestNullHandling:
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await client.get("/api/v1/dtc/P9600")
+        get_response = await client.get("/api/v1/dtc/P2960")
         if get_response.status_code == 200:
             data = get_response.json()
             # description_hu should be null or empty
@@ -1050,7 +1055,7 @@ class TestNullHandling:
         headers = admin_client["headers"]
 
         dtc = {
-            "code": "P9601",
+            "code": "P2961",
             "description_en": "Code with empty lists",
             "category": "powertrain",
             "severity": "medium",
@@ -1063,7 +1068,7 @@ class TestNullHandling:
         assert response.status_code == 201
 
         # Retrieve and verify
-        get_response = await client.get("/api/v1/dtc/P9601")
+        get_response = await client.get("/api/v1/dtc/P2961")
         if get_response.status_code == 200:
             data = get_response.json()
             assert isinstance(data["symptoms"], list)
@@ -1081,7 +1086,7 @@ class TestDataSanitization:
         headers = admin_client["headers"]
 
         dtc = {
-            "code": "P9700",
+            "code": "P2970",
             "description_en": "<script>alert('xss')</script>Test Code",
             "category": "powertrain",
             "severity": "medium",
@@ -1091,7 +1096,7 @@ class TestDataSanitization:
         assert response.status_code == 201
 
         # Retrieve and verify (should not execute script)
-        get_response = await client.get("/api/v1/dtc/P9700")
+        get_response = await client.get("/api/v1/dtc/P2970")
         if get_response.status_code == 200:
             data = get_response.json()
             # Script tags should be stored as-is (API doesn't execute)

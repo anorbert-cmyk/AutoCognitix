@@ -123,7 +123,7 @@ describe('InspectionPage', () => {
     render(<InspectionPage />);
     const currentYear = new Date().getFullYear();
     expect(
-      screen.getByText(new RegExp(`${currentYear} MechanicAI`)),
+      screen.getByText(new RegExp(`${currentYear} AutoCognitix`)),
     ).toBeInTheDocument();
   });
 });

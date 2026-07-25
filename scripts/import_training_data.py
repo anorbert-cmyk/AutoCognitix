@@ -60,6 +60,13 @@ from tqdm.asyncio import tqdm_asyncio
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -598,7 +605,7 @@ async def import_python_obd_codes(
 
                                 if isinstance(code, str):
                                     code_upper = code.upper().strip()
-                                    if re.match(r"^[PCBU][0-9A-F]{4}$", code_upper):
+                                    if is_valid_dtc_code(code_upper):
                                         all_codes[code_upper] = {
                                             "code": code_upper,
                                             "description_en": (
@@ -615,7 +622,7 @@ async def import_python_obd_codes(
                     # Alternative format: {"P0001": "Description", ...}
                     for code, description in data.items():
                         code_upper = code.upper().strip()
-                        if re.match(r"^[PCBU][0-9A-F]{4}$", code_upper):
+                        if is_valid_dtc_code(code_upper):
                             all_codes[code_upper] = {
                                 "code": code_upper,
                                 "description_en": (
@@ -649,13 +656,17 @@ async def import_python_obd_codes(
 
                 # Extract DTC codes from python source (pattern matching)
                 # Look for patterns like: "P0001": "Description"
+                # Capture any quoted 5-char key, then let the canonical SAE
+                # J2012 validator decide - the old [PCBU][0-9A-F]{4} key
+                # pattern both dropped hex codes and admitted hex-shaped junk.
                 dtc_pattern = re.compile(
-                    r'["\']([PCBU][0-9A-F]{4})["\']:\s*["\']([^"\']+)["\']',
-                    re.IGNORECASE,
+                    r'["\']([A-Za-z][0-9A-Za-z]{4})["\']:\s*["\']([^"\']+)["\']',
                 )
 
                 for match in dtc_pattern.finditer(source_code):
                     code = match.group(1).upper()
+                    if not is_valid_dtc_code(code):
+                        continue
                     description = match.group(2)
 
                     # Only add if not already present
@@ -880,7 +891,7 @@ async def download_obdb_repo(
                     dtcs = signalset.get("dtcs", {})
                     if isinstance(dtcs, dict):
                         for code, desc in dtcs.items():
-                            if re.match(r"^[PCBU][0-9A-F]{4}$", code, re.IGNORECASE):
+                            if is_valid_dtc_code(code):
                                 result["dtcs"].append(
                                     {
                                         "code": code.upper(),

@@ -1,5 +1,210 @@
 # Lessons Learned - AutoCognitix
 
+## Sprint S4 - Szemantikus keresés helyreállítása - 2026-07-25
+
+### A csendes fallback hónapokig elrejt egy zászlóshajó funkciót (CRITICAL)
+
+**Probléma:** A magyar szemantikus keresés — a termék központi ígérete — hónapokig nem működött. Nem dobott hibát, nem logolt errort, a válaszban sem látszott.
+
+**Root cause:** A `requirements.prod.txt` kihagyta a torchot, ezért az `embed_text()` `[0.0] * 768`-at adott vissza. A nullvektor **típushelyes**: 768 elemű float lista, tehát minden dimenzió- és típusellenőrzés átengedte. Cosine távolságnál viszont a Qdrant normalizálja a query vektort, a nulla normájú vektor normalizálása nulla vektort ad → **minden dot product 0.0** → a `score_threshold=0.5` garantáltan üres listát csinál belőle.
+
+Három egymásra rakódó csendes fallback minden szinten hibát **üres eredménnyé** alakított:
+1. `embedding_service.py` — nincs torch → nullvektor, `logger.warning`, kivétel nélkül
+2. `rag_service.py` — `except Exception` → `return []`, `logger.warning`
+3. `diagnosis_service.py` — `except Exception` → `_fallback_diagnosis()`, ami a felhasználónak ugyanúgy néz ki, mint egy valódi AI-jelentés
+
+**Egy üres találatlista egy keresőben teljesen legitim válasz.** Nem volt olyan pont a rendszerben, ahol a *"nem tudtam megkérdezni"* megkülönböztethető lett volna a *"megkérdeztem, nincs válasz"*-tól.
+
+**Fix — három rétegű, hangos hiba:**
+```python
+# 1. app/core/exceptions.py - a hiányzó backend HIBA, nem üres eredmény
+class EmbeddingUnavailableError(EmbeddingException):
+    """Nincs elerheto embedding backend. HTTP 503, nem nullvektor."""
+
+# 2. app/db/qdrant_client.py - a nullvektor el sem jut a kereséshez
+MIN_QUERY_VECTOR_NORM = 1e-6
+def _validate_query_vector(query_vector, collection_name) -> None:
+    norm = math.sqrt(math.fsum(float(v) * float(v) for v in query_vector))
+    if not math.isfinite(norm) or norm < MIN_QUERY_VECTOR_NORM:
+        raise ValueError(...)   # ValueError, NEM QdrantException: a Qdrant hibátlan,
+                                # a HÍVÓ adott át érvénytelen vektort
+
+# 3. app/services/embedding_service.py - kívülről látható próba
+def self_test() -> Dict[str, Any]:   # -> "ok" | "degraded" | "unavailable"
+```
+
+**Szabály:** A hibának **megkülönböztethetőnek kell lennie a valóban-üres eredménytől, és a megkülönböztetésnek el kell érnie az API kontraktusig** — nem elég egy log-sztring. Ezért kapott a `common-issues` endpoint egy `sources` státusz-objektumot: a kliens csak akkor jelenítheti meg "nincs adat"-ként az üres listát, ha az tényleg üres, nem ha az adattár kiesett.
+
+---
+
+### MINDEN javítás először FÉL javítás volt — a hívók végigjárása a munka
+
+**Probléma:** A sprint során ez nem egy-egy elnézés volt, hanem **visszatérő minta**. Három példa ugyanarra a hibára:
+
+| Javítottuk | Amit kihagytunk | Következmény |
+|-----------|-----------------|--------------|
+| A RAG retrieval-lábát a valós complaint adatra irányítottuk | A **fogyasztóját** nem: `description` kulcsot olvasott, amit a complaint payloadok nem hordoznak | Öt **üres** bejegyzés került a magyar promptba, és a confidence faktor tartalmatlan találatokat számolt |
+| A DTC szabályt szigorítottuk a **részletek**-úton | A **keresésen** nem | A user megtalálta a `PEACE`-t a keresésben, aztán nem tudta megnyitni |
+| Az olvasási utakat átvittük a unified collectionre | A **GDPR törlést** nem | A fiók-törlés **semmit nem törölt, miközben sikert jelentett** |
+
+Ugyanez a mintázat vitte el a collection-drift első javítását is: a `rag_service` saját lábai átálltak, de a `chat_service` és a `consistency_service` nem. Utóbbi maga volt a konzisztencia-ellenőrzés — permanensen 0 vektort jelentett és hamis inkonzisztenciát kiáltott. **A drift-detektor is a drift áldozata volt.**
+
+**Fix:** Minden esetben a **repo teljes sweepje** találta meg a maradék hívókat, nem egy lista.
+
+**Szabály:** A bug megtalálása nem a munka — **minden hívó végigjárása az**. Ha egy konstans/kulcs/szabály jelentése megváltozik, `grep` az egész repóra (`backend/app/`, `scripts/`, `tests/`), és a **fogyasztó** oldalt is nézd meg, ne csak a termelőt. Egy retargetelt lekérdezés értéktelen, ha a hívó a régi payload-alakot olvassa.
+
+---
+
+### Egy őr, ami soha nem fut le, nem őr
+
+**Probléma:** Két védőteszt létezett, és **egyik sem futott le sehol**:
+- a befagyasztott referenciavektor-teszt `@pytest.mark.skipif`-fel indult a `.onnx` hiányára — a `.onnx` viszont **egyetlen környezetben sincs meg** (sem CI-ben, sem dev gépen), tehát nulla környezetben futott;
+- egy drift-teszt egy hiányzó függőség miatt volt véglegesen skippelve.
+
+**Root cause:** A skip-feltétel olyan artifactra hivatkozott, ami csak a Docker build belsejében létezik. A teszt "zöld" volt, mert soha nem futott.
+
+**Fix — a védelmet oda tettük, ahol az artifact ténylegesen létezik:**
+```dockerfile
+# backend/Dockerfile.prod, `onnx-export` stage - minden buildnél lefut
+RUN python -c "... \
+assert ids_ok, 'tokenizers vs AutoTokenizer token ID mismatch'; \
+assert cos  > 0.9999, 'ONNX export drifted from the torch reference'; \
+assert cosb > 0.9999, 'ONNX export drifted on a mixed-length BATCH'; \
+assert cosf > 0.9999, 'ONNX export does NOT reproduce the frozen vectors'"
+```
+A harmadik assertion az, amit **nem lehet meghamisítani**: a második az exportot egy *ugyanazon a revízión* újraletöltött torch modellhez méri, tehát egy **rossz revízió-pin tökéletesen átmegy rajta**. A befagyasztott fixture viszont az indexben ténylegesen benne lévő vektorokhoz van horgonyozva.
+
+A másik teszt **agreement-teszté** lett: a `scripts/` importerek ma ténylegesen **importálják** a kanonikus modult (`from app.core.dtc_codes import extract_dtc_codes` — nincs másolt regex), és a `test_both_pipelines_extract_the_same_codes` assertálja, hogy a két független pipeline **azonos kimenetet** ad. Az invariáns így nem egy karbantartott fájllistán, hanem egy futó összehasonlításon áll.
+
+**Szabály:** Mielőtt egy `skipif`-et beírsz, kérdezd meg: **melyik környezetben fog ez ténylegesen lefutni?** Ha a válasz "egyikben sem", a teszt nem védelem, hanem díszlet. Tedd build-kapuvá, vagy írd át olyan invariánsra, ami a tesztkörnyezetben is ellenőrizhető (strukturális szabály > adat-alapú assertion).
+
+---
+
+### A duplikáció volt a root cause, nem stíluskérdés — és egy import-mellékhatás okozta
+
+**Probléma:** A repó **tíz** független DTC regexet hordozott kilenc-tíz helyszínen (két request-séma, a metrics middleware, hat `scripts/` importer), és **csak egy volt közülük helyes**. Ezért lett egyetlen fogalmi javításból **három commit**.
+
+A két történelmi minta ellentétes irányban hibázott:
+```python
+r"[PBCU][0-9]{4}"      # túl szigorú: négy DECIMÁLIS jegy
+                       # -> eldobja a valódi hex kódokat: P26B7, P090C, P0A94, B00A0
+                       # -> de ELFOGADJA a P9324-et (Nissan kampányszám), mert a 2. karaktert sosem nézte
+r"[PBCU][0-9A-F]{4}"   # túl laza: hex betűkkel angol szavakat is illeszt
+                       # -> PEACE, PACED, BEEDA, U760E (Toyota váltó), PC861 (Nissan kampány)
+```
+
+**Root cause a duplikációra:** az `app/core/__init__.py` **import-időben építette a `Settings` objektumot**, ami `SECRET_KEY` / `JWT_SECRET_KEY` nélkül nem áll össze. Emiatt **minden** `app.core.<submodule>` import örökölte ezt a követelményt — beleértve a stdlib-only `app.core.dtc_codes`-t is. A `scripts/` alól tehát nem lehetett egyszerűen importálni a közös modult; a workaround az volt, hogy mindenki bemásolta a szabályt magához. **Így halmozódott fel a tíz divergens regex.**
+
+**Fix — PEP 562 lazy re-export, hogy az `app.core` import mellékhatás-mentes legyen:**
+```python
+# app/core/__init__.py
+def __getattr__(name: str) -> Any:
+    """Resolve a re-exported name on first access (PEP 562)."""
+    submodule = _LAZY_EXPORTS.get(name)
+    if submodule is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(submodule), name)
+    globals()[name] = value   # cache: __getattr__ csak miss esetén hívódik
+    return value
+```
+`from app.core import settings` továbbra is működik, de egy **submodul** importja már nem húzza be a konfigurációt. Így lett a `backend/app/core/dtc_codes.py` valódi single source of truth, SAE J2012 szerint: a load-bearing szabály a **2. karakter `0-3`**, mert az egyszerre öli meg mindkét hibamódot.
+
+**Szabály:** Ha ugyanaz a szabály sok helyen ismétlődik, **ne a másolatokat javítsd — kérdezd meg, mi tette lehetetlenné a megosztást.** Itt egy import-mellékhatás volt. A `__init__.py` legyen mellékhatás-mentes; konfigurációt soha ne építs import-időben, ha a csomag stdlib-only submodulokat is tartalmaz.
+
+---
+
+### A feltevéseket a valódi korpuszon ellenőrizd, ne a kódból következtess
+
+**Probléma:** A `common-issues` feature arra a feltevésre épült, hogy a fogyasztói NHTSA panaszok **idéznek DTC kódokat**. Az egész gráf **~107** `MENTIONS_DTC` élt tartalmazott (`scripts/sync_neo4j_sprint9.py`). A feature tehát nem "kicsit hiányos" volt, hanem **alapjában hamis feltevésen állt** — és ezt a kód olvasásából nem lehetett látni, csak a gráf megszámolásából.
+
+**Mért adat 26 237 valódi NHTSA narratíván (30 make/model/year halmaz):**
+
+| Minta | Találat | Hamis pozitív |
+|-------|---------|---------------|
+| régi szigorú (`[PBCU][0-9]{4}`) | 373 | 15 (`P9324`) |
+| régi laza (`[PBCU][0-9A-F]{4}`) | 478 | 39 (`PEACE`, `PC861`, `PC214`, `PC490`, `U760E`, `BEEDA`, …) |
+| **új (SAE J2012, 2. karakter `0-3`)** | **443** | **0 megfigyelt** |
+
+Egy második, független feltevés-hiba a mintavételben: a biztonság szerint rangsorolt top-50K minta **garantáltan a legkevésbé DTC-valószínű** panaszokat választotta ki — a légzsák- és karosszéria-jelentések sosem idéznek powertrain kódot.
+
+**Fix:** A ranking átállt arra, aminek **valódi lefedettsége van**: a panasz-**komponens** gyakoriságra PostgreSQL-ből (`components`, `share`, crash/fire/injury/death). A DTC-ág megmaradt visszafelé kompatibilitásból, de a doksi kimondja, hogy gyakran üres.
+
+**Szabály:** Mielőtt egy feature egy adat-tulajdonságra épül, **számold meg a valódi korpuszban**. Egy `COUNT` a gráfon / indexen többet ér, mint bármilyen kódolvasásból levezetett érvelés — és olcsóbb, mint utólag kiderülni.
+
+---
+
+### A rank fusion helyben írta felül a score-okat (a felhasználónak 36% helyett 0,7% jelent meg)
+
+**Probléma:** A confidence pontszám **minden diagnózisnál** hibás volt. A rank fusion a fúziós `1/(60+rank)` értéket **az itemekre írta rá**, felülírva a cosine similarityt — amit utána a confidence számítás olvasott. A pinelt eseten a felhasználónak látható érték **0,7% volt 36% helyett**; az 1.0-ra pontozott PostgreSQL direkt találatok 0,016-ra íródtak át, így a direkt-találat számláló nullát mutatott.
+
+**Fix:** A fúzió **másolatokat ad vissza**, nem módosít helyben. Ugyanez a latens hiba megvolt a score-normalizálásban is.
+
+**Szabály:** Ha egy pipeline-lépés származtatott értéket számol, **ne írja felül a bemenetét**. A "majd a hívó a másik mezőt olvassa" konvenció egy tetszőleges későbbi olvasónál elhasal — a másolat-visszaadás strukturálisan lehetetlenné teszi a korrupciót, a fegyelem nem.
+
+---
+
+### ONNX Runtime = drop-in torch csere, HA a pooling a modellen kívül van
+
+**Probléma:** A production nem tudott embedelni (nincs torch), de a torch visszatétele ~1,3 GB image-et és 802,5 MB/worker RSS-t jelentett volna.
+
+**Miért működik az ONNX:** a pooling és az L2 normalizálás a modell**gráfon kívül**, tiszta tensor-aritmetikával fut. Az ONNX gráf csak a transformer forward passt tartalmazza, tehát ugyanaz a numpy pooling ugyanabban az embedding-térben tartja a két backendet.
+
+```python
+# app/services/embedding_service.py - a KÖZÖS nevező, mindkét backend ezt használja
+def _mean_pool_l2_numpy(last_hidden: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+    ...
+# A clamp(min=1e-9) és az ord=2/axis=1 pontos átvétele nem stílus: ez az embedding-tér identitása.
+```
+
+**Mért eredmény a pinelt környezetben** (torch 2.2.0+cpu, transformers 4.37.2, onnxruntime 1.28.0): `cos ≥ 0,9999991`, max abs elemeltérés 1,5e-07, azonos token ID-k. Image **−720 MB**, RSS **−208 MB/worker**, query **~1,7× gyorsabb**. **Nulla reindex.**
+
+**Két csapda, amibe könnyű beleesni:**
+1. **A `transformers` NEM kerülhet be a prod image-be.** Importja behúzza a torchot (+367 MB RSS mérve) → az ONNX út 937,7 MB-ot eszik, azaz **rosszabb, mint a tiszta torch**. A tokenizálás ezért közvetlenül `tokenizers.BertWordPieceTokenizer(vocab.txt, lowercase=False)`-szal megy.
+2. **`lowercase=False` kötelező** (`config.json`: `do_lower_case: false`). Elrontva az embedding **csendben** romlik — ezért tartalmaz a befagyasztott fixture kötelezően magyar nagybetűs/ékezetes szöveget.
+
+**Az int8 kvantálás KIZÁRVA**, két független okból: a rangsor 6/6 query-n megtört, **és** alapértelmezett szálszámmal nemdeterminisztikus (30 futásból 29 különböző kimenet ugyanarra a hosszú inputra). Egy diagnosztikai terméknél ez nem tárgyalható.
+
+**Szabály:** Inference backend cseréje akkor biztonságos, ha a **pooling/normalizálás a gráfon kívül** van, és a paritást a **projekt pinelt környezetében** méred újra (nem egy feltáró venv-ben). A rangsor-egyezés a helyes metrika, nem a nyers cosine.
+
+---
+
+### Verziózott cache-névtér manuális Redis-takarítás helyett
+
+**Probléma:** A mérgezett nullvektorok **bekerültek a Redis embedding cache-be** (TTL 1 óra). A javítás utáni első órában a felhasználók továbbra is nullvektort kaptak volna — és az az érzés keletkezik, hogy a fix nem működik.
+
+**A kézenfekvő (rossz) megoldás:** deploy után `SCAN` + `DEL` a `embed:*` prefixre. Ez operátori lépés, tehát elfelejthető, félrefuttatható, és nincs rá visszajelzés.
+
+**Fix — a kulcs verziózása, hogy a takarítás felesleges legyen:**
+```python
+# app/services/embedding_service.py
+EMBEDDING_CACHE_VERSION = "v2"   # "v2" nyugdíjazza a pre-ONNX build nullvektorait
+
+def _cache_key_material(self, text: str) -> str:
+    return f"{EMBEDDING_CACHE_VERSION}|{self._backend_name or 'none'}|{text}"
+# a redis_cache._embedding_cache_key ezt sózza tovább HUBERT_MODEL@HUBERT_REVISION-nel
+```
+A régi bejegyzések **elérhetetlenné válnak abban a pillanatban**, amikor az új image bebootol. A backend neve is a kulcsban van, így torch- és ONNX-készítésű vektor sosem szolgálható ki egymás helyett.
+
+**Szabály:** Ha egy deploy után "takarítani kellene" egy cache-t, **verziózd a kulcsot helyette**. Egy operátori lépés, ami elmaradhat, nem megoldás. Ha a produkált értékek megváltozhatnak (backend-csere, modell/revízió bump, pooling-változás) → `EMBEDDING_CACHE_VERSION` bump.
+
+---
+
+### Health státusz ≠ belső próba-státusz
+
+**Probléma:** A runbook `embedding.status == "ok"`-ot ellenőrzött volna, a health endpoint viszont **átképezi** a belső próba-státuszokat.
+
+```python
+# app/api/v1/endpoints/health.py
+status_map = {"ok": "healthy", "degraded": "degraded", "unavailable": "degraded"}
+```
+Az `"unavailable" → "degraded"` **szándékos**: az API ilyenkor is kiszolgál (lexikai + gráf út), és `"unhealthy"`-ra állítva egy embedding-kiesés úgy nézne ki, mint egy teljes adattár-leállás.
+
+Az embedding-próbának **saját 5s timeoutja** van, szigorúan a `detailed_health_check()` közös 10s budgetje alatt — enélkül egy hideg modellbetöltés kiütné a **közös** timeoutot, aminek a kezelője a postgres/neo4j/qdrant/redis **mindegyikét** `unhealthy`-nak jelentené.
+
+**Szabály:** Runbookban `services.Embedding.status == "healthy"`-ra ellenőrizz. Ha egy health-aggregátor több alrendszert vár be **közös** timeouttal, minden lassú próbának legyen **saját, szigorúan kisebb** budgetje — különben egy komponens lassúsága az összes többit hibásnak jelenti.
+
+---
+
 ## Sprint S1/S2 + Header Refactor - 2026-07-19 (#22/#23/#24)
 
 ### Pydantic v2 NEM koercál UUID→str (CRITICAL, 5 élő 500-as hiba)

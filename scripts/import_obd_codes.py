@@ -21,7 +21,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -69,8 +68,12 @@ MYTRILE_FILES = {
     "network": f"{MYTRILE_BASE_URL}/codes/network.json",
 }
 
-# DTC Code patterns
-DTC_PATTERN = re.compile(r'^[PCBU][0-9A-F]{4}$', re.IGNORECASE)
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
 
 
 def get_category_from_code(code: str) -> str:
@@ -180,7 +183,7 @@ async def download_mytrile_codes() -> List[Dict[str, Any]]:
                 if isinstance(data, dict):
                     for code, description in data.items():
                         code_upper = code.upper().strip()
-                        if DTC_PATTERN.match(code_upper):
+                        if is_valid_dtc_code(code_upper):
                             all_codes.append({
                                 "code": code_upper,
                                 "description_en": description if isinstance(description, str) else str(description),
@@ -192,7 +195,7 @@ async def download_mytrile_codes() -> List[Dict[str, Any]]:
                         if isinstance(item, dict):
                             code = item.get("code", "").upper().strip()
                             desc = item.get("description", item.get("description_en", ""))
-                            if code and DTC_PATTERN.match(code):
+                            if code and is_valid_dtc_code(code):
                                 all_codes.append({
                                     "code": code,
                                     "description_en": desc,
@@ -276,7 +279,7 @@ def parse_csv_codes(csv_content: str) -> List[Dict[str, Any]]:
                 continue
 
         # Validate and add
-        if code and description and DTC_PATTERN.match(code):
+        if code and description and is_valid_dtc_code(code):
             codes.append({
                 "code": code,
                 "description_en": description,
@@ -306,7 +309,7 @@ def normalize_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         code = code_data.get("code", "").upper().strip()
 
         # Skip if invalid or duplicate
-        if not DTC_PATTERN.match(code) or code in seen_codes:
+        if not is_valid_dtc_code(code) or code in seen_codes:
             continue
 
         seen_codes.add(code)

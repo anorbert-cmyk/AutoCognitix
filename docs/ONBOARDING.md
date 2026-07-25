@@ -144,9 +144,24 @@ Bemutató (pre-filled P0300 szimuláció): `http://localhost:3000/demo`.
 **Forrás:** `backend/app/db/neo4j_models.py::is_neo4j_available()`.
 
 ### P3. Qdrant keresés 0 eredményt ad, pedig vannak vektorok
-**Ok:** Az `index_qdrant_hubert.py` még nem futott le végig, vagy az embedding model verzió (`hubert-base-cc-v1`) nem egyezik. A collection nevek kötelezően `*_hu` szuffixummal végződnek (huBERT 768-dim).
-**Megoldás:** Ellenőrizd: `docker-compose exec backend python -c "from app.db.qdrant_client import qdrant_client; import asyncio; print(asyncio.run(qdrant_client.get_storage_stats()))"`.
-**Forrás:** `backend/app/db/qdrant_client.py` - `DTC_COLLECTION = "dtc_embeddings_hu"`.
+**Ok — a leggyakoribb tévút:** a **`*_hu` collectionöket nézed.** Azok LÉTEZNEK, de ÜRESEK. Minden huBERT vektor a unified **`autocognitix`** collectionben van, `type` payload-diszkriminátorral (`dtc` / `complaint` / `recall`). Az `initialize_collections()` minden app-induláskor létrehozza az öt üres `*_hu` collectiont, ezért látszanak a Qdrant Cloudon.
+
+Egyéb okok: az `index_qdrant_hubert.py` nem futott le végig; vagy **nincs elérhető embedding backend** (ilyenkor ma `EmbeddingUnavailableError` jön a logban — korábban csendes nullvektor volt, ami minden keresést üresre vitt).
+
+**Megoldás:**
+```bash
+# 1. A VALÓDI collection pontszáma (a get_storage_stats() CSAK a legacy ötöt nézi!)
+docker-compose exec backend python -c "
+from app.db.qdrant_client import qdrant_client
+from app.core.config import settings
+import asyncio
+print(asyncio.run(qdrant_client.get_collection_info(settings.QDRANT_UNIFIED_COLLECTION)))"
+
+# 2. Az embedding backend állapota
+curl -s localhost:8000/api/v1/health/detailed | jq '.services.Embedding'
+#    -> status "healthy" + details.self_test_norm ~ 1.0 a jó eredmény
+```
+**Forrás:** `backend/app/db/qdrant_client.py` - `search_unified()`, `settings.QDRANT_UNIFIED_COLLECTION`. Háttér: `docs/EMBEDDING_ARCHITECTURE_DECISION.md`.
 
 ### P4. `Rate limit exceeded` - 429-es válasz diagnózis indításakor
 **Ok:** A rate limiter **fail-closed** (Sprint 9-es security hardening): ha Redis elérhetetlen, a kérés tiltva. Az alapértelmezett limit diagnózisra alacsony.

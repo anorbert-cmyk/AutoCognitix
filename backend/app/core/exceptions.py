@@ -594,6 +594,7 @@ class EmbeddingException(AutoCognitixException):
         message: str = "Szovegfeldolgozasi hiba.",
         details: Optional[Dict[str, Any]] = None,
         original_error: Optional[Exception] = None,
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         error_details = details or {}
         if original_error:
@@ -603,7 +604,39 @@ class EmbeddingException(AutoCognitixException):
             message=message,
             code=ErrorCode.EMBEDDING_ERROR,
             details=error_details,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
+        )
+
+
+class EmbeddingUnavailableError(EmbeddingException):
+    """
+    No embedding backend is available (or it is explicitly disabled).
+
+    This exists because the failure it replaces was silent: the service used to
+    return ``[0.0] * 768`` when torch was missing. A zero vector is
+    type-correct, dimension-correct, and mathematically meaningless - every
+    downstream check passed it through and Hungarian semantic search returned
+    nothing for months.
+
+    Semantic search MUST fail loudly instead. Callers are expected to catch this
+    and degrade to their lexical/graph path (logging at ERROR), never to 500 and
+    never to substitute a zero vector.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "Nincs elerheto embedding backend - a szemantikus kereses letiltva. "
+            "Nullvektor helyett hiba."
+        ),
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+            original_error=original_error,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
 

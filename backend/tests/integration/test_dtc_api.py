@@ -263,26 +263,31 @@ class TestDTCDetailEndpoint:
     @pytest.mark.asyncio
     async def test_get_nonexistent_code_returns_404(self, async_client, seeded_db):
         """Test that nonexistent code returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999")
+        # Structurally valid but not seeded. "P9999" is not a DTC under SAE
+        # J2012 (second character must be 0-3) and now 400s on validation.
+        response = await async_client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_invalid_format_returns_400(self, async_client, seeded_db):
         """Test that invalid code format returns 400."""
-        # Codes that fail the format validation (len < 5 or invalid prefix)
-        invalid_codes = ["INVALID", "X0101", "P01"]
+        # Codes that fail format validation: wrong length, wrong prefix, second
+        # character outside 0-3, or a non-hex tail (see app/core/dtc_codes.py).
+        invalid_codes = ["INVALID", "X0101", "P01", "PEACE", "P9324", "P9999"]
 
         for code in invalid_codes:
             response = await async_client.get(f"/api/v1/dtc/{code}")
             assert response.status_code == 400, f"Expected 400 for {code}"
 
     @pytest.mark.asyncio
-    async def test_get_overlong_code_returns_404(self, async_client, seeded_db):
-        """Test that overlong but valid-prefix code returns 404 (not in DB)."""
+    async def test_get_overlong_code_returns_400(self, async_client, seeded_db):
+        """Test that an overlong code is rejected on format, not looked up."""
         response = await async_client.get("/api/v1/dtc/P012345")
-        # Passes format validation (len >= 5, starts with P) but not found in DB
-        assert response.status_code == 404
+        # A DTC is exactly five characters (app/core/dtc_codes.py). The old
+        # "len >= 5 and starts with P/B/C/U" guard let this through to the
+        # Neo4j lookup and the Redis cache key before answering 404.
+        assert response.status_code == 400
 
     @pytest.mark.asyncio
     async def test_get_code_normalizes_lowercase(self, async_client, seeded_db):
@@ -359,10 +364,24 @@ class TestDTCRelatedCodesEndpoint:
     @pytest.mark.asyncio
     async def test_related_codes_for_nonexistent_returns_404(self, async_client, seeded_db):
         """Test that nonexistent code returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999/related")
+        # Structurally valid but not seeded, matching the /{code} sibling.
+        # "P9999" fails SAE J2012 (second character must be 0-3) and is now a
+        # 400 on both endpoints - see the format test below.
+        response = await async_client.get("/api/v1/dtc/P3FFF/related")
 
         # Endpoint raises 404 when the base DTC code doesn't exist
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_related_codes_reject_the_same_formats_as_the_detail_endpoint(
+        self, async_client, seeded_db
+    ):
+        """/{code} and /{code}/related bind the same parameter and must agree."""
+        for code in ["INVALID", "X0101", "P01", "PEACE", "P9324", "P9999"]:
+            detail = await async_client.get(f"/api/v1/dtc/{code}")
+            related = await async_client.get(f"/api/v1/dtc/{code}/related")
+            assert detail.status_code == 400, f"Expected 400 for /{code}"
+            assert related.status_code == 400, f"Expected 400 for /{code}/related"
 
 
 class TestDTCCategoriesEndpoint:

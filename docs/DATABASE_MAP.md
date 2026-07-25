@@ -126,30 +126,59 @@ Jelenlegi méret (CLAUDE.md szerint): **~26,816 node**.
 **Index scriptek:** `scripts/index_qdrant_hubert.py` (HuBERT, 768-dim), `scripts/index_qdrant.py`, `scripts/index_qdrant_full.py`, `scripts/index_qdrant_robust.py`, `scripts/init_qdrant.py`.
 
 ### Collection-ok (mind 768-dim, COSINE distance)
+
+**A vektorok EGYETLEN, `type`-diszkriminált collectionben vannak. A per-típus `*_hu` collectionök léteznek, de üresek.**
+
+#### A tényleges vektortároló
+
 | Collection név | Tartalom | Forrás |
 |----------------|---------|--------|
-| `dtc_embeddings_hu` | DTC kódok szemantikus embeddingjei (HU leírás + symptoms). | `qdrant_client.py:34` (`DTC_COLLECTION`). |
-| `symptom_embeddings_hu` | Panasz/tünet szövegek embeddingjei. | `qdrant_client.py:35` (`SYMPTOM_COLLECTION`). |
-| `component_embeddings_hu` | Jármű alkatrész/komponens nevek + leírások. | `qdrant_client.py:36` (`COMPONENT_COLLECTION`). |
-| `repair_embeddings_hu` | Javítási eljárások leírásai. | `qdrant_client.py:37` (`REPAIR_COLLECTION`). |
-| `known_issue_embeddings_hu` | Ismert problémák (TSB, forum, adatbázis) szövegei. | `qdrant_client.py:38` (`ISSUE_COLLECTION`). |
+| **`autocognitix`** | **Minden HuBERT vektor.** A payload `type` mezője diszkriminál: `"dtc"`, `"complaint"`, `"recall"`. Egyéb payload-kulcsok típusonként: DTC-nél `code`/`category`/`severity`, complaint/recall-nál `make`/`model`/`year`/`component` (nyers, all-caps NHTSA értékek). | `settings.QDRANT_UNIFIED_COLLECTION` (`core/config.py`), env-overridable. Indexelő: `scripts/index_qdrant_hubert.py`. |
+
+Runtime hozzáférés: `QdrantService.search_unified(query_vector, type_=...)`, illetve az arra épülő `search_dtc()`. A RAG-út: `rag_service.py::retrieve_from_qdrant(type_="dtc" | "complaint")`.
+
+> **`type = "symptom"` NEM létezik** a collectionben. A RAG "symptom" retrieval-lába ezért `type="complaint"`-re képez - az indexelt NHTSA panasz-narratívák maguk a tünetleírások.
+
+#### Legacy per-típus collectionök (LÉTEZNEK, de ÜRESEK)
+
+| Collection név | Eredeti szándék | Forrás | Valós állapot |
+|----------------|-----------------|--------|---------------|
+| `dtc_embeddings_hu` | DTC kódok szemantikus embeddingjei. | `QdrantService.DTC_COLLECTION` | üres |
+| `symptom_embeddings_hu` | Panasz/tünet szövegek embeddingjei. | `QdrantService.SYMPTOM_COLLECTION` | üres |
+| `component_embeddings_hu` | Jármű alkatrész/komponens nevek. | `QdrantService.COMPONENT_COLLECTION` | üres |
+| `repair_embeddings_hu` | Javítási eljárások leírásai. | `QdrantService.REPAIR_COLLECTION` | üres |
+| `known_issue_embeddings_hu` | Ismert problémák (TSB, forum) szövegei. | `QdrantService.ISSUE_COLLECTION` | üres |
+
+Ezeket a `QdrantService.initialize_collections()` **minden app-induláskor létrehozza**, ha hiányoznak (hívó: `app/main.py` lifespan). Ezért látszanak a Qdrant Cloudon.
+
+> **Történeti megjegyzés:** a `/diagnosis/analyze` RAG-ja hónapokig ezeket az ÜRES collectionöket kérdezte, miközben a vektorok az `autocognitix`-ban voltak - és mivel a hiba üres találatlistaként jelentkezett, semmi nem jelezte. Javítva: `c64dcf1`. A teljes történet: `docs/EMBEDDING_ARCHITECTURE_DECISION.md`.
 
 ### Konfiguráció
 - **Dimension:** `768` (`QdrantService.EXPECTED_DIMENSION`, `qdrant_client.py:31`).
 - **Distance metric:** `COSINE` (`qdrant_models.Distance.COSINE`, `qdrant_client.py:96`).
-- **Embedding model:** `hubert-base-cc-v1` (`EMBEDDING_MODEL_VERSION`, `qdrant_client.py:28`). Minden vektor payloadjában ott van `_embedding_model_version` mező - így biztosítható, hogy csak azonos modellel készült vektorokat hasonlítunk össze.
-- **Storage alert threshold:** 50,000 vector / collection (`STORAGE_WARN_THRESHOLD`, `qdrant_client.py:41`).
-- **Legacy (angol) collections:** `dtc_embeddings`, `symptom_embeddings`, `known_issue_embeddings` - backwards compatibility miatt megmaradtak (`qdrant_client.py:44-46`).
-- **Létrehozás:** `_create_collection_if_not_exists()` automatikusan futtatódik a `initialize_collections()` során (`qdrant_client.py:68`).
+- **Embedding modell:** `SZTAKI-HLT/hubert-base-cc`, **SHA-ra pinelve** (`HUBERT_REVISION`, `core/config.py`). Production inference: **ONNX Runtime fp32** (`EMBEDDING_BACKEND=onnx`), dev/indexelés: torch.
+- **`_embedding_model_version` payload:** az `upsert_vectors()` minden általa írt payloadba beleteszi (`EMBEDDING_MODEL_VERSION = "hubert-base-cc-v1"`). **DE az `autocognitix` collection pontjai NEM hordozzák** - más indexelő úton készültek. Ezért a unified keresésnél a `model_version` szűrőt **tilos** átadni, különben mindent kizárna.
+- **Storage alert threshold:** 50,000 vector / collection (`STORAGE_WARN_THRESHOLD`). Figyelem: a `get_storage_stats()` / `check_storage_alerts()` **csak az öt legacy collectiont nézi**, tehát a valódi vektortároló (`autocognitix`) méretét ma nem monitorozza.
+- **Degenerált query-vektor guard:** a `search()` `ValueError`-t dob üres vagy `norm < 1e-6` query vektorra (`_validate_query_vector`, `MIN_QUERY_VECTOR_NORM`). Cosine távolságnál a nullvektor nem rossz, hanem **értelmetlen** találatokat ad - ez a hiba rejtette hónapokig a törött embedding utat.
+- **Legacy (angol) collections:** `dtc_embeddings`, `symptom_embeddings`, `known_issue_embeddings` - konstansként megmaradtak, de nem jönnek létre és nem kérdezi őket semmi.
+- **Létrehozás:** `_create_collection_if_not_exists()` automatikusan futtatódik az `initialize_collections()` során. **Az `autocognitix` collectiont NEM ez hozza létre**, hanem az indexelő script.
 
-Jelenlegi méret (CLAUDE.md szerint): **35,000+ vector**.
+Jelenlegi méret: lásd a `CLAUDE.md` "Aktuális Adatbázis Állapot" tábláját - **a repó forrásai ellentmondanak egymásnak**, és ez ott dokumentálva van.
 
 ### Qdrant helper metódusok
-- `search_dtc()` - DTC keresés category + severity szűrővel.
-- `search_similar_symptoms()` - panasz keresés vehicle_make szűrővel.
-- `search_components()` - komponens keresés system szűrővel (engine/transmission/brakes).
-- `search_repairs()` - javítás keresés difficulty szűrővel.
-- `delete_by_user(user_id)` - GDPR Article 17 cleanup, mind az 5 collection-ból törli a usert.
+
+**Aktívan használt:**
+- `search_unified(query_vector, type_, ...)` - a unified `autocognitix` collection keresése `type` diszkriminátorral. A `type` szűrő **utoljára** kerül be, így hívói `extra_filters` nem tudja felülírni.
+- `search_dtc()` - DTC keresés; delegál a `search_unified(type_="dtc")`-re, opcionális category + severity szűrővel.
+- `search()` - alacsony szintű keresés tetszőleges collectionre (guarddal).
+
+**Halott kód - a legacy ÜRES collectionökre mutat, nincs hívója az `app/`-ban és a `scripts/`-ben:**
+- `search_similar_symptoms()` - `symptom_embeddings_hu`, `vehicle_make` szűrővel.
+- `search_components()` - `component_embeddings_hu`.
+- `search_repairs()` - `repair_embeddings_hu`.
+
+**GDPR (Article 17):**
+- `delete_by_user(user_id)` - **elsőként a unified `autocognitix` collectiont** törli, majd azokat a legacy collectionöket, amik **ténylegesen léteznek** (`_legacy_collections_present()` előzetes probe). Korábban csak a legacy (üres) collectionöket söpörte, és minden hibát elnyelt - így a törlés **semmit nem törölt, miközben sikert jelentett**. Ma **minden hiba propagál** (`QdrantException`), hogy a `DELETE /api/v1/auth/me` részleges-törlés hibát tudjon jelenteni a felhasználónak.
 
 ---
 
@@ -189,4 +218,6 @@ A három domain-DB (Postgres + Neo4j + Qdrant) **szinkronban tartása** sprint 9
 - `backend/app/services/consistency_service.py` - runtime konzisztencia check.
 - `rag_service.py::verify_cross_db_consistency()` (1274. sor) - health endpoint számára.
 
-Amennyi `Postgres dtc_codes` rekord van, annyi `DTCNode` kell legyen Neo4j-ben és annyi pontnak a `dtc_embeddings_hu` collection-ban. Eltérés warning-ot generál.
+Amennyi `Postgres dtc_codes` rekord van, annyi `DTCNode` kell legyen Neo4j-ben, és annyi `type="dtc"` pontnak a unified **`autocognitix`** collectionben. Eltérés warning-ot generál.
+
+> **Történeti csapda:** a `consistency_service` korábban az ÜRES `dtc_embeddings_hu` collectiont számolta, ezért permanensen 0 Qdrant vektort jelentett és hamis inkonzisztenciát kiáltott — **a drift-detektor maga is a drift áldozata volt**. Javítva (`62158b3`): a unified collectiont számolja `type` szűrővel, és egy hiányzó collection valódi hibaként jelenik meg, nem csendes nullaként.

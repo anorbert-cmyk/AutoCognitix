@@ -188,7 +188,10 @@ class TestQuickAnalyze:
         """Test quick analyze with unknown code returns placeholder."""
         response = await async_client.post(
             "/api/v1/diagnosis/quick-analyze",
-            params={"dtc_codes": ["P9999"]},  # Not in database
+            # Structurally valid (P + 3 + FFF) but not seeded. The previous
+            # probe here, "P9999", is not a DTC at all under SAE J2012 (second
+            # character must be 0-3), so it now fails validation instead.
+            params={"dtc_codes": ["P3FFF"]},
         )
 
         assert response.status_code == 200
@@ -196,7 +199,7 @@ class TestQuickAnalyze:
 
         # Should still return something for unknown codes
         assert len(data["dtc_codes"]) == 1
-        assert data["dtc_codes"][0]["code"] == "P9999"
+        assert data["dtc_codes"][0]["code"] == "P3FFF"
 
     @pytest.mark.asyncio
     async def test_quick_analyze_missing_codes_returns_422(self, async_client: AsyncClient):
@@ -204,6 +207,61 @@ class TestQuickAnalyze:
         response = await async_client.post("/api/v1/diagnosis/quick-analyze")
 
         assert response.status_code == 422
+
+    # -------------------------------------------------------------------------
+    # Regression: hex DTC codes used to be answered with HTTP 400
+    # -------------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", ["P26B7", "P090C", "P0A94", "B00A0", "P17F1"])
+    async def test_quick_analyze_accepts_real_hex_dtc_code_regression(
+        self, async_client: AsyncClient, sample_dtc_codes, code: str
+    ):
+        """Real manufacturer/hex DTCs must be analysable (was HTTP 400).
+
+        The old guard was ``code[1:].isdigit()``, so every hex code a scan tool
+        actually reports - P26B7, P090C, P0A94, B00A0, P17F1 - was rejected at
+        the boundary and a mechanic could not run a quick analysis on it.
+        """
+        response = await async_client.post(
+            "/api/v1/diagnosis/quick-analyze",
+            params={"dtc_codes": [code]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["dtc_codes"][0]["code"] == code
+
+    @pytest.mark.asyncio
+    async def test_quick_analyze_normalizes_lowercase_hex_code_regression(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """Lower-case input is canonicalised before it reaches the repository."""
+        response = await async_client.post(
+            "/api/v1/diagnosis/quick-analyze",
+            params={"dtc_codes": [" p26b7 "]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["dtc_codes"][0]["code"] == "P26B7"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("junk", ["PEACE", "PACED", "P9324", "P9999", "UA80E", "INVALID"])
+    async def test_quick_analyze_still_rejects_junk_regression(
+        self, async_client: AsyncClient, junk: str
+    ):
+        """Widening to hex must not let non-codes through.
+
+        ``PEACE``/``PACED``/``UA80E`` are hex-shaped English words and Toyota
+        designations; ``P9324``/``P9999`` have a second character outside 0-3
+        (P9324 is a Nissan service campaign id, not a DTC).
+        """
+        response = await async_client.post(
+            "/api/v1/diagnosis/quick-analyze",
+            params={"dtc_codes": [junk]},
+        )
+
+        assert response.status_code == 400, response.text
+        assert "Invalid DTC code format" in response.json()["detail"]
 
 
 class TestGetDiagnosis:

@@ -21,7 +21,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass, field, asdict
@@ -44,6 +43,13 @@ logger = logging.getLogger(__name__)
 
 # Project paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
 DATA_DIR = PROJECT_ROOT / "data" / "obdb"
 SIGNALSETS_DIR = DATA_DIR / "signalsets"
 METADATA_DIR = DATA_DIR / "metadata"
@@ -394,7 +400,7 @@ def extract_dtcs(signalset: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     if isinstance(dtc_data, dict):
         for code, desc in dtc_data.items():
-            if not re.match(r'^[PCBU][0-9A-F]{4}$', code, re.IGNORECASE):
+            if not is_valid_dtc_code(code):
                 continue
 
             description = desc if isinstance(desc, str) else desc.get("description", "") if isinstance(desc, dict) else ""

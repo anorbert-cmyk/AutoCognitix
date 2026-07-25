@@ -31,7 +31,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -116,14 +115,15 @@ ALL_MAKES = [
     "Suzuki",
 ]
 
-# DTC code patterns
-DTC_PATTERN = re.compile(r'\b([PCBU][0-9A-Fa-f]{4})\b', re.IGNORECASE)
-EXTENDED_DTC_PATTERNS = [
-    re.compile(r'DTC\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'trouble\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'error\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-]
+# DTC extraction - canonical SAE J2012 rules live in
+# backend/app/core/dtc_codes.py and are IMPORTED, never copied. The patterns
+# replaced here were r'\b([PCBU][0-9A-Fa-f]{4})\b' plus marker variants: the
+# hex-permissive tail is how PEACE / PACED / P93AF / UA80E / U760E / PC861 were
+# written into the corpus as "DTC codes", and \b matches inside longer tokens
+# (it finds "P3F25" in the VIN fragment "1FADP3F25FL").
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import extract_dtc_codes as _extract_dtc_codes  # noqa: E402
 
 
 # =============================================================================
@@ -214,22 +214,8 @@ class ComplaintRecord:
 # =============================================================================
 
 def extract_dtc_codes(text: str) -> List[str]:
-    """Extract DTC codes from text content."""
-    if not text:
-        return []
-
-    codes: Set[str] = set()
-
-    # Primary pattern
-    for match in DTC_PATTERN.finditer(text):
-        codes.add(match.group(1).upper())
-
-    # Extended patterns
-    for pattern in EXTENDED_DTC_PATTERNS:
-        for match in pattern.finditer(text):
-            codes.add(match.group(1).upper())
-
-    return sorted(codes)
+    """Extract DTC codes from text content (see app/core/dtc_codes.py)."""
+    return _extract_dtc_codes(text)
 
 
 def parse_date(date_str: Optional[str]) -> Optional[date]:

@@ -2,6 +2,7 @@
 Vehicle schemas.
 """
 
+from enum import Enum
 from typing import Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field
@@ -139,6 +140,80 @@ class VehicleCommonIssue(BaseModel):
     occurrence_count: Optional[int] = Field(None, description="Number of reported occurrences")
 
 
+class VehicleComplaintComponent(BaseModel):
+    """A vehicle component ranked by NHTSA consumer-complaint frequency.
+
+    Sourced from the imported NHTSA complaint corpus in PostgreSQL. Unlike the
+    DTC-based `VehicleCommonIssue` list - which depends on a complaint narrative
+    literally quoting a fault code, something consumers almost never do - the
+    component field is present on every complaint row, so this list actually
+    carries data.
+    """
+
+    component: str = Field(
+        ..., description="Raw NHTSA component label (uppercase, e.g. 'ELECTRICAL SYSTEM')"
+    )
+    component_hu: Optional[str] = Field(
+        None,
+        description=(
+            "Hungarian label, or null when no verified translation exists "
+            "(clients should fall back to `component`)"
+        ),
+    )
+    complaint_count: int = Field(..., description="Complaints filed against this component")
+    share: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of this vehicle's total complaints (0..1)",
+    )
+    crash_count: int = Field(..., description="Complaints that reported a crash")
+    fire_count: int = Field(..., description="Complaints that reported a fire")
+    injury_count: int = Field(..., description="Total injuries reported")
+    death_count: int = Field(..., description="Total deaths reported")
+
+
+class DataSourceStatus(str, Enum):
+    """Whether the datastore behind a response section actually answered.
+
+    ``unavailable`` means the section's list is empty for lack of data ACCESS,
+    not for lack of data. A client must never present such an empty list as a
+    factual absence ("this vehicle has no complaints", "this model was never
+    sold in the US") - that would be a fabricated claim.
+    """
+
+    OK = "ok"
+    UNAVAILABLE = "unavailable"
+
+
+class CommonIssuesSources(BaseModel):
+    """Per-source load status for :class:`VehicleCommonIssuesResponse`.
+
+    The response is assembled from two INDEPENDENT datastores, each of which
+    degrades to an empty list on its own outage (see the service docstrings).
+    Without this block the two failure modes - "nothing to report" and "could
+    not reach the source" - are indistinguishable on the wire, and the UI is
+    forced to guess. It guessed wrong: a PostgreSQL blip made the panel state,
+    as fact, that the user's car was never sold in the US.
+
+    Future-proofing: every source gets its OWN REQUIRED field here. There is no
+    ``ok`` default and no free-form dict to forget a key in, so wiring a third
+    source in without reporting its status fails at response construction
+    (pydantic ``ValidationError`` on every request) instead of silently
+    inheriting "ok" - which is exactly how this defect would otherwise recur.
+    """
+
+    components: DataSourceStatus = Field(
+        ...,
+        description=(
+            "NHTSA complaint corpus (PostgreSQL) backing `components` and `total_complaints`"
+        ),
+    )
+    issues: DataSourceStatus = Field(
+        ..., description="Complaint->DTC graph (Neo4j) backing `issues`"
+    )
+
+
 class VehicleCommonIssuesResponse(BaseModel):
     """Schema for vehicle common issues response."""
 
@@ -146,3 +221,23 @@ class VehicleCommonIssuesResponse(BaseModel):
     model: str = Field(..., description="Vehicle model")
     year: Optional[int] = Field(None, description="Optional year filter")
     issues: List[VehicleCommonIssue] = Field(default_factory=list, description="Common issues")
+    components: List[VehicleComplaintComponent] = Field(
+        default_factory=list,
+        description="Components ranked by NHTSA complaint frequency (descending)",
+    )
+    total_complaints: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Total NHTSA complaints stored for this vehicle across ALL components "
+            "(the denominator for `share`; 0 means no complaint data)"
+        ),
+    )
+    sources: CommonIssuesSources = Field(
+        ...,
+        description=(
+            "Per-source load status. Tells an empty list caused by a datastore "
+            "outage apart from a genuinely empty one - clients must only present "
+            "the latter as an absence of data"
+        ),
+    )

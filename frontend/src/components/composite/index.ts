@@ -1,5 +1,5 @@
 /**
- * MechanicAI PRO - Composite Components
+ * AutoCognitix - Composite Components
  *
  * Complex UI components built from primitive components.
  */

@@ -5,7 +5,8 @@ Tests context retrieval, response generation, and confidence scoring.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from functools import partial
+from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from pathlib import Path
 
@@ -430,3 +431,378 @@ class TestRAGServiceSingleton:
         service2 = get_rag_service()
 
         assert service1 is service2
+
+
+# =============================================================================
+# Unified Qdrant collection routing (collection-drift guard)
+# =============================================================================
+
+# Unified-collection hits: every huBERT vector lives in ONE collection with a
+# type-discriminated payload (the per-type collections were never populated).
+UNIFIED_DTC_HITS = [
+    {
+        "id": 1,
+        "score": 0.83,
+        "payload": {
+            "type": "dtc",
+            "code": "P0301",
+            "description": "1. henger egeskimaradas",
+            "category": "powertrain",
+        },
+    }
+]
+
+UNIFIED_COMPLAINT_HITS = [
+    {
+        "id": 2,
+        "score": 0.71,
+        "payload": {
+            "type": "complaint",
+            "odi_id": "11554321",
+            "make": "VOLKSWAGEN",
+            "model": "GOLF",
+            "year": "2018",
+            "component": "ENGINE",
+            "description": "Engine misfires and shakes at idle",
+        },
+    }
+]
+
+
+def _unified_qdrant_mock(hits_by_type=None, error=None):
+    """Build a QdrantService double whose ``search_unified`` is the REAL one.
+
+    Only the low-level ``search`` is stubbed, so the assertions observe the
+    exact collection name and payload filters that the production code path
+    sends to Qdrant - a mocked ``search_unified`` could not prove either.
+    """
+    from app.db.qdrant_client import QdrantService
+
+    mock = MagicMock()
+
+    if error is not None:
+        mock.search = AsyncMock(side_effect=error)
+    else:
+
+        async def _search(**kwargs):
+            payload_type = (kwargs.get("filter_conditions") or {}).get("type")
+            return list((hits_by_type or {}).get(payload_type, []))
+
+        mock.search = AsyncMock(side_effect=_search)
+
+    mock.search_unified = partial(QdrantService.search_unified, mock)
+    return mock
+
+
+@pytest.fixture
+def rag_service():
+    """RAGService singleton with a clean cache, restored after the test."""
+    from app.services.rag_service import RAGService
+
+    service = RAGService()
+    original_qdrant = service._qdrant
+    service._cache.clear()
+    service.set_db_session(None)
+    yield service
+    service._qdrant = original_qdrant
+    service._cache.clear()
+
+
+class TestRAGUnifiedCollectionRouting:
+    """The RAG must query the collection that actually holds the huBERT
+    vectors (``settings.QDRANT_UNIFIED_COLLECTION``), not the empty legacy
+    per-type collections that the loaders never populated.
+    """
+
+    @pytest.mark.asyncio
+    async def test_dtc_retrieval_targets_unified_collection_with_type_filter(self, rag_service):
+        """A type_="dtc" retrieval hits the unified collection + discriminator."""
+        from app.core.config import settings
+        from app.services.rag_service import RetrievalSource
+
+        rag_service._qdrant = _unified_qdrant_mock({"dtc": UNIFIED_DTC_HITS})
+
+        with patch(
+            "app.services.rag_service.embed_text_async",
+            new=AsyncMock(return_value=[0.1] * 768),
+        ):
+            items = await rag_service.retrieve_from_qdrant(
+                query="P0301 egyenetlen jaratas", type_="dtc", top_k=10, preprocess=False
+            )
+
+        _, kwargs = rag_service._qdrant.search.call_args
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["filter_conditions"]["type"] == "dtc"
+
+        assert len(items) == 1
+        assert items[0].content["code"] == "P0301"
+        assert items[0].source == RetrievalSource.QDRANT_DTC
+
+    @pytest.mark.asyncio
+    async def test_revert_guard_rag_never_queries_empty_legacy_collections(self, rag_service):
+        """REVERT-GUARD: FAILS if the RAG retrieval legs are pointed back at the
+        empty ``dtc_embeddings_hu`` / ``symptom_embeddings_hu`` collections.
+        """
+        from app.core.config import settings
+        from app.db.qdrant_client import QdrantService
+        from app.services.rag_service import VehicleInfo
+
+        rag_service._qdrant = _unified_qdrant_mock(
+            {"dtc": UNIFIED_DTC_HITS, "complaint": UNIFIED_COMPLAINT_HITS}
+        )
+
+        with (
+            patch(
+                "app.services.rag_service.embed_text_async", new=AsyncMock(return_value=[0.1] * 768)
+            ),
+            patch("app.services.rag_service.preprocess_hungarian", side_effect=lambda text: text),
+            patch("app.services.rag_service.get_diagnostic_path", new=AsyncMock(return_value={})),
+        ):
+            context = await rag_service.assemble_context(
+                vehicle_info=VehicleInfo(make="Volkswagen", model="Golf", year=2018),
+                dtc_codes=["P0301"],
+                symptoms="egyenetlen jaratas",
+            )
+
+        collections = [
+            call.kwargs["collection_name"] for call in rag_service._qdrant.search.call_args_list
+        ]
+        assert collections, "assemble_context issued no Qdrant search at all"
+        assert set(collections) == {settings.QDRANT_UNIFIED_COLLECTION}
+        assert QdrantService.DTC_COLLECTION not in collections
+        assert QdrantService.SYMPTOM_COLLECTION not in collections
+
+        # ...and the retrieved payloads really reach the prompt context.
+        assert "P0301" in context.dtc_context
+        assert "Engine misfires" in context.symptom_context
+
+    @pytest.mark.asyncio
+    async def test_chat_dtc_context_targets_unified_collection(self, rag_service):
+        """REVERT-GUARD for the chat assistant's DTC-context leg.
+
+        ``ChatService._fetch_rag_context`` is a SECOND caller of
+        ``retrieve_from_qdrant``; pointing it back at ``dtc_embeddings_hu``
+        would silently strip every DTC fact out of the chat prompt without any
+        error surfacing. FAILS if the legacy collection reappears.
+        """
+        from app.core.config import settings
+        from app.db.qdrant_client import QdrantService
+        from app.services.chat_service import ChatService
+
+        rag_service._qdrant = _unified_qdrant_mock({"dtc": UNIFIED_DTC_HITS})
+
+        with (
+            patch(
+                "app.services.rag_service.embed_text_async", new=AsyncMock(return_value=[0.1] * 768)
+            ),
+            patch("app.services.rag_service.get_rag_service", return_value=rag_service),
+        ):
+            context = await ChatService()._fetch_rag_context(["P0301"])
+
+        calls = rag_service._qdrant.search.call_args_list
+        assert calls, "chat RAG context issued no Qdrant search at all"
+        collections = [call.kwargs["collection_name"] for call in calls]
+        assert set(collections) == {settings.QDRANT_UNIFIED_COLLECTION}
+        assert QdrantService.DTC_COLLECTION not in collections
+        assert all(call.kwargs["filter_conditions"]["type"] == "dtc" for call in calls)
+
+        # ...and the hit really reaches the chat prompt.
+        assert context is not None
+        assert "P0301" in context
+        assert "1. henger egeskimaradas" in context
+
+    @pytest.mark.asyncio
+    async def test_symptom_leg_uses_complaint_type_not_nonexistent_symptom_type(self, rag_service):
+        """The unified collection has no ``symptom`` payloads; the similar-case
+        leg must ask for ``complaint`` (which exists) instead of silently
+        matching nothing.
+        """
+        from app.services.rag_service import RetrievalSource, VehicleInfo
+
+        rag_service._qdrant = _unified_qdrant_mock(
+            {"dtc": UNIFIED_DTC_HITS, "complaint": UNIFIED_COMPLAINT_HITS}
+        )
+
+        with (
+            patch(
+                "app.services.rag_service.embed_text_async", new=AsyncMock(return_value=[0.1] * 768)
+            ),
+            patch("app.services.rag_service.preprocess_hungarian", side_effect=lambda text: text),
+            patch("app.services.rag_service.get_diagnostic_path", new=AsyncMock(return_value={})),
+        ):
+            context = await rag_service.assemble_context(
+                vehicle_info=VehicleInfo(make="Volkswagen", model="Golf", year=2018),
+                dtc_codes=["P0301"],
+                symptoms="egyenetlen jaratas",
+            )
+
+        all_filters = [
+            call.kwargs.get("filter_conditions") or {}
+            for call in rag_service._qdrant.search.call_args_list
+        ]
+        requested_types = {filters.get("type") for filters in all_filters}
+        assert requested_types == {"dtc", "complaint"}
+        assert "symptom" not in requested_types
+
+        assert len(context.symptom_items) == 1
+        assert context.symptom_items[0].source == RetrievalSource.QDRANT_COMPLAINT
+        # No make filter: NHTSA stores upper-case makes, so an exact-match
+        # filter on the user's spelling would silently return nothing.
+        complaint_filters = [f for f in all_filters if f.get("type") == "complaint"]
+        assert complaint_filters == [{"type": "complaint"}]
+
+    @pytest.mark.asyncio
+    async def test_retrieval_never_filters_by_embedding_model_version(self, rag_service):
+        """Unified points carry no ``_embedding_model_version`` payload, so
+        passing a model version would filter every hit away.
+        """
+        rag_service._qdrant = _unified_qdrant_mock({"dtc": UNIFIED_DTC_HITS})
+
+        with patch(
+            "app.services.rag_service.embed_text_async",
+            new=AsyncMock(return_value=[0.1] * 768),
+        ):
+            await rag_service.retrieve_from_qdrant(query="P0301", type_="dtc")
+
+        _, kwargs = rag_service._qdrant.search.call_args
+        assert kwargs["model_version"] is None
+
+    @pytest.mark.asyncio
+    async def test_identical_query_does_not_leak_between_type_legs(self, rag_service):
+        """Both legs share one collection; with an empty symptom text they also
+        share the query string, so the cache key must include the type.
+        """
+        rag_service._qdrant = _unified_qdrant_mock(
+            {"dtc": UNIFIED_DTC_HITS, "complaint": UNIFIED_COMPLAINT_HITS}
+        )
+
+        with patch(
+            "app.services.rag_service.embed_text_async",
+            new=AsyncMock(return_value=[0.1] * 768),
+        ):
+            dtc_items = await rag_service.retrieve_from_qdrant(query="P0301", type_="dtc")
+            complaint_items = await rag_service.retrieve_from_qdrant(
+                query="P0301", type_="complaint"
+            )
+
+        assert dtc_items[0].content["code"] == "P0301"
+        assert complaint_items[0].content["odi_id"] == "11554321"
+        assert rag_service._qdrant.search.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_assemble_context_survives_qdrant_failure(self, rag_service):
+        """A Qdrant outage must degrade the context, never raise (no 500 on
+        /diagnosis/analyze).
+        """
+        from app.services.rag_service import RAGContext, VehicleInfo
+
+        rag_service._qdrant = _unified_qdrant_mock(error=Exception("Qdrant unavailable"))
+
+        with (
+            patch(
+                "app.services.rag_service.embed_text_async", new=AsyncMock(return_value=[0.1] * 768)
+            ),
+            patch("app.services.rag_service.preprocess_hungarian", side_effect=lambda text: text),
+            patch("app.services.rag_service.get_diagnostic_path", new=AsyncMock(return_value={})),
+        ):
+            context = await rag_service.assemble_context(
+                vehicle_info=VehicleInfo(make="Volkswagen", model="Golf", year=2018),
+                dtc_codes=["P0301"],
+                symptoms="egyenetlen jaratas",
+            )
+
+        assert isinstance(context, RAGContext)
+        assert context.dtc_items == []
+        assert context.symptom_items == []
+
+    @pytest.mark.asyncio
+    async def test_verify_cross_db_consistency_reports_unified_collection(self, rag_service):
+        """The health check must count the collection that is actually queried;
+        reporting the empty legacy one is a misleading "ok".
+        """
+        from app.core.config import settings
+        from app.db.qdrant_client import QdrantService
+
+        mock_qdrant = _unified_qdrant_mock()
+        mock_qdrant.get_collection_info = AsyncMock(return_value={"points_count": 54652})
+        rag_service._qdrant = mock_qdrant
+
+        with patch("app.db.neo4j_models.is_neo4j_available", new=AsyncMock(return_value=True)):
+            report = await rag_service.verify_cross_db_consistency()
+
+        mock_qdrant.get_collection_info.assert_awaited_once_with(settings.QDRANT_UNIFIED_COLLECTION)
+        assert report["details"]["qdrant"]["collection"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert report["details"]["qdrant"]["collection"] != QdrantService.DTC_COLLECTION
+        assert report["details"]["qdrant"]["count"] == 54652
+
+    @pytest.mark.asyncio
+    async def test_get_context_helper_uses_unified_collection(self, rag_service):
+        """The module-level convenience helper follows the same route."""
+        from app.core.config import settings
+        from app.services.rag_service import get_context
+
+        rag_service._qdrant = _unified_qdrant_mock({"dtc": UNIFIED_DTC_HITS})
+
+        with patch(
+            "app.services.rag_service.embed_text_async",
+            new=AsyncMock(return_value=[0.1] * 768),
+        ):
+            results = await get_context("egyenetlen jaratas", top_k=5)
+
+        _, kwargs = rag_service._qdrant.search.call_args
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["filter_conditions"]["type"] == "dtc"
+        assert results[0]["content"]["code"] == "P0301"
+        assert results[0]["source"] == "qdrant_dtc"
+
+    @pytest.mark.asyncio
+    async def test_explicit_collection_route_still_supported(self, rag_service):
+        """Backwards compatibility: an explicit collection name still targets
+        that collection through the plain search API.
+        """
+        rag_service._qdrant = _unified_qdrant_mock()
+
+        with patch(
+            "app.services.rag_service.embed_text_async",
+            new=AsyncMock(return_value=[0.1] * 768),
+        ):
+            items = await rag_service.retrieve_from_qdrant(
+                query="teszt", collection="custom_collection", top_k=3
+            )
+
+        _, kwargs = rag_service._qdrant.search.call_args
+        assert kwargs["collection_name"] == "custom_collection"
+        assert kwargs["filter_conditions"] is None
+        assert items == []
+
+    @pytest.mark.asyncio
+    async def test_retrieve_requires_collection_or_type(self, rag_service):
+        """Neither route selected is a programming error, not a silent no-op."""
+        with pytest.raises(ValueError):
+            await rag_service.retrieve_from_qdrant(query="teszt")
+
+
+class TestConsistencyServiceCollectionRouting:
+    """The admin cross-DB consistency check must count the vectors that exist."""
+
+    @pytest.mark.asyncio
+    async def test_dtc_vector_count_reads_unified_collection_with_type_filter(self):
+        """REVERT-GUARD: counting the empty ``dtc_embeddings_hu`` collection
+        reported 0 vectors and declared a permanent, bogus inconsistency.
+        """
+        from app.core.config import settings
+        from app.services.consistency_service import ConsistencyService
+
+        client = MagicMock()
+        client.count.return_value = MagicMock(count=54652)
+
+        with patch("qdrant_client.QdrantClient", return_value=client):
+            total = await ConsistencyService()._get_qdrant_vector_count()
+
+        assert total == 54652
+        _, kwargs = client.count.call_args
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["collection_name"] != "dtc_embeddings_hu"
+        condition = kwargs["count_filter"].must[0]
+        assert condition.key == "type"
+        assert condition.match.value == "dtc"

@@ -18,7 +18,7 @@ import hashlib
 import threading
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
 
@@ -30,6 +30,8 @@ from sqlalchemy import func, or_, select
 from app.core.sql_utils import escape_ilike as _escape_ilike
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.log_sanitizer import sanitize_exception
 from app.core.logging import get_logger
 from app.db.neo4j_models import get_diagnostic_path
 from app.db.postgres.models import DTCCode, KnownIssue
@@ -46,6 +48,7 @@ from app.prompts.diagnosis_hu import (
     generate_rule_based_diagnosis,
     parse_diagnosis_response,
 )
+from app.core.exceptions import EmbeddingUnavailableError
 from app.services.embedding_service import (
     embed_text_async,
     get_embedding_service,
@@ -119,12 +122,42 @@ class RetrievalSource(str, Enum):
 
     QDRANT_DTC = "qdrant_dtc"
     QDRANT_SYMPTOM = "qdrant_symptom"
+    QDRANT_COMPLAINT = "qdrant_complaint"
     NEO4J_GRAPH = "neo4j_graph"
     POSTGRES_TEXT = "postgres_text"
     NHTSA = "nhtsa"
 
     def __str__(self) -> str:
         return str(self.value)
+
+
+# Payload ``type`` discriminator -> retrieval source label. Under the unified
+# collection every hit comes from the same collection, so the source label is
+# driven by the payload type instead of the collection name.
+_SOURCE_BY_PAYLOAD_TYPE: Dict[str, RetrievalSource] = {
+    "dtc": RetrievalSource.QDRANT_DTC,
+    "complaint": RetrievalSource.QDRANT_COMPLAINT,
+}
+
+# The "similar cases" leg reads owner-reported narratives out of Qdrant payloads,
+# and the payloads were written by two different indexers with two different
+# shapes: one stores the narrative under ``description``, the other embeds the
+# narrative but persists only metadata (odi_number/make/model/component/...) and
+# no text at all. Probing the known text keys keeps both readable; a payload with
+# none of them carries NO symptom information and must be dropped rather than
+# rendered as an empty numbered line in the Hungarian prompt.
+_SYMPTOM_TEXT_KEYS: Tuple[str, ...] = ("description", "narrative", "summary", "complaint_text")
+
+
+def _symptom_narrative(content: Optional[Dict[str, Any]]) -> str:
+    """Return the narrative text of a symptom/complaint payload ("" if it has none)."""
+    if not content:
+        return ""
+    for key in _SYMPTOM_TEXT_KEYS:
+        value = content.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 @dataclass
@@ -151,7 +184,16 @@ class VehicleInfo:
 
 @dataclass
 class RetrievedItem:
-    """Item retrieved from any source."""
+    """
+    Item retrieved from any source.
+
+    ``score`` is the RELEVANCE of the item as reported by its source: cosine
+    similarity for Qdrant hits, a fixed confidence for direct/graph matches.
+    :meth:`RAGService.calculate_confidence` reads it with that meaning, so
+    nothing may overwrite it with a score from a different scale -
+    :class:`HybridRanker` therefore returns re-scored *copies* instead of
+    mutating the items it is given (they are shared with the retrieval cache).
+    """
 
     content: Dict[str, Any]
     source: RetrievalSource
@@ -287,12 +329,21 @@ class HybridRanker:
         """
         Combine multiple ranked lists using RRF.
 
+        The returned items are COPIES carrying the fused score; the input items
+        are never touched. That is not a style preference: the lists handed in
+        are the objects ``retrieve_from_qdrant`` cached and returns by
+        reference, and ``calculate_confidence`` reads ``item.score`` as a cosine
+        similarity. Writing the RRF score (``1/(k+rank)``, ~0.016) back into
+        them replaced a ~0.85 similarity in the user-facing confidence and kept
+        the corrupted values in the cache for its whole TTL.
+
         Args:
             ranked_lists: List of ranked item lists from different sources.
             weights: Optional weights for each list (default: equal weights).
 
         Returns:
-            Combined and re-ranked list of items.
+            Combined and re-ranked list of NEW items whose ``score`` is the
+            fused RRF score (an ordering signal, not a similarity).
         """
         if not ranked_lists:
             return []
@@ -323,14 +374,9 @@ class HybridRanker:
             item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True
         )
 
-        # Update item scores and return
-        result = []
-        for key in sorted_keys:
-            item = item_objects[key]
-            item.score = item_scores[key]
-            result.append(item)
-
-        return result
+        # Re-score COPIES - see the docstring. ``replace`` keeps content and
+        # metadata by reference (they are read-only here) and only swaps score.
+        return [replace(item_objects[key], score=item_scores[key]) for key in sorted_keys]
 
     def _get_item_key(self, item: RetrievedItem) -> str:
         """Generate unique key for an item."""
@@ -338,7 +384,12 @@ class HybridRanker:
         return hashlib.sha256(content_str.encode()).hexdigest()
 
     def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
-        """Normalize scores to 0-1 range."""
+        """Normalize scores to 0-1 range, returning copies (inputs untouched).
+
+        Same contract as :meth:`reciprocal_rank_fusion`: a ranker never mutates
+        the items it is given, because they may be the cached retrieval objects
+        whose ``score`` is a similarity other code depends on.
+        """
         if not items:
             return items
 
@@ -346,13 +397,10 @@ class HybridRanker:
         min_score = min(item.score for item in items)
 
         if max_score == min_score:
-            for item in items:
-                item.score = 1.0
-        else:
-            for item in items:
-                item.score = (item.score - min_score) / (max_score - min_score)
+            return [replace(item, score=1.0) for item in items]
 
-        return items
+        span = max_score - min_score
+        return [replace(item, score=(item.score - min_score) / span) for item in items]
 
 
 # =============================================================================
@@ -464,63 +512,134 @@ class RAGService:
     async def retrieve_from_qdrant(
         self,
         query: str,
-        collection: str,
+        collection: Optional[str] = None,
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5,
         preprocess: bool = True,
+        type_: Optional[str] = None,
     ) -> List[RetrievedItem]:
         """
         Retrieve items from Qdrant vector store.
 
+        All huBERT vectors live in ONE type-discriminated collection
+        (``settings.QDRANT_UNIFIED_COLLECTION``); the per-type collections
+        (``dtc_embeddings_hu``, ``symptom_embeddings_hu``, ...) were never
+        populated. Passing ``type_`` therefore routes the search through
+        :meth:`QdrantService.search_unified`, which targets that collection and
+        injects the ``{"type": type_}`` discriminator. ``collection`` is only
+        honoured for an explicit legacy per-collection lookup.
+
         Args:
             query: Search query text.
-            collection: Qdrant collection name.
+            collection: Legacy Qdrant collection name. Required only when
+                ``type_`` is omitted.
             top_k: Number of results to return.
             filters: Optional filter conditions.
             score_threshold: Minimum similarity score.
             preprocess: Run Hungarian NLP preprocessing before embedding.
                 Set to False when the caller has already preprocessed the query
                 to avoid a redundant spaCy pass.
+            type_: Payload discriminator ("dtc", "complaint", ...) selecting the
+                unified-collection route.
 
         Returns:
             List of RetrievedItem from Qdrant.
+
+        Raises:
+            ValueError: If neither ``collection`` nor ``type_`` is provided.
         """
+        target_collection = settings.QDRANT_UNIFIED_COLLECTION if type_ else collection
+        if not target_collection:
+            raise ValueError("retrieve_from_qdrant requires either 'collection' or 'type_'")
+
         # Normalize Hungarian text to NFC form for consistent search
         query = unicodedata.normalize("NFC", query)
 
-        # Check cache
-        cached = self._cache.get("qdrant", collection, query, filters)
+        # Cache key = EVERY argument that changes the result set. ``type_`` is in
+        # it because under the unified collection two retrieval legs otherwise
+        # share collection+query+filters and serve each other's results; ``top_k``
+        # and ``score_threshold`` are in it because they change the size and the
+        # cut-off of that set (chat_service asks for top_k=3 on a bare DTC code,
+        # assemble_context asks for top_k=10 on the same reduced query, and the
+        # second caller used to be served the first one's 3 items). ``preprocess``
+        # is in it because it changes the vector the query is embedded into.
+        # No slicing of a wider cached result: Qdrant's HNSW search depends on
+        # ``limit``, so a top_k=10 result is not guaranteed to contain the same
+        # first 3 hits a top_k=3 search would return.
+        cache_key = (
+            "qdrant",
+            target_collection,
+            type_,
+            query,
+            filters,
+            top_k,
+            score_threshold,
+            preprocess,
+        )
+        cached = self._cache.get(*cache_key)
         if cached is not None:
             return cast("List[RetrievedItem]", cached)
 
         # Generate embedding for query (async to avoid blocking event loop)
         try:
             query_embedding = await embed_text_async(query, preprocess=preprocess)
-        except (RuntimeError, Exception) as e:
-            logger.warning(f"Embedding failed, falling back to keyword search: {e}")
+        except EmbeddingUnavailableError as e:
+            # ERROR, not WARNING: Sentry only raises events from ERROR upwards
+            # (core/logging.py, event_level=logging.ERROR). A dead embedding
+            # backend silently removes the entire semantic leg of retrieval, so
+            # logging it at WARNING would reproduce the exact operator
+            # experience - degraded quality, zero alerts - that raising
+            # EmbeddingUnavailableError exists to end.
+            logger.error(
+                f"Embedding backend unavailable - semantic retrieval from "
+                f"{target_collection} returns NOTHING (the caller's lexical and "
+                f"Neo4j paths are unaffected): {sanitize_exception(e)}",
+                exc_info=True,
+            )
+            query_embedding = None
+        except Exception as e:
+            # A transient per-query embedding failure is less severe than a dead
+            # backend; it stays at WARNING.
+            logger.warning(
+                f"Embedding failed for {target_collection} - returning no "
+                f"semantic results: {sanitize_exception(e)}"
+            )
             query_embedding = None
 
         if query_embedding is None:
             return []
 
         try:
-            results = await self._qdrant.search(
-                collection_name=collection,
-                query_vector=query_embedding,
-                limit=top_k,
-                filter_conditions=filters,
-                score_threshold=score_threshold,
-            )
+            if type_:
+                # NOTE: no model_version - the unified collection's points carry
+                # no ``_embedding_model_version`` payload, so filtering on it
+                # would match nothing.
+                results = await self._qdrant.search_unified(
+                    query_vector=query_embedding,
+                    type_=type_,
+                    limit=top_k,
+                    extra_filters=filters,
+                    score_threshold=score_threshold,
+                )
+            else:
+                results = await self._qdrant.search(
+                    collection_name=target_collection,
+                    query_vector=query_embedding,
+                    limit=top_k,
+                    filter_conditions=filters,
+                    score_threshold=score_threshold,
+                )
+
+            if type_:
+                source = _SOURCE_BY_PAYLOAD_TYPE.get(type_, RetrievalSource.QDRANT_SYMPTOM)
+            elif target_collection == QdrantService.DTC_COLLECTION:
+                source = RetrievalSource.QDRANT_DTC
+            else:
+                source = RetrievalSource.QDRANT_SYMPTOM
 
             items = []
             for result in results:
-                source = (
-                    RetrievalSource.QDRANT_DTC
-                    if collection == QdrantService.DTC_COLLECTION
-                    else RetrievalSource.QDRANT_SYMPTOM
-                )
-
                 items.append(
                     RetrievedItem(
                         content=result.get("payload", {}),
@@ -530,12 +649,24 @@ class RAGService:
                     )
                 )
 
+            # Success-path telemetry: makes a silently empty retrieval
+            # (collection drift, empty index) diagnosable without a redeploy.
+            logger.info(
+                "rag qdrant retrieval: collection=%s type=%s hits=%d",
+                target_collection,
+                type_ or "-",
+                len(items),
+            )
+
             # Cache results
-            self._cache.set(items, "qdrant", collection, query, filters)
+            self._cache.set(items, *cache_key)
             return items
 
         except Exception as e:
-            logger.warning(f"Qdrant search error for {collection}: {e}")
+            logger.warning(
+                f"Qdrant search error for {target_collection} "
+                f"(type={type_ or '-'}): {sanitize_exception(e)}"
+            )
             return []
 
     async def retrieve_from_neo4j(
@@ -788,19 +919,26 @@ class RAGService:
 
         # Parallel retrieval from all sources
         tasks = [
-            # Qdrant DTC search (query already preprocessed above)
+            # Qdrant DTC search over the unified collection (query already
+            # preprocessed above)
             self.retrieve_from_qdrant(
                 query=search_query,
-                collection=QdrantService.DTC_COLLECTION,
+                type_="dtc",
                 top_k=10,
                 preprocess=False,
             ),
-            # Qdrant symptom search (query already preprocessed above)
+            # Qdrant "similar case" search (query already preprocessed above).
+            # The unified collection holds no ``symptom`` payloads - the indexed
+            # owner-reported NHTSA complaint narratives ARE the symptom
+            # descriptions, so this leg retrieves ``type="complaint"``.
+            # Deliberately unfiltered by make: complaint payloads store NHTSA's
+            # upper-case make ("VOLKSWAGEN") while the request carries the
+            # user's spelling, and an exact-match filter would silently return
+            # nothing. Relevance comes from vector similarity instead.
             self.retrieve_from_qdrant(
                 query=preprocessed_symptoms or search_query,
-                collection=QdrantService.SYMPTOM_COLLECTION,
+                type_="complaint",
                 top_k=5,
-                filters={"vehicle_make": vehicle_info.make} if vehicle_info.make else None,
                 preprocess=False,
             ),
             # Neo4j graph retrieval
@@ -885,16 +1023,37 @@ class RAGService:
         dtc_data = [item.content for item in combined_dtc[:10]]
         context.dtc_context = format_dtc_context(dtc_data)
 
-        symptom_data = [
-            {
-                "description": item.content.get("description", ""),
-                "score": item.score,
-                "resolution": item.content.get("resolution", ""),
-                "related_dtc": item.content.get("related_dtc", []),
-            }
-            for item in context.symptom_items[:5]
-        ]
-        context.symptom_context = format_symptom_context(symptom_data)
+        # Only hits that actually carry a narrative become "similar cases". A
+        # complaint payload without one (see _symptom_narrative) would render as
+        # a blank numbered line - "1.  (hasonlosag: 78%)" - in the LLM prompt and
+        # would suppress the honest "Nincs hasonlo eset" branch, because an empty
+        # list is what makes that branch fire.
+        symptom_data = []
+        for item in context.symptom_items:
+            narrative = _symptom_narrative(item.content)
+            if not narrative:
+                continue
+            symptom_data.append(
+                {
+                    "description": narrative,
+                    "score": item.score,
+                    "resolution": item.content.get("resolution", ""),
+                    "related_dtc": item.content.get("related_dtc", []),
+                }
+            )
+
+        dropped = len(context.symptom_items) - len(symptom_data)
+        if dropped > 0:
+            # Visible telemetry for a payload-shape drift that is otherwise
+            # invisible: the hits exist, they just carry no readable text.
+            logger.info(
+                "rag symptom leg: %d/%d hits carry no narrative payload and were "
+                "dropped from the prompt and from confidence scoring",
+                dropped,
+                len(context.symptom_items),
+            )
+
+        context.symptom_context = format_symptom_context(symptom_data[:5])
 
         context.repair_context = format_repair_context(graph_data)
 
@@ -948,11 +1107,17 @@ class RAGService:
             factors += 0.2
 
         # Factor 3: Symptom matching (0-0.2)
-        if context.symptom_items:
-            symptom_scores = [item.score for item in context.symptom_items]
-            if symptom_scores:
-                avg_symptom = sum(symptom_scores) / len(symptom_scores)
-                score += avg_symptom * 0.2
+        # Only narrative-bearing hits count. A complaint payload with no text
+        # contributes nothing to the prompt, so letting its similarity inflate
+        # the confidence would report evidence the diagnosis never saw. With no
+        # usable symptom evidence the factor is simply absent from the average,
+        # matching how factors 1, 4 and 5 treat missing evidence.
+        symptom_scores = [
+            item.score for item in context.symptom_items if _symptom_narrative(item.content)
+        ]
+        if symptom_scores:
+            avg_symptom = sum(symptom_scores) / len(symptom_scores)
+            score += avg_symptom * 0.2
             factors += 0.2
 
         # Factor 4: Graph context richness (0-0.2)
@@ -1309,11 +1474,18 @@ class RAGService:
         except Exception as e:
             results["details"]["postgresql"] = {"status": "error", "error": str(e)}
 
-        # 2. Count DTCs in Qdrant
+        # 2. Count vectors in Qdrant. Must report the collection the retrieval
+        # layer actually queries - reporting the empty legacy collection here
+        # yields a misleading "ok" with a zero count.
         try:
-            info = await self._qdrant.get_collection_info(QdrantService.DTC_COLLECTION)
+            qdrant_collection = settings.QDRANT_UNIFIED_COLLECTION
+            info = await self._qdrant.get_collection_info(qdrant_collection)
             qdrant_count = info.get("points_count", 0) if info else 0
-            results["details"]["qdrant"] = {"status": "ok", "count": qdrant_count}
+            results["details"]["qdrant"] = {
+                "status": "ok",
+                "collection": qdrant_collection,
+                "count": qdrant_count,
+            }
         except Exception as e:
             results["details"]["qdrant"] = {"status": "error", "error": str(e)}
             results["consistent"] = False
@@ -1426,7 +1598,7 @@ async def get_context(
     service = get_rag_service()
     items = await service.retrieve_from_qdrant(
         query=query,
-        collection=QdrantService.DTC_COLLECTION,
+        type_="dtc",
         top_k=top_k,
     )
     return [

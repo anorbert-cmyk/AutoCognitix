@@ -29,7 +29,6 @@ import argparse
 import json
 import logging
 import random
-import re
 import sys
 import time
 from collections import defaultdict
@@ -53,7 +52,12 @@ SOURCE_FILES: List[str] = [
     "2025-2026.json",
 ]
 
-DTC_PATTERN = re.compile(r"\b[PBCU][0-9]{4}\b")
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. Importing `app.core` no longer constructs the
+# FastAPI Settings object, so this runs with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core import dtc_codes as dtc_rules  # noqa: E402
 
 TOP_30_MAKES: Set[str] = {
     "FORD",
@@ -278,7 +282,7 @@ def is_safety_critical(complaint: Dict[str, Any]) -> bool:
 def has_dtc_code(complaint: Dict[str, Any]) -> bool:
     """Returns True if the complaint summary contains a DTC code pattern."""
     summary = complaint.get("summary") or ""
-    return bool(DTC_PATTERN.search(summary))
+    return bool(dtc_rules.contains_dtc_code(summary))
 
 
 def get_year_sampling_rate(model_year: Optional[int]) -> float:

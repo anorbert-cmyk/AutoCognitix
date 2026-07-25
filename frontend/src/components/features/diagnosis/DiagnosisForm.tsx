@@ -108,7 +108,12 @@ export function DiagnosisForm({
     if (dtcCodes.length === 0) {
       newErrors.dtcCodes = 'Legalább egy hibakód megadása kötelező';
     } else {
-      const dtcPattern = /^[PBCU][0-9A-F]{4}$/;
+      // Canonical rule: backend/app/core/dtc_codes.py (DTC_CODE_STRICT, SAE
+      // J2012) - P/B/C/U, then 0-3, then 3 hex digits. There is no shared
+      // module across the language boundary, so this regex deliberately
+      // mirrors it character for character: without the [0-3] the client
+      // would accept "PEACE" and let the server answer 422.
+      const dtcPattern = /^[PBCU][0-3][0-9A-F]{3}$/;
       const invalidCodes = dtcCodes.filter((code) => !dtcPattern.test(code));
       if (invalidCodes.length > 0) {
         newErrors.dtcCodes = `Érvénytelen hibakód(ok): ${invalidCodes.join(', ')}`;

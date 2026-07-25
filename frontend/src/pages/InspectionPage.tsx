@@ -403,7 +403,7 @@ export default function InspectionPage() {
 
       {/* Footer */}
       <footer className="mt-auto py-8 text-center text-slate-500 text-sm font-medium border-t border-slate-200 bg-white">
-        <p>&copy; {currentYear} MechanicAI. Fejlett diagnosztikai algoritmusokkal mukodik.</p>
+        <p>&copy; {currentYear} AutoCognitix. Fejlett diagnosztikai algoritmusokkal működik.</p>
       </footer>
     </div>
   )

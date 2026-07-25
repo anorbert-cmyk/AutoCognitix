@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,13 @@ METADATA_DIR = DATA_DIR / "metadata"
 REPOS_CACHE = METADATA_DIR / "repos_cache.json"
 IMPORT_STATE_FILE = METADATA_DIR / "import_state.json"
 STATS_FILE = DATA_DIR / "import_stats.json"
+
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
 
 # GitHub API configuration
 GITHUB_API = "https://api.github.com"
@@ -367,7 +375,7 @@ async def download_vehicle_data(
                         if isinstance(dtcs, dict):
                             # Count valid DTC codes
                             for code in dtcs:
-                                if re.match(r"^[PCBU][0-9A-F]{4}$", code, re.IGNORECASE):
+                                if is_valid_dtc_code(code):
                                     vehicle.dtc_count += 1
 
                         break
@@ -581,7 +589,7 @@ def reorganize_existing_data() -> Dict[str, Any]:
                 dtcs = signalset.get("dtcs", {})
                 if isinstance(dtcs, dict):
                     for code in dtcs:
-                        if re.match(r"^[PCBU][0-9A-F]{4}$", code, re.IGNORECASE):
+                        if is_valid_dtc_code(code):
                             dtc_count += 1
 
                 # Save metadata

@@ -344,7 +344,9 @@ class TestQuickAnalyzeEndpoint:
         """Test that quick-analyze handles unknown DTC codes gracefully."""
         response = await async_client.post(
             "/api/v1/diagnosis/quick-analyze",
-            params={"dtc_codes": ["P9999"]},  # Unknown code
+            # Unknown but structurally valid. "P9999" (second character 9) is
+            # not a DTC under SAE J2012 and is now rejected with 400 instead.
+            params={"dtc_codes": ["P3FFF"]},
         )
 
         assert response.status_code == 200
@@ -353,7 +355,7 @@ class TestQuickAnalyzeEndpoint:
         # Should indicate code not found
         if data["dtc_codes"]:
             first_code = data["dtc_codes"][0]
-            assert first_code["code"] == "P9999"
+            assert first_code["code"] == "P3FFF"
 
     @pytest.mark.asyncio
     async def test_quick_analyze_accepts_multiple_codes(

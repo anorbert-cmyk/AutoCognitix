@@ -30,7 +30,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -90,19 +89,19 @@ POPULAR_MAKES = [
 DEFAULT_START_YEAR = 2015
 DEFAULT_END_YEAR = 2024
 
-# DTC code pattern (P0xxx, C0xxx, B0xxx, U0xxx)
-DTC_PATTERN = re.compile(
-    r'\b([PCBU][0-9A-Fa-f]{4})\b',
-    re.IGNORECASE
-)
+# DTC extraction - canonical SAE J2012 rules live in
+# backend/app/core/dtc_codes.py and are IMPORTED, never copied. The comment
+# that used to sit here said "KEEP IN SYNC with scripts/sync_neo4j_sprint9.py",
+# which is precisely the maintenance burden this import removes.
+#
+# The separate EXTENDED_DTC_PATTERNS list is gone too: the canonical extractor
+# already tolerates the marker forms it existed for ("DTC: P 0301", "P-0301"),
+# and it does so *with* the boundary guard the extended pattern was missing -
+# that one would happily read "P0301" out of "DTC: XP0301".
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
-# Extended DTC patterns that might appear in text
-EXTENDED_DTC_PATTERNS = [
-    re.compile(r'DTC\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'trouble\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'error\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-]
+from app.core.dtc_codes import dtc_category as _dtc_category  # noqa: E402
+from app.core.dtc_codes import extract_dtc_codes as _extract_dtc_codes  # noqa: E402
 
 
 # =============================================================================
@@ -123,35 +122,14 @@ def extract_dtc_codes(text: str) -> Set[str]:
     Returns:
         Set of unique DTC codes found (uppercase).
     """
-    if not text:
-        return set()
-
-    codes = set()
-
-    # Primary pattern - standard DTC format
-    for match in DTC_PATTERN.finditer(text):
-        codes.add(match.group(1).upper())
-
-    # Extended patterns
-    for pattern in EXTENDED_DTC_PATTERNS:
-        for match in pattern.finditer(text):
-            codes.add(match.group(1).upper())
-
-    return codes
+    return set(_extract_dtc_codes(text))
 
 
 def get_category_from_code(code: str) -> str:
     """Determine the category from a DTC code prefix."""
     if not code:
         return "unknown"
-    prefix = code[0].upper()
-    categories = {
-        "P": "powertrain",
-        "C": "chassis",
-        "B": "body",
-        "U": "network",
-    }
-    return categories.get(prefix, "unknown")
+    return _dtc_category(code)
 
 
 def get_severity_from_code(code: str) -> str:
@@ -877,13 +855,13 @@ async def main():
         print(f"Total recalls fetched: {len(all_recalls)}")
         print(f"Total complaints fetched: {len(all_complaints)}")
         print(f"Unique DTC codes extracted: {len(extracted_codes)}")
-        print(f"\nOutput files:")
+        print("\nOutput files:")
         print(f"  Recalls: {RECALLS_FILE}")
         print(f"  Complaints: {COMPLAINTS_FILE}")
         print(f"  Extracted DTC: {EXTRACTED_DTC_FILE}")
 
         if extracted_codes:
-            print(f"\nTop extracted DTC codes:")
+            print("\nTop extracted DTC codes:")
             # Sort by reference count
             sorted_codes = sorted(
                 extracted_codes.values(),

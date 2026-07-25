@@ -50,6 +50,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.app.core.config import settings
 
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied.
+from backend.app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -194,13 +197,12 @@ class DataValidator:
             self.errors.append("Missing required field: code")
             return False
 
-        # Code format validation
-        if len(code) != 5:
-            self.errors.append(f"Invalid code length: {code}")
-            return False
-
-        if code[0] not in "PBCU":
-            self.errors.append(f"Invalid code prefix: {code}")
+        # Code format validation. The old check here was `len(code) == 5` plus
+        # `code[0] in "PBCU"`, which accepts PEACE, PACED, U760E, PC861 and
+        # P9324 - the canonical SAE J2012 rule rejects all of them and still
+        # accepts every real hex code (P26B7, P090C, P0A94, B00A0).
+        if not is_valid_dtc_code(code):
+            self.errors.append(f"Invalid code format: {code}")
             return False
 
         # Description validation

@@ -16,7 +16,7 @@ Performance optimizations:
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,8 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.config import settings
+from app.core.dtc_codes import is_valid_dtc_code, normalize_dtc_code
+from app.core.exceptions import EmbeddingUnavailableError
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.api.v1.endpoints.auth import require_role
 from app.db.postgres.models import DTCCode as DTCCodeModel
@@ -125,7 +127,7 @@ DTC_DETAIL_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     404: {
         "description": "DTC code not found",
         "content": {
-            "application/json": {"example": {"detail": "DTC code P9999 not found in database"}}
+            "application/json": {"example": {"detail": "DTC code P3FFF not found in database"}}
         },
     },
 }
@@ -149,9 +151,19 @@ RELATED_CODES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
             }
         },
     },
+    400: {
+        "description": "Invalid DTC code format",
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": "Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100"
+                }
+            }
+        },
+    },
     404: {
         "description": "DTC code not found",
-        "content": {"application/json": {"example": {"detail": "DTC code P9999 not found"}}},
+        "content": {"application/json": {"example": {"detail": "DTC code P3FFF not found"}}},
     },
 }
 
@@ -313,6 +325,25 @@ def _compute_text_relevance(dtc: DTCCodeModel, query_lower: str) -> float:
     return 0.5
 
 
+def _servable_dtcs(dtcs: Sequence[DTCCodeModel]) -> List[DTCCodeModel]:
+    """Drop rows that ``GET /dtc/{code}`` would refuse to open.
+
+    The detail endpoint validates through :func:`normalize_dtc_code` (SAE J2012),
+    so a stored row whose code fails that rule is permanently un-openable: the
+    client throws on the malformed code before it can even send the request, and
+    the server would answer 400 if it did. Listing such a row is therefore worse
+    than omitting it - it is a dead link the user can never follow.
+
+    The seeded corpus still contains five of them (``PEACE``, ``PACED``,
+    ``P93AF``, ``UA80E``, ``UA80F`` in ``data/dtc_codes/all_codes_*.json`` and
+    ``backend/data/dtc_codes_seed.json``), imported back when the loose
+    ``[PBCU][0-9A-F]{4}`` pattern was still in force. Purging them is a data
+    migration; until it runs, this gate keeps search, detail and related
+    agreeing on exactly one definition of "a code this API can serve".
+    """
+    return [dtc for dtc in dtcs if is_valid_dtc_code(dtc.code)]
+
+
 def _dtc_model_to_search_result(dtc: DTCCodeModel, relevance_score: float = 0.0) -> DTCSearchResult:
     """Convert PostgreSQL model to API schema."""
     return DTCSearchResult(
@@ -439,12 +470,14 @@ async def search_dtc_codes(
             logger.debug(f"Cache HIT for search: {sanitize_log(query)}")
             return [DTCSearchResult(**item) for item in cached]
 
-    # Check if query looks like a DTC code (starts with P, B, C, or U)
-    is_code_query = (
-        len(query) >= 1
-        and query[0].upper() in "PBCU"
-        and (len(query) == 1 or query[1:2].isdigit() or query[1:].upper() == query[1:])
-    )
+    # "Is the user typing a code?" - this decides both the exact-match shortcut
+    # below and whether the semantic (embedding) branch runs at all, so it must
+    # stay true for a code still being typed: the autocomplete fires from two
+    # characters ("P0", "P03"). Zero-padding to full length lets the single
+    # canonical validator in app.core.dtc_codes (SAE J2012) answer the partial
+    # and the complete case alike, so free text typed in capitals ("PORLASZTO")
+    # is no longer mistaken for a code and keeps its semantic search.
+    is_code_query = len(query) <= 5 and is_valid_dtc_code(query.ljust(5, "0"))
 
     results: List[DTCSearchResult] = []
 
@@ -457,9 +490,14 @@ async def search_dtc_codes(
         if exact_match:
             results.append(_dtc_model_to_search_result(exact_match, relevance_score=1.0))
 
-    # Text search from PostgreSQL
+    # Text search from PostgreSQL. Filtered through _servable_dtcs so the list
+    # can never advertise a code that GET /dtc/{code} answers with 400 - the
+    # lexical ILIKE happily matches the junk rows the seed corpus still carries
+    # ("PEACE", "UA80E"), and a result the user cannot open is a dead link.
     category_filter = category.value if category else None
-    text_results = await repository.search(query, category=category_filter, limit=limit)
+    text_results = _servable_dtcs(
+        await repository.search(query, category=category_filter, limit=limit)
+    )
 
     # Add text results (avoid duplicates)
     existing_codes = {r.code for r in results}
@@ -501,7 +539,9 @@ async def search_dtc_codes(
             # Batch fetch all codes in a single query
             semantic_dtcs: List[DTCCodeModel] = []
             if code_score_map:
-                semantic_dtcs = await repository.get_by_codes(list(code_score_map.keys()))
+                semantic_dtcs = _servable_dtcs(
+                    await repository.get_by_codes(list(code_score_map.keys()))
+                )
                 for semantic_dtc in semantic_dtcs:
                     results.append(
                         _dtc_model_to_search_result(
@@ -519,9 +559,21 @@ async def search_dtc_codes(
                 len(semantic_dtcs),
             )
 
+        except EmbeddingUnavailableError as e:
+            # ERROR, not WARNING: Sentry only raises events from ERROR upwards
+            # (core/logging.py, event_level=logging.ERROR). Without this arm a
+            # dead embedding backend degrades every search to lexical while
+            # on-call sees nothing - the same silent failure that raising
+            # EmbeddingUnavailableError was introduced to eliminate.
+            logger.error(
+                f"Embedding backend unavailable - DTC search for "
+                f"'{sanitize_log(query)}' is LEXICAL ONLY: {sanitize_exception(e)}",
+                exc_info=True,
+            )
         except Exception as e:
             # Qdrant failure/empty must never 500 the endpoint: fall back to the
-            # lexical results already collected above (or an empty list).
+            # lexical results already collected above (or an empty list). Less
+            # severe than a dead backend, so it stays at WARNING.
             logger.warning(
                 f"Semantic search failed for query '{sanitize_log(query)}', "
                 f"falling back to lexical results: {sanitize_exception(e)}"
@@ -648,14 +700,17 @@ async def get_dtc_code_detail(
         400: Invalid DTC code format
         404: DTC code not found
     """
-    code = code.upper().strip()
-
-    # Validate code format
-    if not (len(code) >= 5 and code[0] in "PBCU"):
+    # Validate and canonicalise in one step. Structural rules live in
+    # app.core.dtc_codes (SAE J2012), so hex codes such as P26B7 are served
+    # while junk that merely starts with P/B/C/U ("PEACEFUL", "P9324") can no
+    # longer reach the Neo4j lookup or the Redis cache key below.
+    canonical = normalize_dtc_code(code)
+    if canonical is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100",
         )
+    code = canonical
 
     # Check cache first (unless skip_cache is True)
     cache_key = f"{code}:{include_graph}"
@@ -728,9 +783,19 @@ async def get_related_codes(
         List of related DTC codes
 
     Raises:
+        400: Invalid DTC code format
         404: DTC code not found
     """
-    code = code.upper().strip()
+    # Same gate as GET /dtc/{code}: this endpoint shares the {code} path
+    # parameter with it, so accepting a spelling the sibling rejects would let
+    # junk reach the Neo4j lookup by the back door.
+    canonical = normalize_dtc_code(code)
+    if canonical is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100",
+        )
+    code = canonical
     repository = DTCCodeRepository(db)
 
     # Fetch the original DTC
@@ -744,9 +809,11 @@ async def get_related_codes(
     results: List[DTCSearchResult] = []
     existing_codes = {code}  # Exclude the original code
 
-    # Get related codes from PostgreSQL (stored in related_codes field)
+    # Get related codes from PostgreSQL (stored in related_codes field).
+    # Every source below goes through _servable_dtcs for the same reason the
+    # search path does: a suggestion the user cannot open is a dead link.
     if dtc.related_codes:
-        related = await repository.get_related_codes(code)
+        related = _servable_dtcs(await repository.get_related_codes(code))
         for r in related:
             if r.code not in existing_codes:
                 results.append(_dtc_model_to_search_result(r, relevance_score=0.9))
@@ -769,7 +836,7 @@ async def get_related_codes(
         # Batch fetch full details from PostgreSQL in a single query (avoid N+1)
         codes_to_fetch = [c for c in neo4j_related_codes if c not in existing_codes]
         if codes_to_fetch:
-            related_dtcs = await repository.get_by_codes(codes_to_fetch)
+            related_dtcs = _servable_dtcs(await repository.get_by_codes(codes_to_fetch))
             for related_dtc in related_dtcs:
                 if related_dtc.code not in existing_codes:
                     results.append(_dtc_model_to_search_result(related_dtc, relevance_score=0.85))
@@ -781,7 +848,9 @@ async def get_related_codes(
     if len(results) < limit:
         # Same category codes (P0xxx for P0101, etc.)
         prefix = code[:2]
-        stmt_results = await repository.search(prefix, limit=limit + len(existing_codes))
+        stmt_results = _servable_dtcs(
+            await repository.search(prefix, limit=limit + len(existing_codes))
+        )
 
         for r in stmt_results:
             if r.code not in existing_codes:

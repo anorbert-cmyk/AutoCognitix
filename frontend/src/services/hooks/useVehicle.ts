@@ -5,7 +5,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api'
 import {
+  DEFAULT_COMMON_ISSUES_LIMIT,
   decodeVIN,
+  getVehicleCommonIssues,
   getVehicleComplaints,
   getVehicleMakes,
   getVehicleModels,
@@ -27,6 +29,10 @@ export const vehicleKeys = {
     [...vehicleKeys.all, 'recalls', make, model, year] as const,
   complaints: (make: string, model: string, year: number) =>
     [...vehicleKeys.all, 'complaints', make, model, year] as const,
+  // `year` szándékosan opcionális a kulcsban is: az "összes évjárat" nézet
+  // (year === undefined) önálló, teljes értékű cache-bejegyzés.
+  commonIssues: (make: string, model: string, year: number | undefined, limit: number) =>
+    [...vehicleKeys.all, 'commonIssues', make, model, year, limit] as const,
 }
 
 // =============================================================================
@@ -147,6 +153,37 @@ export function useVehicleComplaints(
     queryKey: vehicleKeys.complaints(make || '', model || '', year || 0),
     queryFn: () => getVehicleComplaints(make!, model!, year!),
     enabled: !!make && !!model && !!year,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    retry: (failureCount, error) => {
+      // Don't retry on external API errors
+      if (error instanceof ApiError && error.status === 502) {
+        return false
+      }
+      return failureCount < 2
+    },
+  })
+}
+
+// =============================================================================
+// Common Issues Hooks
+// =============================================================================
+
+/**
+ * Hook for fetching a vehicle's most commonly reported problems
+ *
+ * `year` elhagyva (az alapértelmezés) az összes évjáratot összesíti — ez adja a
+ * lényegesen gazdagabb eredményt, ezért NEM része az `enabled` feltételnek.
+ */
+export function useVehicleCommonIssues(
+  make: string | undefined,
+  model: string | undefined,
+  year?: number,
+  limit: number = DEFAULT_COMMON_ISSUES_LIMIT
+) {
+  return useQuery({
+    queryKey: vehicleKeys.commonIssues(make || '', model || '', year, limit),
+    queryFn: () => getVehicleCommonIssues(make!, model!, year, limit),
+    enabled: !!make && !!model,
     staleTime: 30 * 60 * 1000, // 30 minutes
     retry: (failureCount, error) => {
       // Don't retry on external API errors

@@ -35,8 +35,12 @@ OUTPUT_FILE = OUTPUT_DIR / "dtcdb_codes.json"
 # GitHub raw URL
 DTCDB_URL = "https://raw.githubusercontent.com/todrobbins/dtcdb/master/generic.csv"
 
-# DTC code pattern
-DTC_PATTERN = re.compile(r"^[PCBU][0-9A-F]{4}$", re.IGNORECASE)
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
 
 # Category header pattern: "DTC Codes - P0100-P0199 – Fuel and Air Metering"
 CATEGORY_HEADER_PATTERN = re.compile(
@@ -178,7 +182,7 @@ def parse_csv(content: str) -> list[DTCCode]:
         description = parts[1].strip()
 
         # Validate DTC code format
-        if not DTC_PATTERN.match(code):
+        if not is_valid_dtc_code(code):
             continue
 
         # Skip duplicates (there's a duplicate P0109 in the source)

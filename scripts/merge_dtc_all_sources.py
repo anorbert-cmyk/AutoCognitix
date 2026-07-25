@@ -38,8 +38,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "dtc_codes"
 OUTPUT_FILE = DATA_DIR / "all_codes_complete.json"
 
-# DTC code validation pattern: [PCBU][0-9A-F]{4}
-DTC_PATTERN = re.compile(r"^[PCBU][0-9A-Fa-f]{4}$")
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. This script writes
+# data/dtc_codes/all_codes_complete.json, and the pattern that used to live
+# here (r'^[PCBU][0-9A-Fa-f]{4}$') is exactly the one that let PEACE, PACED,
+# P93AF, UA80E and UA80F into that file as if they were DTC codes.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
 
 # Category mapping from code prefix
 CATEGORY_MAP = {
@@ -87,8 +93,8 @@ SYSTEM_MAP_PREFIX = {
 
 
 def validate_dtc_code(code: str) -> bool:
-    """Validate DTC code format: [PCBU][0-9A-F]{4}."""
-    return bool(DTC_PATTERN.match(code.upper()))
+    """Validate DTC code format (SAE J2012, see app/core/dtc_codes.py)."""
+    return is_valid_dtc_code(code)
 
 
 def normalize_code(raw_code: str) -> Optional[str]:

@@ -8,6 +8,7 @@ import api, {
   Complaint,
   PaginatedResponse,
   Recall,
+  VehicleCommonIssuesResponse,
   VehicleMake,
   VehicleModel,
   VINDecodeResponse,
@@ -172,6 +173,53 @@ export async function getVehicleComplaints(
 
   const response = await api.get<Complaint[]>(
     `/vehicles/${encodeURIComponent(make)}/${encodeURIComponent(model)}/${year}/complaints`
+  )
+
+  return response.data
+}
+
+// =============================================================================
+// Common Issues
+// =============================================================================
+
+/** A végpont alapértelmezett `limit`-je (backend: ge=1, le=50). */
+export const DEFAULT_COMMON_ISSUES_LIMIT = 10
+
+/**
+ * Get the most commonly reported problems for a vehicle
+ *
+ * A `year` szándékosan opcionális: elhagyva a végpont az ÖSSZES évjárat
+ * bejelentéseit összesíti, ami lényegesen gazdagabb eredményt ad, mint egyetlen
+ * évjárat szűrése. A hívó csak akkor adjon meg évet, ha a felhasználó
+ * kifejezetten arra szűrt.
+ *
+ * A testvér-függvényekkel ellentétben itt nincs korai `make`/`model` guard: a
+ * válasz objektum, üres helyettesítője csak kitalált `make`/`model` mezőkkel
+ * lenne előállítható. A hívást a hook `enabled` feltétele őrzi. (Csupa szóközből
+ * álló `make`/`model` esetén a végpont 422-t ad — nem csendben a teljes márka
+ * bejelentés-történetét.)
+ *
+ * A válasz `sources` mezője forrásonként megmondja, hogy az adott lista azért
+ * üres-e, mert tényleg nincs adat (`'ok'`), vagy mert a forrás nem válaszolt
+ * (`'unavailable'`). A hívó felület CSAK az előbbit közölheti adathiányként.
+ *
+ * @param make Vehicle manufacturer
+ * @param model Vehicle model
+ * @param year Optional model year filter (omit to aggregate all years)
+ * @param limit Maximum number of complaint components to return (1-50)
+ * @returns Component ranking, DTC ranking, the stored complaint total and the
+ *   per-source load status
+ * @throws ApiError on request failure
+ */
+export async function getVehicleCommonIssues(
+  make: string,
+  model: string,
+  year?: number,
+  limit: number = DEFAULT_COMMON_ISSUES_LIMIT
+): Promise<VehicleCommonIssuesResponse> {
+  const response = await api.get<VehicleCommonIssuesResponse>(
+    `/vehicles/${encodeURIComponent(make)}/${encodeURIComponent(model)}/common-issues`,
+    { params: { ...(year ? { year } : {}), limit } }
   )
 
   return response.data
@@ -412,6 +460,7 @@ export const vehicleService = {
   getYears: getVehicleYears,
   getRecalls: getVehicleRecalls,
   getComplaints: getVehicleComplaints,
+  getCommonIssues: getVehicleCommonIssues,
   formatVehicleInfo,
   formatVINForDisplay,
   getRegionFromVIN,
