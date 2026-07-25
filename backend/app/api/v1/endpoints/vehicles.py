@@ -9,6 +9,7 @@ Provides endpoints to:
 - Get recalls and complaints from NHTSA
 """
 
+import asyncio
 import re
 from typing import Any, Dict, List, Optional, Union
 
@@ -861,20 +862,26 @@ async def get_vehicle_common_issues(
     model = _validate_vehicle_param(model)
 
     try:
-        issues_data = await vehicle_service.get_vehicle_common_issues(
-            make=make,
-            model=model,
-            year=year,
-        )
-
-        # Sequential, NOT asyncio.gather: the two calls hit different datastores
-        # but the component query runs on an AsyncSession, and concurrent
-        # execute() on one session raises InterfaceError. Keep them ordered.
-        components_data, total_complaints = await vehicle_service.get_vehicle_complaint_components(
-            make=make,
-            model=model,
-            year=year,
-            limit=limit,
+        # Concurrent: the two rankings are genuinely independent - the DTC leg
+        # talks to Neo4j, and the component leg opens its OWN AsyncSession via
+        # async_session_maker() for a single grouped statement. Nothing is
+        # shared, so the "concurrent execute() on ONE AsyncSession raises
+        # InterfaceError" rule does not apply here (it is enforced inside
+        # VehicleService._query_complaint_components, which issues exactly one
+        # statement on its own session). Both calls swallow their own datastore
+        # errors and degrade to empty, so neither can break the other.
+        issues_data, (components_data, total_complaints) = await asyncio.gather(
+            vehicle_service.get_vehicle_common_issues(
+                make=make,
+                model=model,
+                year=year,
+            ),
+            vehicle_service.get_vehicle_complaint_components(
+                make=make,
+                model=model,
+                year=year,
+                limit=limit,
+            ),
         )
 
         issues = [
@@ -913,6 +920,12 @@ async def get_vehicle_common_issues(
         )
 
     except Exception as e:
+        # Defence-in-depth, unreachable by design on the datastore paths: both
+        # service calls catch their own Neo4j/PostgreSQL failures and degrade to
+        # empty, which is what the docstring's "200 with truthful empty lists"
+        # promise rests on. What is left for this handler is a bug in the
+        # response assembly below (a missing key, a schema violation) - and for
+        # those a sanitized 500 beats an unsanitized unhandled traceback.
         logger.error(
             f"Error fetching common issues for {sanitize_log(make)} {sanitize_log(model)}: {sanitize_exception(e)}"
         )

@@ -594,6 +594,7 @@ class EmbeddingException(AutoCognitixException):
         message: str = "Szovegfeldolgozasi hiba.",
         details: Optional[Dict[str, Any]] = None,
         original_error: Optional[Exception] = None,
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         error_details = details or {}
         if original_error:
@@ -603,7 +604,7 @@ class EmbeddingException(AutoCognitixException):
             message=message,
             code=ErrorCode.EMBEDDING_ERROR,
             details=error_details,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
         )
 
 
@@ -635,8 +636,8 @@ class EmbeddingUnavailableError(EmbeddingException):
             message=message,
             details=details,
             original_error=original_error,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-        self.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
 
 class RAGException(AutoCognitixException):

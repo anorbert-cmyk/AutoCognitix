@@ -678,11 +678,11 @@ class TestEmbeddingSelfTest:
 
     @pytest.mark.asyncio
     async def test_health_check_maps_ok_to_healthy(self):
-        from app.api.v1.endpoints.health import check_embedding_health
+        import app.api.v1.endpoints.health as health_mod
 
         probe = {"status": "ok", "backend": "onnx", "self_test_norm": 1.0}
         with patch("app.services.embedding_service.embedding_self_test", return_value=dict(probe)):
-            result = await check_embedding_health()
+            result = await health_mod.check_embedding_health()
 
         assert result.status == "healthy"
         assert result.details["backend"] == "onnx"
@@ -692,24 +692,24 @@ class TestEmbeddingSelfTest:
     async def test_health_check_maps_unavailable_to_degraded(self):
         """An embedding outage is a degradation, not a full service outage:
         lexical + Neo4j diagnosis still works."""
-        from app.api.v1.endpoints.health import check_embedding_health
+        import app.api.v1.endpoints.health as health_mod
 
         probe = {"status": "unavailable", "backend": None, "error": "no backend"}
         with patch("app.services.embedding_service.embedding_self_test", return_value=dict(probe)):
-            result = await check_embedding_health()
+            result = await health_mod.check_embedding_health()
 
         assert result.status == "degraded"
         assert result.error == "no backend"
 
     @pytest.mark.asyncio
     async def test_health_check_survives_an_exploding_probe(self):
-        from app.api.v1.endpoints.health import check_embedding_health
+        import app.api.v1.endpoints.health as health_mod
 
         with patch(
             "app.services.embedding_service.embedding_self_test",
             side_effect=RuntimeError("boom"),
         ):
-            result = await check_embedding_health()
+            result = await health_mod.check_embedding_health()
 
         assert result.status == "unhealthy"
         assert "boom" in (result.error or "")

@@ -171,9 +171,9 @@ def mock_torch_cpu():
 @pytest.fixture
 def svc_cpu(mock_torch_cpu):
     """Create a HungarianEmbeddingService on mocked CPU."""
-    from app.services.embedding_service import HungarianEmbeddingService
+    import app.services.embedding_service as mod
 
-    svc = HungarianEmbeddingService()
+    svc = mod.HungarianEmbeddingService()
     svc.disable_cache()
     return svc
 
@@ -186,9 +186,9 @@ def svc_no_torch():
         patch("app.services.embedding_service.torch", None),
         patch("app.services.embedding_service.ONNX_RUNTIME_AVAILABLE", False),
     ):
-        from app.services.embedding_service import HungarianEmbeddingService
+        import app.services.embedding_service as mod
 
-        svc = HungarianEmbeddingService()
+        svc = mod.HungarianEmbeddingService()
         svc.disable_cache()
         yield svc
 
@@ -200,17 +200,17 @@ def svc_no_torch():
 
 class TestSingleton:
     def test_returns_same_instance(self, mock_torch_cpu):
-        from app.services.embedding_service import HungarianEmbeddingService
+        import app.services.embedding_service as mod
 
-        a = HungarianEmbeddingService()
-        b = HungarianEmbeddingService()
+        a = mod.HungarianEmbeddingService()
+        b = mod.HungarianEmbeddingService()
         assert a is b
 
     def test_get_embedding_service(self, mock_torch_cpu):
-        from app.services.embedding_service import get_embedding_service
+        import app.services.embedding_service as mod
 
-        svc = get_embedding_service()
-        assert svc is get_embedding_service()
+        svc = mod.get_embedding_service()
+        assert svc is mod.get_embedding_service()
 
 
 # ---------------------------------------------------------------------------
@@ -699,9 +699,9 @@ class TestDetectDevice:
             patch("app.services.embedding_service.AutoTokenizer"),
             patch("app.services.embedding_service.AutoModel"),
         ):
-            from app.services.embedding_service import HungarianEmbeddingService
+            import app.services.embedding_service as mod
 
-            svc = HungarianEmbeddingService()
+            svc = mod.HungarianEmbeddingService()
             # device should have been set via _detect_device
             assert svc._device is not None
 
@@ -714,9 +714,9 @@ class TestDetectDevice:
             patch("app.services.embedding_service.AutoTokenizer"),
             patch("app.services.embedding_service.AutoModel"),
         ):
-            from app.services.embedding_service import HungarianEmbeddingService
+            import app.services.embedding_service as mod
 
-            svc = HungarianEmbeddingService()
+            svc = mod.HungarianEmbeddingService()
             assert svc._device is not None
 
 
@@ -763,65 +763,65 @@ class TestOptimalBatchSize:
 
 class TestConvenienceFunctions:
     def test_embed_text_function(self, mock_torch_cpu):
-        from app.services.embedding_service import embed_text
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.embed_text.return_value = [0.1] * 768
             get_svc.return_value = mock_svc
-            result = embed_text("test")
+            result = mod.embed_text("test")
             assert len(result) == 768
 
     def test_embed_batch_function(self, mock_torch_cpu):
-        from app.services.embedding_service import embed_batch
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.embed_batch.return_value = [[0.1] * 768]
             get_svc.return_value = mock_svc
-            result = embed_batch(["test"])
+            result = mod.embed_batch(["test"])
             assert len(result) == 1
 
     def test_preprocess_hungarian_function(self, mock_torch_cpu):
-        from app.services.embedding_service import preprocess_hungarian
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.preprocess_hungarian.return_value = "motor hiba"
             get_svc.return_value = mock_svc
-            result = preprocess_hungarian("Motor hiba")
+            result = mod.preprocess_hungarian("Motor hiba")
             assert result == "motor hiba"
 
     def test_get_similar_texts_function(self, mock_torch_cpu):
-        from app.services.embedding_service import get_similar_texts
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.get_similar_texts.return_value = [("a", 0.9)]
             get_svc.return_value = mock_svc
-            result = get_similar_texts("query", ["a"])
+            result = mod.get_similar_texts("query", ["a"])
             assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_embed_text_async_function(self, mock_torch_cpu):
-        from app.services.embedding_service import embed_text_async
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.embed_text_async = AsyncMock(return_value=[0.1] * 768)
             get_svc.return_value = mock_svc
-            result = await embed_text_async("test")
+            result = await mod.embed_text_async("test")
             assert len(result) == 768
 
     @pytest.mark.asyncio
     async def test_embed_batch_async_function(self, mock_torch_cpu):
-        from app.services.embedding_service import embed_batch_async
+        import app.services.embedding_service as mod
 
         with patch("app.services.embedding_service.get_embedding_service") as get_svc:
             mock_svc = MagicMock()
             mock_svc.embed_batch_async = AsyncMock(return_value=[[0.1] * 768])
             get_svc.return_value = mock_svc
-            result = await embed_batch_async(["test"])
+            result = await mod.embed_batch_async(["test"])
             assert len(result) == 1
 
 
