@@ -43,6 +43,7 @@ from prometheus_client import (
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+from app.core.dtc_codes import is_valid_dtc_code
 
 # =============================================================================
 # Application Info
@@ -797,8 +798,12 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             # Replace VIN patterns with placeholder
             elif len(part) == 17 and part.isalnum():
                 normalized_parts.append("{vin}")
-            # Replace DTC code patterns with placeholder
-            elif len(part) >= 4 and part[0] in "PBCU" and part[1:].replace("-", "").isalnum():
+            # Replace DTC codes with placeholder. Structural rules live in
+            # app.core.dtc_codes (SAE J2012), shared with the API validators and
+            # app/middleware/metrics.py, so a segment that merely starts with
+            # P/B/C/U ("CHEVROLET", "PARTS") is no longer collapsed into the
+            # {dtc_code} label and lost.
+            elif is_valid_dtc_code(part):
                 normalized_parts.append("{dtc_code}")
             else:
                 normalized_parts.append(part)

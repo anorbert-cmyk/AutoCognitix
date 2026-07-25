@@ -30,6 +30,7 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.config import settings
+from app.core.dtc_codes import is_valid_dtc_code, normalize_dtc_code
 from app.core.exceptions import EmbeddingUnavailableError
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.api.v1.endpoints.auth import require_role
@@ -126,7 +127,7 @@ DTC_DETAIL_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     404: {
         "description": "DTC code not found",
         "content": {
-            "application/json": {"example": {"detail": "DTC code P9999 not found in database"}}
+            "application/json": {"example": {"detail": "DTC code P3FFF not found in database"}}
         },
     },
 }
@@ -152,7 +153,7 @@ RELATED_CODES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     },
     404: {
         "description": "DTC code not found",
-        "content": {"application/json": {"example": {"detail": "DTC code P9999 not found"}}},
+        "content": {"application/json": {"example": {"detail": "DTC code P3FFF not found"}}},
     },
 }
 
@@ -440,12 +441,14 @@ async def search_dtc_codes(
             logger.debug(f"Cache HIT for search: {sanitize_log(query)}")
             return [DTCSearchResult(**item) for item in cached]
 
-    # Check if query looks like a DTC code (starts with P, B, C, or U)
-    is_code_query = (
-        len(query) >= 1
-        and query[0].upper() in "PBCU"
-        and (len(query) == 1 or query[1:2].isdigit() or query[1:].upper() == query[1:])
-    )
+    # "Is the user typing a code?" - this decides both the exact-match shortcut
+    # below and whether the semantic (embedding) branch runs at all, so it must
+    # stay true for a code still being typed: the autocomplete fires from two
+    # characters ("P0", "P03"). Zero-padding to full length lets the single
+    # canonical validator in app.core.dtc_codes (SAE J2012) answer the partial
+    # and the complete case alike, so free text typed in capitals ("PORLASZTO")
+    # is no longer mistaken for a code and keeps its semantic search.
+    is_code_query = len(query) <= 5 and is_valid_dtc_code(query.ljust(5, "0"))
 
     results: List[DTCSearchResult] = []
 
@@ -661,14 +664,17 @@ async def get_dtc_code_detail(
         400: Invalid DTC code format
         404: DTC code not found
     """
-    code = code.upper().strip()
-
-    # Validate code format
-    if not (len(code) >= 5 and code[0] in "PBCU"):
+    # Validate and canonicalise in one step. Structural rules live in
+    # app.core.dtc_codes (SAE J2012), so hex codes such as P26B7 are served
+    # while junk that merely starts with P/B/C/U ("PEACEFUL", "P9324") can no
+    # longer reach the Neo4j lookup or the Redis cache key below.
+    canonical = normalize_dtc_code(code)
+    if canonical is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid DTC code format. Expected format: P0101, B1234, C0567, U0100",
         )
+    code = canonical
 
     # Check cache first (unless skip_cache is True)
     cache_key = f"{code}:{include_graph}"

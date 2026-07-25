@@ -577,6 +577,41 @@ class TestRAGUnifiedCollectionRouting:
         assert "Engine misfires" in context.symptom_context
 
     @pytest.mark.asyncio
+    async def test_chat_dtc_context_targets_unified_collection(self, rag_service):
+        """REVERT-GUARD for the chat assistant's DTC-context leg.
+
+        ``ChatService._fetch_rag_context`` is a SECOND caller of
+        ``retrieve_from_qdrant``; pointing it back at ``dtc_embeddings_hu``
+        would silently strip every DTC fact out of the chat prompt without any
+        error surfacing. FAILS if the legacy collection reappears.
+        """
+        from app.core.config import settings
+        from app.db.qdrant_client import QdrantService
+        from app.services.chat_service import ChatService
+
+        rag_service._qdrant = _unified_qdrant_mock({"dtc": UNIFIED_DTC_HITS})
+
+        with (
+            patch(
+                "app.services.rag_service.embed_text_async", new=AsyncMock(return_value=[0.1] * 768)
+            ),
+            patch("app.services.rag_service.get_rag_service", return_value=rag_service),
+        ):
+            context = await ChatService()._fetch_rag_context(["P0301"])
+
+        calls = rag_service._qdrant.search.call_args_list
+        assert calls, "chat RAG context issued no Qdrant search at all"
+        collections = [call.kwargs["collection_name"] for call in calls]
+        assert set(collections) == {settings.QDRANT_UNIFIED_COLLECTION}
+        assert QdrantService.DTC_COLLECTION not in collections
+        assert all(call.kwargs["filter_conditions"]["type"] == "dtc" for call in calls)
+
+        # ...and the hit really reaches the chat prompt.
+        assert context is not None
+        assert "P0301" in context
+        assert "1. henger egeskimaradas" in context
+
+    @pytest.mark.asyncio
     async def test_symptom_leg_uses_complaint_type_not_nonexistent_symptom_type(self, rag_service):
         """The unified collection has no ``symptom`` payloads; the similar-case
         leg must ask for ``complaint`` (which exists) instead of silently
@@ -745,3 +780,29 @@ class TestRAGUnifiedCollectionRouting:
         """Neither route selected is a programming error, not a silent no-op."""
         with pytest.raises(ValueError):
             await rag_service.retrieve_from_qdrant(query="teszt")
+
+
+class TestConsistencyServiceCollectionRouting:
+    """The admin cross-DB consistency check must count the vectors that exist."""
+
+    @pytest.mark.asyncio
+    async def test_dtc_vector_count_reads_unified_collection_with_type_filter(self):
+        """REVERT-GUARD: counting the empty ``dtc_embeddings_hu`` collection
+        reported 0 vectors and declared a permanent, bogus inconsistency.
+        """
+        from app.core.config import settings
+        from app.services.consistency_service import ConsistencyService
+
+        client = MagicMock()
+        client.count.return_value = MagicMock(count=54652)
+
+        with patch("qdrant_client.QdrantClient", return_value=client):
+            total = await ConsistencyService()._get_qdrant_vector_count()
+
+        assert total == 54652
+        _, kwargs = client.count.call_args
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["collection_name"] != "dtc_embeddings_hu"
+        condition = kwargs["count_filter"].must[0]
+        assert condition.key == "type"
+        assert condition.match.value == "dtc"

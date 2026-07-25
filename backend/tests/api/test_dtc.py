@@ -395,6 +395,55 @@ class TestDTCSearch:
             assert 0.0 <= d["relevance_score"] <= 1.0
 
 
+class TestDTCSearchCodeVsFreeTextRouting:
+    """The "is this query a code?" branch that gates the semantic search.
+
+    A true verdict takes the exact-match shortcut and skips the embedding call;
+    a false verdict is what routes Hungarian free text to semantic search. The
+    old test accepted any all-caps string starting with P/B/C/U, so a mechanic
+    typing in capitals silently lost semantic search entirely.
+    """
+
+    async def _search(self, async_client: AsyncClient, query: str):
+        qdrant = _qdrant_with_mocked_search([])
+        embedding = _embedding_service_stub()
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=embedding,
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": query, "use_semantic": "true", "skip_cache": "true"},
+            )
+        assert response.status_code == 200, response.text
+        return embedding
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["P", "P0", "P03", "P030", "P0300", "P26B7", "p26b7"])
+    async def test_code_and_partial_code_skip_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes, query: str
+    ):
+        """A complete code, and a code still being typed, stay on the lexical path.
+
+        The autocomplete fires from two characters, so narrowing this must not
+        start an embedding round-trip on every keystroke.
+        """
+        embedding = await self._search(async_client, query)
+        embedding.embed_text_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["PORLASZTO", "PEACE", "BUXA HANG", "CSAPAGY", "P9324"])
+    async def test_capitalised_free_text_still_reaches_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes, query: str
+    ):
+        """Free text in capitals is not a code and must keep semantic search."""
+        embedding = await self._search(async_client, query)
+        embedding.embed_text_async.assert_called_once()
+
+
 class TestDTCCategories:
     """Tests for GET /api/v1/dtc/categories/list endpoint."""
 
@@ -480,7 +529,10 @@ class TestDTCCodeDetail:
         self, async_client: AsyncClient, sample_dtc_codes
     ):
         """Test getting nonexistent DTC returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999")
+        # Structurally valid (P + 3 + FFF) but not seeded, so the 404 comes from
+        # the database lookup rather than from format validation. "P9999", the
+        # previous probe, is not a DTC under SAE J2012 (second character 9).
+        response = await async_client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
 
@@ -490,6 +542,26 @@ class TestDTCCodeDetail:
         response = await async_client.get("/api/v1/dtc/INVALID")
 
         assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", ["P26B7", "P090C", "P0A94", "B00A0"])
+    async def test_get_dtc_detail_accepts_hex_code_format(
+        self, async_client: AsyncClient, sample_dtc_codes, code: str
+    ):
+        """Real hex DTCs must pass format validation (404, never 400)."""
+        response = await async_client.get(f"/api/v1/dtc/{code}")
+
+        assert response.status_code == 404, response.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("junk", ["PEACE", "P9324", "P9999", "UA80E", "PEACEFUL"])
+    async def test_get_dtc_detail_rejects_junk_before_lookup(
+        self, async_client: AsyncClient, junk: str
+    ):
+        """Junk that merely starts with P/B/C/U must not reach Neo4j or the cache."""
+        response = await async_client.get(f"/api/v1/dtc/{junk}")
+
+        assert response.status_code == 400, response.text
 
     @pytest.mark.asyncio
     async def test_get_dtc_detail_case_insensitive(
@@ -569,7 +641,7 @@ class TestDTCRelatedCodes:
         self, async_client: AsyncClient, sample_dtc_codes
     ):
         """Test getting related codes for nonexistent DTC returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999/related")
+        response = await async_client.get("/api/v1/dtc/P3FFF/related")
 
         assert response.status_code == 404
 

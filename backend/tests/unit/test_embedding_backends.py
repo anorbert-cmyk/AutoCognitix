@@ -443,7 +443,7 @@ class TestFrozenPooling:
     """
 
     def test_numpy_pooling_matches_frozen_reference(self):
-        from app.services.embedding_service import _mean_pool_l2_numpy
+        import app.services.embedding_service as mod
 
         with POOLING_REFERENCE_PATH.open(encoding="utf-8") as f:
             data = json.load(f)
@@ -453,26 +453,26 @@ class TestFrozenPooling:
             hidden = np.asarray(case["last_hidden_state"], dtype=np.float32)
             mask = np.asarray(case["attention_mask"], dtype=np.int64)
             expected = np.asarray(case["expected"], dtype=np.float64)
-            produced = np.asarray(_mean_pool_l2_numpy(hidden, mask), dtype=np.float64)
+            produced = np.asarray(mod._mean_pool_l2_numpy(hidden, mask), dtype=np.float64)
             assert produced.shape == expected.shape
             assert np.allclose(produced, expected, atol=1e-6), case["attention_mask"]
 
     def test_fully_masked_row_does_not_divide_by_zero(self):
         """The clamp(min=1e-9) / clamp(min=1e-12) guards are load-bearing."""
-        from app.services.embedding_service import _mean_pool_l2_numpy
+        import app.services.embedding_service as mod
 
         hidden = np.zeros((1, 4, 8), dtype=np.float32)
         mask = np.zeros((1, 4), dtype=np.int64)
-        result = _mean_pool_l2_numpy(hidden, mask)
+        result = mod._mean_pool_l2_numpy(hidden, mask)
         assert np.isfinite(result).all()
 
     def test_output_is_l2_normalized(self):
-        from app.services.embedding_service import _mean_pool_l2_numpy
+        import app.services.embedding_service as mod
 
         rng = np.random.default_rng(7)
         hidden = rng.standard_normal((2, 6, 32)).astype(np.float32)
         mask = np.ones((2, 6), dtype=np.int64)
-        result = _mean_pool_l2_numpy(hidden, mask)
+        result = mod._mean_pool_l2_numpy(hidden, mask)
         norms = np.linalg.norm(result, axis=1)
         assert np.allclose(norms, 1.0, atol=1e-6)
 
@@ -714,6 +714,45 @@ class TestEmbeddingSelfTest:
         assert result.status == "unhealthy"
         assert "boom" in (result.error or "")
 
+    @pytest.mark.asyncio
+    async def test_a_slow_probe_degrades_only_itself(self):
+        """A cold model load must never spend the SHARED health-check budget.
+
+        ``detailed_health_check`` gathers all five probes under one timeout, and
+        that timeout's handler marks postgres, neo4j, qdrant AND redis
+        unhealthy. If the embedding probe could trip it, one slow model load
+        would report a total datastore outage. Its own smaller budget makes that
+        impossible - and a timeout here is "degraded", because lexical and graph
+        diagnosis keep working.
+        """
+        import asyncio
+
+        import app.api.v1.endpoints.health as health_mod
+
+        async def _never_finishes():
+            await asyncio.sleep(3600)
+
+        with (
+            patch.object(health_mod, "EMBEDDING_HEALTH_TIMEOUT_SECONDS", 0.01),
+            patch.object(health_mod, "check_embedding_health", _never_finishes),
+        ):
+            result = await health_mod._check_embedding_health_bounded()
+
+        assert result.name == "Embedding"
+        assert result.status == "degraded"
+        assert "timed out" in (result.error or "")
+
+    def test_the_embedding_budget_is_strictly_below_the_shared_one(self):
+        """A budget that is not smaller is no isolation at all."""
+        import re
+
+        import app.api.v1.endpoints.health as health_mod
+
+        source = inspect.getsource(health_mod.detailed_health_check)
+        shared = [float(m) for m in re.findall(r"timeout=([0-9]+(?:\.[0-9]+)?)", source)]
+        assert shared, "could not find the shared gather timeout to compare against"
+        assert health_mod.EMBEDDING_HEALTH_TIMEOUT_SECONDS < min(shared)
+
 
 # ---------------------------------------------------------------------------
 # 8. Cache-key versioning
@@ -722,10 +761,10 @@ class TestEmbeddingSelfTest:
 
 class TestEmbeddingCacheVersioning:
     def test_namespace_carries_version_and_backend(self, onnx_service):
-        from app.services.embedding_service import EMBEDDING_CACHE_VERSION
+        import app.services.embedding_service as mod
 
         key = onnx_service._cache_namespace("rangat a motor")
-        assert key.startswith(f"{EMBEDDING_CACHE_VERSION}|onnx|")
+        assert key.startswith(f"{mod.EMBEDDING_CACHE_VERSION}|onnx|")
         assert key.endswith("rangat a motor")
 
     def test_namespace_differs_from_the_raw_text(self, onnx_service):
@@ -849,6 +888,6 @@ class TestPublicInterfaceUnchanged:
     def test_max_sequence_length_is_512(self):
         """Shared by both backends AND by the offline indexer. Changing it
         changes the embedding space."""
-        from app.services.embedding_service import MAX_SEQUENCE_LENGTH
+        import app.services.embedding_service as mod
 
-        assert MAX_SEQUENCE_LENGTH == 512
+        assert mod.MAX_SEQUENCE_LENGTH == 512

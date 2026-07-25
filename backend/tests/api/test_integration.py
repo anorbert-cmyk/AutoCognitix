@@ -616,9 +616,11 @@ class TestErrorHandlingFlow:
     @pytest.mark.asyncio
     async def test_not_found_resources_flow(self, async_client: AsyncClient, sample_dtc_codes):
         """Test: Access nonexistent resources returns 404."""
+        # P3FFF is structurally valid (SAE J2012) but not seeded, so these 404
+        # on the database lookup. "P9999" would now 400 on format validation.
         not_found_endpoints = [
-            "/api/v1/dtc/P9999",  # Nonexistent DTC code
-            "/api/v1/dtc/P9999/related",  # Related codes for nonexistent DTC
+            "/api/v1/dtc/P3FFF",  # Nonexistent DTC code
+            "/api/v1/dtc/P3FFF/related",  # Related codes for nonexistent DTC
         ]
 
         for endpoint in not_found_endpoints:

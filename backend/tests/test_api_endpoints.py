@@ -210,13 +210,15 @@ class TestDTCDetailEndpoint:
 
     def test_get_nonexistent_code_returns_404(self, client):
         """Test that nonexistent code returns 404."""
-        response = client.get("/api/v1/dtc/P9999")
+        # Structurally valid but not seeded. "P9999" is not a DTC under SAE
+        # J2012 (second character must be 0-3) and now 400s on validation.
+        response = client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
 
     def test_get_invalid_code_format_returns_400(self, client):
         """Test that invalid code format returns 400."""
-        invalid_codes = ["INVALID", "X0101", "P01", "P01011"]
+        invalid_codes = ["INVALID", "X0101", "P01", "P01011", "PEACE", "P9324"]
 
         for code in invalid_codes:
             response = client.get(f"/api/v1/dtc/{code}")

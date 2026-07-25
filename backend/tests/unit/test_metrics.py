@@ -440,6 +440,25 @@ class TestMetricsMiddleware:
         result = middleware._normalize_endpoint("/api/v1/dtc/P0300")
         assert "{dtc_code}" in result
 
+    @pytest.mark.parametrize("code", ["P26B7", "P090C", "P0A94", "B00A0", "p0a94"])
+    def test_normalize_endpoint_hex_dtc_code(self, code: str):
+        """Hex DTCs are real codes and must collapse into the {dtc_code} label."""
+        middleware = MetricsMiddleware(app=MagicMock())
+        assert middleware._normalize_endpoint(f"/api/v1/dtc/{code}") == "/api/v1/dtc/{dtc_code}"
+
+    @pytest.mark.parametrize("segment", ["CHEVROLET", "PEACE", "P9324", "UA80E", "B-1234"])
+    def test_normalize_endpoint_does_not_collapse_non_dtc_segments(self, segment: str):
+        """Segments that merely start with P/B/C/U must keep their own label.
+
+        The old guard (``part[0] in "PBCU"`` plus ``isalnum()``) folded make
+        names and any hex-ish word into {dtc_code}, silently merging unrelated
+        endpoints into one metric series.
+        """
+        middleware = MetricsMiddleware(app=MagicMock())
+        result = middleware._normalize_endpoint(f"/api/v1/vehicles/{segment}/models")
+        assert "{dtc_code}" not in result
+        assert segment in result
+
     def test_normalize_endpoint_root(self):
         middleware = MetricsMiddleware(app=MagicMock())
         assert middleware._normalize_endpoint("/") == "/"

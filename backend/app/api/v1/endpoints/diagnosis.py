@@ -33,6 +33,7 @@ from app.api.v1.schemas.diagnosis import (
     StreamingEvent,
     VehicleDiagnosisCount,
 )
+from app.core.dtc_codes import normalize_dtc_code
 from app.core.exceptions import (
     AutoCognitixException,
     DiagnosisException,
@@ -167,7 +168,16 @@ QUICK_ANALYZE_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
     },
     400: {
         "description": "Invalid DTC code format",
-        "content": {"application/json": {"example": {"detail": "Invalid DTC code format: X1234"}}},
+        "content": {
+            "application/json": {
+                "example": {
+                    "detail": (
+                        "Invalid DTC code format: X1234 "
+                        "(expected e.g. 'P0300', one of P/B/C/U, then 0-3, then 3 hex digits)"
+                    )
+                }
+            }
+        },
     },
 }
 
@@ -662,16 +672,24 @@ async def quick_analyze(
     """
     try:
         async with DiagnosisService(db) as service:
-            # Validate and normalize DTC codes
+            # Validate and normalize DTC codes. Structural rules live in
+            # app.core.dtc_codes (SAE J2012), shared with the DiagnosisRequest
+            # validator: real manufacturer/hex codes such as P26B7 or P0A94 are
+            # accepted here, while hex-shaped English words (PEACE) and service
+            # campaign ids (P9324) are not.
             normalized_codes = []
             for code in dtc_codes:
-                code = code.upper().strip()
-                if not (len(code) == 5 and code[0] in "PBCU" and code[1:].isdigit()):
+                canonical = normalize_dtc_code(code)
+                if canonical is None:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid DTC code format: {code}",
+                        detail=(
+                            f"Invalid DTC code format: {code} "
+                            "(expected e.g. 'P0300', one of P/B/C/U, then 0-3, "
+                            "then 3 hex digits)"
+                        ),
                     )
-                normalized_codes.append(code)
+                normalized_codes.append(canonical)
 
             # Get DTC details from repository
             dtc_details = []

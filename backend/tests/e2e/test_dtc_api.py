@@ -407,7 +407,9 @@ class TestDTCCodeDetailEndpoint:
     @pytest.mark.asyncio
     async def test_get_nonexistent_dtc_returns_404(self, async_client, seeded_db):
         """Test that getting nonexistent DTC returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999")
+        # Structurally valid but not seeded. "P9999" is not a DTC under SAE
+        # J2012 (second character must be 0-3) and now 400s on validation.
+        response = await async_client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
 
@@ -1312,12 +1314,14 @@ class TestDTCErrorMessages:
     @pytest.mark.asyncio
     async def test_404_includes_helpful_message(self, async_client, seeded_db):
         """Test that 404 error includes helpful message."""
-        response = await async_client.get("/api/v1/dtc/P9999")
+        # Structurally valid but not seeded. "P9999" is not a DTC under SAE
+        # J2012 (second character must be 0-3) and now 400s on validation.
+        response = await async_client.get("/api/v1/dtc/P3FFF")
 
         assert response.status_code == 404
         data = response.json()
         assert "detail" in data
-        assert "P9999" in data["detail"] or "not found" in data["detail"].lower()
+        assert "P3FFF" in data["detail"] or "not found" in data["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_400_includes_format_hint(self, async_client, seeded_db):
