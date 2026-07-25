@@ -175,20 +175,36 @@ python scripts/init_qdrant.py --include-legacy
 
 ### Qdrant Collections
 
-| Collection                  | Vector Size | Description                        |
-|-----------------------------|-------------|------------------------------------|
-| dtc_embeddings_hu           | 768         | Hungarian DTC descriptions         |
-| symptom_embeddings_hu       | 768         | Hungarian symptom descriptions     |
-| known_issue_embeddings_hu   | 768         | Known issue descriptions           |
-| dtc_embeddings (legacy)     | 384         | English DTC (backward compat)      |
-| symptom_embeddings (legacy) | 384         | English symptoms (backward compat) |
+**All huBERT vectors live in ONE collection.** `init_qdrant.py` creates the
+per-type `*_hu` collections, but nothing writes to them and nothing reads from
+them - they exist and are empty. Do not treat them as the data.
+
+| Collection                  | Vector Size | Holds vectors? | Description                                      |
+|-----------------------------|-------------|----------------|--------------------------------------------------|
+| **`autocognitix`**          | 768         | **YES - all of them** | Unified store. Payload `type` discriminates: `dtc` \| `complaint` \| `recall`. Name is env-overridable (`QDRANT_UNIFIED_COLLECTION`). Created by `scripts/index_qdrant_hubert.py`, NOT by `init_qdrant.py`. |
+| dtc_embeddings_hu           | 768         | no (empty)     | Pre-unification per-type collection.             |
+| symptom_embeddings_hu       | 768         | no (empty)     | Pre-unification. Note there is no `symptom` payload type either - the RAG symptom leg maps to `type="complaint"`. |
+| component_embeddings_hu     | 768         | no (empty)     | Pre-unification.                                 |
+| repair_embeddings_hu        | 768         | no (empty)     | Pre-unification.                                 |
+| known_issue_embeddings_hu   | 768         | no (empty)     | Pre-unification.                                 |
+| dtc_embeddings (legacy)     | 384         | no             | English, backward compat constant only.          |
+| symptom_embeddings (legacy) | 384         | no             | English, backward compat constant only.          |
+
+Background - and why this matters operationally: the `/diagnosis/analyze` RAG
+queried the empty `*_hu` collections for months while the vectors sat in
+`autocognitix`. Because a cosine search against an empty collection returns an
+empty list, nothing ever errored. See `docs/EMBEDDING_ARCHITECTURE_DECISION.md`.
 
 ### Indexing Data
 
-After initializing collections, populate them with:
+The huBERT indexer needs torch, which is **deliberately absent from the
+production image**. Run it locally / offline, not with `railway run`:
 
 ```bash
-# Index DTC codes and symptoms
+# Index the unified collection with huBERT vectors (768-dim) - the real one
+python scripts/index_qdrant_hubert.py
+
+# Older/auxiliary indexers (per-type collections)
 python scripts/index_qdrant.py --all
 
 # Index only DTC codes

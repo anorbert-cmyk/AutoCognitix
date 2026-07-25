@@ -36,7 +36,7 @@ flowchart TB
     subgraph DataLayer["Data Layer - backend/app/db"]
         PG[("PostgreSQL 16<br/>users, dtc_codes, diagnosis_sessions,<br/>user_vehicles, vehicle_recalls...")]
         NEO[("Neo4j 5.x<br/>DTC -> Symptom -> Component<br/>-> Repair -> Part gráf")]
-        QD[("Qdrant<br/>5 collection, 768-dim<br/>cosine similarity")]
+        QD[("Qdrant<br/>autocognitix collection<br/>768-dim, cosine, type-discriminated")]
         RD[("Redis 7<br/>cache, rate limit,<br/>embedding cache")]
     end
 
@@ -127,7 +127,7 @@ flowchart TB
   - `backend/app/db/postgres/models.py` - SQLAlchemy 2.0 modellek (~30 tábla).
   - `backend/app/db/postgres/repositories.py` - repository pattern (DTCCodeRepository, DiagnosisSessionRepository, stb.).
   - `backend/app/db/neo4j_models.py` - Neomodel node-ok és relációk, `get_diagnostic_path()`, `get_vehicle_common_issues()`.
-  - `backend/app/db/qdrant_client.py` - `QdrantService` singleton, 5 collection, dimension validation, storage alerts.
+  - `backend/app/db/qdrant_client.py` - `QdrantService` singleton, dimension validation, storage alerts, **degenerált (nulla normájú) query-vektor guard** (`_validate_query_vector`). A tényleges keresés a unified `autocognitix` collectionre megy (`search_unified()`); az öt legacy `*_hu` collection konstansa megmaradt, és az `initialize_collections()` továbbra is létrehozza őket üresen.
   - `backend/app/db/redis_cache.py` - `RedisCacheService` singleton, circuit breaker, Lua-alapú atomic rate limit, TTL konstansok.
 
 ---
@@ -139,9 +139,21 @@ flowchart TB
 | **NHTSA API** (`api.nhtsa.gov`) | VIN dekódolás, jármű visszahívások, panaszok. Ingyenes, kulcs nélküli. | `backend/app/services/nhtsa_service.py` - `decode_vin()`, `get_recalls()`, `get_complaints()`. Eredmény Redis-ben cache-elve (TTL 6h). |
 | **Anthropic Claude** (vagy OpenAI GPT-4) | RAG pipeline végén a strukturált diagnózis generálás. | `backend/app/services/llm_provider.py` + `rag_service.py::generate_diagnosis()`. Provider választás az `.env`-ben (`LLM_PROVIDER=anthropic` vagy `openai`). |
 | **Neo4j Aura** (`cloud.neo4j.com`) | Production graph DB - 26,816 node (Vehicles, DTC, Symptoms, Components, Repairs, Parts, Engines, Platforms). | Csatlakozás: `NEO4J_URI=neo4j+s://...`, `NEO4J_PASSWORD=...` env változókkal. `backend/app/db/neo4j_models.py`. |
-| **Qdrant Cloud** (`cloud.qdrant.io`) | Production vector DB - 35,000+ vector, 768-dim cosine. | Csatlakozás: `QDRANT_URL`, `QDRANT_API_KEY`. 5 collection: `dtc_embeddings_hu`, `symptom_embeddings_hu`, `component_embeddings_hu`, `repair_embeddings_hu`, `known_issue_embeddings_hu`. |
-| **HuggingFace Hub** | huBERT model (`SZTAKI-HLT/hubert-base-cc`) letöltés első indításkor. | `backend/app/services/embedding_service.py::_load_hubert_model()`. |
+| **Qdrant Cloud** (`cloud.qdrant.io`) | Production vector DB - 768-dim cosine. **Minden HuBERT vektor EGYETLEN, `type`-diszkriminált collectionben van: `autocognitix`** (`settings.QDRANT_UNIFIED_COLLECTION`), payload `type` = `dtc` \| `complaint` \| `recall`. | Csatlakozás: `QDRANT_URL`, `QDRANT_API_KEY`. Az öt `*_hu` collection (`dtc_embeddings_hu`, `symptom_embeddings_hu`, `component_embeddings_hu`, `repair_embeddings_hu`, `known_issue_embeddings_hu`) **létezik, de ÜRES** - lásd lent. |
+| **HuggingFace Hub** | huBERT model (`SZTAKI-HLT/hubert-base-cc`) letöltés - **csak dev/indexelés**. Production-ben nincs HF hálózati hívás: a modell ONNX gráfként az image-be van sütve. | `backend/app/services/embedding_service.py::_load_hubert_model()` (torch út). Production: `backend/Dockerfile.prod` `onnx-export` stage. |
 | **Railway** | Production PaaS - backend + frontend + PostgreSQL + Redis addonok. | `backend/railway.toml`, `frontend/railway.toml`, `docs/RAILWAY_DEPLOYMENT.md`. |
+
+### Qdrant collection-modell - amit tudni kell
+
+Ez a rész korábban félrevezető volt, ezért kimondottan pontosítjuk:
+
+- **Az összes HuBERT vektor a `autocognitix` collectionben van**, `type` payload-diszkriminátorral (`dtc` / `complaint` / `recall`). Indexelő: `scripts/index_qdrant_hubert.py`. A collection neve env-overridable: `QDRANT_UNIFIED_COLLECTION`.
+- **A runtime EZT kérdezi.** `QdrantService.search_unified()` / `search_dtc()`, és a `rag_service.py::retrieve_from_qdrant(type_=...)` út is ide megy.
+- **Az öt `*_hu` collection LÉTEZIK, de ÜRES.** A `QdrantService.initialize_collections()` (amit az `app/main.py` lifespan hív) minden induláskor létrehozza őket, ha hiányoznak. A konstansok (`DTC_COLLECTION`, `SYMPTOM_COLLECTION`, …) szintén megvannak.
+- **`type = "symptom"` NEM létezik** a unified collectionben. A RAG "symptom" retrieval-lába ezért `type="complaint"`-re képez (az NHTSA panasz-narratívák a tünetleírások).
+- A `search_similar_symptoms()` / `search_components()` / `search_repairs()` metódusok **még a legacy (üres) collectionökre mutatnak, és nincs hívójuk** - halott kód.
+
+Részletek és a történet (miért volt hónapokig néma a szemantikus keresés): **`docs/EMBEDDING_ARCHITECTURE_DECISION.md`**.
 
 ---
 

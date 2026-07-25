@@ -41,8 +41,8 @@ sequenceDiagram
     SVC->>RAG: _run_rag_pipeline()
     RAG->>EMB: embed_text_async(symptom) -> 768-dim vector
     EMB->>RD: embedding cache lookup
-    RAG->>QD: search(dtc_embeddings_hu, vector, top_k=10)
-    RAG->>QD: search(symptom_embeddings_hu, ...)
+    RAG->>QD: search_unified(autocognitix, type="dtc", top_k=10)
+    RAG->>QD: search_unified(autocognitix, type="complaint", ...)
     RAG->>NEO: get_diagnostic_path("P0300")
     NEO-->>RAG: {symptoms, components, repairs, parts}
     RAG->>PG: DTC frequency + known issues
@@ -97,18 +97,23 @@ Hét lépés szekvenciálisan:
 ### 5. Hungarian embedding (huBERT)
 **Fájl:** `backend/app/services/embedding_service.py`
 **Kulcs:** `embed_text_async(text, preprocess=True)` - 648. sor.
-- Singleton modell (`HungarianEmbeddingService._instance`), lazy load.
-- Modell: `SZTAKI-HLT/hubert-base-cc` (Hungarian BERT, 768-dim).
-- Async wrapper ThreadPoolExecutor-ra (GPU/CPU inference).
-- Redis embedding cache kulcs: `embed:{sha256(text)[:64]}` (TTL 1h, `CacheTTL.EMBEDDINGS`).
-- Mean pooling + attention mask alapú vektor kinyerés.
+- Singleton modell (`HungarianEmbeddingService._instance`), lazy load, reentráns lock alatt atomi inicializálás.
+- Modell: `SZTAKI-HLT/hubert-base-cc` (Hungarian BERT, 768-dim), **commit SHA-ra pinelve** (`HUBERT_REVISION`).
+- **Inference backend:** production = **ONNX Runtime fp32** (`EMBEDDING_BACKEND=onnx`, torch/transformers NÉLKÜL); dev + offline indexelés = torch. Mindkettő ugyanazt a numpy poolingot használja (`_mean_pool_l2_numpy`), ezért ugyanabban az embedding-térben van.
+- Async wrapper ThreadPoolExecutor-ra (CPU inference).
+- Redis embedding cache kulcs: verziózott névtér (`EMBEDDING_CACHE_VERSION` + backend név), sózva `HUBERT_MODEL@HUBERT_REVISION`-nel, prefix `embed:` (TTL 1h, `CacheTTL.EMBEDDINGS`).
+- Mean pooling + attention mask alapú vektor kinyerés, majd L2 normalizálás.
+- **Ha nincs backend: `EmbeddingUnavailableError`.** SOHA nem nullvektor - egy nullvektor cosine keresésnél nem rossz, hanem értelmetlen találatokat ad, és ez a csendes fallback hónapokig rejtette a törött szemantikus keresést.
 
 ### 6. Qdrant vector search
 **Fájl:** `backend/app/db/qdrant_client.py`
-**Kulcs:** `QdrantService.search(collection_name, query_vector, limit, filter_conditions, score_threshold)` - 166. sor.
-- Collection-ok: `dtc_embeddings_hu`, `symptom_embeddings_hu`, `component_embeddings_hu`, `repair_embeddings_hu`, `known_issue_embeddings_hu`.
+**Kulcs:** `QdrantService.search_unified(query_vector, type_, limit, extra_filters, score_threshold)` → `search(collection_name, ...)`.
+- **Collection: `autocognitix`** (`settings.QDRANT_UNIFIED_COLLECTION`) - **minden HuBERT vektor itt van**, `type` payload-diszkriminátorral (`dtc` / `complaint` / `recall`). A `type` szűrő utoljára kerül be, így hívói `extra_filters` nem tudja felülírni.
+- Az öt `*_hu` collection létezik, de **üres**; a `search_similar_symptoms()` / `search_components()` / `search_repairs()` metódusok még rájuk mutatnak, de **nincs hívójuk**.
+- **`model_version` szűrőt tilos átadni a unified úton**: az `autocognitix` pontjai nem hordoznak `_embedding_model_version` payloadot, a szűrő mindent kizárna.
 - Distance: `COSINE`. Dimension validation: 768 (`EXPECTED_DIMENSION`).
-- Payload szűrők: `category`, `severity`, `vehicle_make`, `system`, `_embedding_model_version`.
+- **Query-vektor guard:** üres vagy `norm < 1e-6` vektorra `ValueError` - a keresés el sem indul (`_validate_query_vector`).
+- Payload szűrők: `category`, `severity`, `type`, `make` (nyers, all-caps NHTSA érték). *A régi `vehicle_make` kulcs nem létezik a unified payloadban - az arra épülő szűrő garantáltan 0 találatot adott, ezért eltávolítva.*
 - Threshold alapértelmezett: `0.5` (score_threshold).
 
 ### 7. Neo4j graph enrichment

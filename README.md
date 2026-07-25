@@ -20,7 +20,7 @@ AutoCognitix is an intelligent vehicle diagnostic platform that combines AI-powe
 - **DTC Code Lookup** - Comprehensive database of OBD-II diagnostic trouble codes with Hungarian descriptions
 - **Symptom Analysis** - Natural language processing for Hungarian symptom descriptions using huBERT embeddings
 - **Knowledge Graph** - Neo4j-based diagnostic paths connecting DTCs, symptoms, components, and repairs
-- **Vector Search** - Semantic similarity search using Qdrant for finding related issues
+- **Vector Search** - Semantic similarity search using Qdrant. All huBERT vectors live in a single type-discriminated collection (`dtc` / `complaint` / `recall`); a missing embedding backend fails loudly rather than returning a zero vector
 - **VIN Decoding** - Decode Vehicle Identification Numbers using NHTSA API
 - **Recall Information** - Access to NHTSA recall database and historical complaint data
 - **Vehicle Garage** - Personal vehicle management with maintenance reminders, cost tracking, and real health scores derived from live reminder data (list and detail views stay in sync)
@@ -35,7 +35,7 @@ AutoCognitix is an intelligent vehicle diagnostic platform that combines AI-powe
 |-------|-------------|
 | **Backend** | FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Neo4j 5.x, Qdrant, Redis 7 |
 | **Frontend** | React 18, TypeScript, TailwindCSS, TanStack Query, Vite |
-| **AI/NLP** | LangChain, huBERT (SZTAKI-HLT), Anthropic Claude / OpenAI GPT-4 |
+| **AI/NLP** | LangChain, huBERT (SZTAKI-HLT), Anthropic Claude / OpenAI GPT-4. Production embedding inference runs huBERT through **ONNX Runtime** (no torch/transformers in the production image); torch is used for local dev and offline indexing |
 | **Infrastructure** | Docker, Railway, GitHub Actions |
 
 ## Quick Start
@@ -136,6 +136,7 @@ Automatic dependency updates:
 | `/api/v1/dtc/search` | GET | Search DTC codes |
 | `/api/v1/dtc/{code}` | GET | Get DTC details |
 | `/api/v1/vehicles/decode-vin` | POST | Decode VIN via NHTSA |
+| `/api/v1/vehicles/{make}/{model}/common-issues` | GET | Common problems for a vehicle: `components` ranked by NHTSA complaint frequency, `issues` (DTCs from the graph), `total_complaints`, and a `sources` status object that tells a datastore outage apart from genuinely no data |
 | `/api/v1/garage/vehicles` | GET / POST | List (with real health score & upcoming reminder count) or add vehicles to garage |
 | `/api/v1/garage/vehicles/{id}` | GET / PUT / DELETE | Vehicle CRUD |
 | `/api/v1/garage/vehicles/{id}/health` | GET | Vehicle health score (aggregate-based, matches list view) |
