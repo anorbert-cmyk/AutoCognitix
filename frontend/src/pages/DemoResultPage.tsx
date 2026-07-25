@@ -88,7 +88,7 @@ export default function DemoResultPage() {
             <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#0D1B2A] text-white shadow-lg shadow-[#0D1B2A]/20">
               <MaterialIcon name="build_circle" className="text-2xl" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 font-['Space_Grotesk',sans-serif]">MechanicAI</h1>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 font-['Space_Grotesk',sans-serif]">AutoCognitix</h1>
             <span className="ml-2 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wider border border-amber-200">
               Demo
             </span>

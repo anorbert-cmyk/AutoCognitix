@@ -1,5 +1,5 @@
 /**
- * MechanicAI PRO - Layout Components
+ * AutoCognitix - Layout Components
  *
  * Components for page structure and layout.
  */

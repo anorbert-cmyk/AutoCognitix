@@ -126,7 +126,7 @@ function DiagnosisResultContent({ result }: { result: DiagnosisResponse }) {
             <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#0D1B2A] text-white shadow-lg shadow-[#0D1B2A]/20">
               <MaterialIcon name="build_circle" className="text-2xl" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 font-['Space_Grotesk',sans-serif]">MechanicAI</h1>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 font-['Space_Grotesk',sans-serif]">AutoCognitix</h1>
           </div>
 
           <nav className="hidden md:flex items-center gap-8">

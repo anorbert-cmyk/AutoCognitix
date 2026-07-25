@@ -81,10 +81,10 @@ export function Header({
               <>
                 <Wrench className="h-6 w-6 text-primary-600" />
                 <span className="hidden sm:inline">
-                  <span className="text-primary-600">MechanicAI</span>
-                  <span className="text-foreground"> PRO</span>
+                  <span className="text-primary-600">Auto</span>
+                  <span className="text-foreground">Cognitix</span>
                 </span>
-                <span className="sm:hidden text-primary-600">MechanicAI</span>
+                <span className="sm:hidden text-primary-600">AutoCognitix</span>
               </>
             )}
           </Link>

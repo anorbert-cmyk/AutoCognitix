@@ -535,7 +535,7 @@ export function AnalysisProgress({
                 <Car className="w-5 h-5 text-white" />
               </div>
               <span className="font-bold text-xl text-gray-900">
-                MechanicAI <span className="text-[#137fec]">Pro</span>
+                Auto<span className="text-[#137fec]">Cognitix</span>
               </span>
             </div>
 

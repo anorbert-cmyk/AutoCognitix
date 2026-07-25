@@ -496,9 +496,9 @@ describe('ResultPage', () => {
       setupHookReturn({ data: createMockResult() });
     });
 
-    it('renders header with MechanicAI branding', () => {
+    it('renders header with AutoCognitix branding', () => {
       render(<ResultPage />);
-      expect(screen.getByText('MechanicAI')).toBeInTheDocument();
+      expect(screen.getByText('AutoCognitix')).toBeInTheDocument();
     });
 
     it('renders navigation links', () => {
