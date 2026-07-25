@@ -5,6 +5,7 @@ Mocks Neo4j (neomodel_db) and PostgreSQL (async_session_maker) to test
 all service methods without real database connections.
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1050,6 +1051,64 @@ class TestGetVehicleCommonIssues:
         assert issues == []
 
     @pytest.mark.asyncio
+    async def test_neo4j_error_logs_at_error_level(self, service, caplog):
+        """A Neo4j outage must be greppable at ERROR, not silently indistinguishable
+        from 'no data' - both return 200/[] to the client.
+        """
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=RuntimeError("ServiceUnavailable: Aura paused")),
+        ):
+            issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        assert issues == []  # contract unchanged: caller still gets an empty list
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        message = errors[0].getMessage()
+        assert "common-issues neo4j QUERY FAILED" in message
+        assert "RuntimeError" in message
+        assert "Aura paused" in message
+        # The genuine-empty INFO marker must NOT be emitted on the failure path
+        assert not [r for r in caplog.records if "common-issues neo4j OK" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_error_log_sanitizes_user_input(self, service, caplog):
+        """Log-injection guard: user-derived make/model and the exception text are
+        sanitized before reaching the ERROR record (CWE-117).
+        """
+        with (
+            caplog.at_level(logging.ERROR, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=Exception("boom\nFAKE ERROR line")),
+        ):
+            await service.get_vehicle_common_issues("VW\nINJECTED", "Golf\rX")
+
+        message = caplog.records[0].getMessage()
+        assert "\n" not in message
+        assert "\r" not in message
+        assert "\\nINJECTED" in message
+
+    @pytest.mark.asyncio
+    async def test_genuine_empty_logs_info_not_error(self, service, caplog):
+        """Zero rows from a healthy graph logs INFO with rows=0 and no ERROR."""
+
+        async def _to_thread(fn, *args, **kwargs):
+            return [], None
+
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=_to_thread),
+        ):
+            issues = await service.get_vehicle_common_issues("Mazda", "MX-5")
+
+        assert issues == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+        infos = [r for r in caplog.records if "common-issues neo4j OK" in r.getMessage()]
+        assert len(infos) == 1  # exactly one success marker - no double logging
+        assert "rows=0" in infos[0].getMessage()
+
+    @pytest.mark.asyncio
     async def test_postgres_enrichment_error_falls_back_to_graph(self, service):
         """PostgreSQL enrichment failure still returns graph data (never 500)."""
 
@@ -1094,8 +1153,9 @@ class TestGetVehicleCommonIssues:
 
     @pytest.mark.asyncio
     async def test_uses_bare_label_aggregation_query(self, service):
-        """Revert guard: the Cypher must use the bare-label complaint aggregation,
-        never the dead VehicleNode / HAS_COMMON_ISSUE / DTCNode path.
+        """Revert guard: the Cypher must use the bare-label complaint aggregation
+        filtered directly on the Complaint node, never the dead VehicleNode /
+        HAS_COMMON_ISSUE / DTCNode path and no longer the optional HAS_COMPLAINT hop.
 
         This test fails if the label fix is reverted.
         """
@@ -1111,8 +1171,6 @@ class TestGetVehicleCommonIssues:
 
         query = captured["query"]
         # New bare-label schema is present
-        assert "(v:Vehicle)" in query
-        assert "HAS_COMPLAINT" in query
         assert "(c:Complaint)" in query
         assert "MENTIONS_DTC" in query
         assert "MENTIONED_IN" in query
@@ -1123,9 +1181,43 @@ class TestGetVehicleCommonIssues:
         assert "VehicleNode" not in query
         assert "HAS_COMMON_ISSUE" not in query
         assert "DTCNode" not in query
-        # Year filters on the complaint
+        # make/model/year all filter on the Complaint node itself - the
+        # HAS_COMPLAINT hop (loaded last, so the likeliest incomplete edge set)
+        # is no longer a dependency
+        assert "HAS_COMPLAINT" not in query
+        assert "(v:Vehicle)" not in query
+        assert "c.make" in query
+        assert "toLower(c.model) STARTS WITH toLower($model)" in query
         assert "c.year" in query
         assert captured["params"]["year"] == 2018
+
+    @pytest.mark.asyncio
+    async def test_query_never_interpolates_user_values(self, service):
+        """Security guard: make/model/year/limit are bound as parameters only -
+        no caller-controlled value may appear in the Cypher string.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            captured["params"] = args[1] if len(args) > 1 else None
+            return [], None
+
+        evil_make = "Volkswagen' OR 1=1 //"
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues(evil_make, "Golf", year=2018, limit=7)
+
+        query = captured["query"]
+        assert evil_make not in query
+        assert "Golf" not in query
+        assert "2018" not in query
+        assert "7" not in query
+        assert captured["params"] == {
+            "make": evil_make,
+            "model": "Golf",
+            "year": 2018,
+            "limit": 7,
+        }
 
     @pytest.mark.asyncio
     async def test_no_year_omits_year_filter(self, service):

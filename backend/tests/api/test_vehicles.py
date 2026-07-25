@@ -12,9 +12,10 @@ Tests:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
@@ -794,3 +795,49 @@ class TestVehicleCommonIssues:
         data = response.json()
         assert data["year"] is None
         assert data["issues"][0]["code"] == "P0171"
+
+    @pytest.mark.asyncio
+    async def test_common_issues_neo4j_outage_returns_200_and_logs_error(
+        self, async_client: AsyncClient, caplog
+    ):
+        """A Neo4j outage keeps the 200/[] contract but is loud in the logs.
+
+        Uses the real VehicleService (no dependency override) so the endpoint's
+        externally visible behaviour and the service's logging are checked together.
+        """
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=RuntimeError("ServiceUnavailable")),
+        ):
+            response = await async_client.get(
+                "/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018"
+            )
+
+        assert response.status_code == 200
+        assert response.json()["issues"] == []
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        assert "common-issues neo4j QUERY FAILED" in errors[0].getMessage()
+
+    @pytest.mark.asyncio
+    async def test_common_issues_genuine_empty_logs_no_error(
+        self, async_client: AsyncClient, caplog
+    ):
+        """A healthy graph with no matching rows returns the same 200/[] but must
+        NOT log an error - that is what makes the outage above diagnosable.
+        """
+
+        async def _to_thread(fn, *args, **kwargs):
+            return [], None
+
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
+            patch("asyncio.to_thread", side_effect=_to_thread),
+        ):
+            response = await async_client.get("/api/v1/vehicles/Toyota/Corolla/common-issues")
+
+        assert response.status_code == 200
+        assert response.json()["issues"] == []
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("common-issues neo4j OK" in r.getMessage() for r in caplog.records)

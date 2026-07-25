@@ -30,13 +30,20 @@ _DEFAULT_COMMON_ISSUES_LIMIT = 20
 # occurrence_count that the old query ordered by (hence the production 500s).
 # Complaints link to DTCs via MENTIONS_DTC (sync_neo4j_sprint9) OR MENTIONED_IN
 # (load_all_to_neo4j) - opposite directions - so the relationship match is
-# undirected to cover both. count(DISTINCT c) collapses a single complaint that
-# is reachable through several vehicle-year nodes of the same make/model.
+# undirected to cover both. count(DISTINCT c) keeps a complaint counted once per
+# DTC code even when both loaders linked it (MENTIONS_DTC *and* MENTIONED_IN).
+#
+# The Complaint node carries make/model/year natively (sync_neo4j_sprint9
+# load_complaints), so we filter on it directly instead of hopping through
+# (:Vehicle)-[:HAS_COMPLAINT]->. That hop was an avoidable dependency on an
+# edge set created LAST in the loader run order, i.e. the first casualty of
+# Aura Free's 400K relationship cap. Model uses STARTS WITH because NHTSA
+# stores trim-qualified model names ("GOLF GTI", "GOLF R") that an exact match
+# would silently drop; the make equality keeps the prefix scoped.
 _COMMON_ISSUES_CYPHER = """
-    MATCH (v:Vehicle)-[:HAS_COMPLAINT]->(c:Complaint)
-    MATCH (c)-[:MENTIONS_DTC|MENTIONED_IN]-(d:DTC)
-    WHERE toLower(v.make) = toLower($make)
-      AND toLower(v.model) = toLower($model){year_filter}
+    MATCH (c:Complaint)-[:MENTIONS_DTC|MENTIONED_IN]-(d:DTC)
+    WHERE toLower(c.make) = toLower($make)
+      AND toLower(c.model) STARTS WITH toLower($model){year_filter}
     RETURN d.code AS code,
            d.description_en AS description_en,
            d.description_hu AS description_hu,
@@ -427,14 +434,23 @@ class VehicleService:
 
         Degrades gracefully to an empty list on any Neo4j/driver error or when the
         graph has no matching data - this endpoint must never surface a 500.
+
+        Both paths return ``[]``, so they are only distinguishable in the logs: a
+        driver/query failure (outage, wrong NEO4J_URI/credentials, Aura free-tier
+        auto-pause) is logged at ERROR with the marker ``common-issues neo4j
+        QUERY FAILED``, while a genuine no-rows result is logged at INFO with
+        ``rows=0`` by ``_get_common_issues_neo4j``. Never collapse the two.
         """
         try:
             rows = await self._get_common_issues_neo4j(make, model, year, limit)
         except Exception as e:
-            logger.warning(
-                "Neo4j common-issues query failed for %s %s: %s",
+            logger.error(
+                "common-issues neo4j QUERY FAILED (graph unreachable or query invalid) "
+                "make=%s model=%s year=%s error=%s: %s",
                 sanitize_log(make),
                 sanitize_log(model),
+                sanitize_log(str(year)),
+                type(e).__name__,
                 sanitize_exception(e),
             )
             return []
@@ -460,9 +476,15 @@ class VehicleService:
     ) -> List[Dict[str, Any]]:
         """Run the bare-label complaint aggregation against Neo4j.
 
-        See ``_COMMON_ISSUES_CYPHER`` for the schema rationale. The year filter is
-        applied on ``Complaint.year`` (a plain int), because the graph links every
-        vehicle-year node of a make/model to all of that model's complaints.
+        See ``_COMMON_ISSUES_CYPHER`` for the schema rationale. make/model/year are
+        all filtered on the ``Complaint`` node, which carries them natively.
+
+        The year filter is a STATIC template fragment; the user-supplied year is
+        bound as the ``$year`` parameter. No caller-controlled value is ever
+        interpolated into the Cypher string - keep it that way.
+
+        Raises on any driver/query error so the caller can log it distinctly from
+        a genuine empty result.
         """
         params: Dict[str, Any] = {"make": make, "model": model, "limit": limit}
         year_filter = ""
@@ -488,8 +510,10 @@ class VehicleService:
                 }
             )
 
+        # Success marker - `rows=0` here means the graph genuinely has no match,
+        # NOT that Neo4j is down (that path logs ERROR in the caller).
         logger.info(
-            "common-issues neo4j: make=%s model=%s year=%s rows=%d",
+            "common-issues neo4j OK: make=%s model=%s year=%s rows=%d",
             sanitize_log(make),
             sanitize_log(model),
             sanitize_log(str(year)),
