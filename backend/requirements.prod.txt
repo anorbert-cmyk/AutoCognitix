@@ -44,11 +44,38 @@ langchain-anthropic==0.1.1
 langchain-openai==0.0.5
 
 # ============================================
-# EXCLUDED for production (local embedding only):
-# - torch==2.2.0 (~2GB)
-# - transformers==4.37.2
-# - sentence-transformers==2.3.1
+# AI/ML - Hungarian huBERT embeddings via ONNX Runtime (fp32)
 # ============================================
+# The huBERT graph is exported to ONNX in a throwaway Docker build stage (see
+# Dockerfile.prod, stage `onnx-export`) from the SAME pinned model revision the
+# app uses, then copied into the runtime image as a plain .onnx + vocab.txt.
+#
+# torch and transformers are DELIBERATELY absent:
+#  * `transformers` transitively imports torch. Measured: +367 MB RSS, taking
+#    the ONNX path to 937.7 MB - WORSE than plain torch (802.5 MB). Importing it
+#    anywhere on the runtime embed path destroys the entire point of ONNX, so
+#    tokenization goes straight through `tokenizers`
+#    (BertWordPieceTokenizer on vocab.txt, lowercase=False, because the model
+#    config says do_lower_case: false). Measured: token IDs identical to
+#    AutoTokenizer, embeddings cosine >= 0.9999991 vs the torch reference that
+#    produced the indexed Qdrant vectors - so NO reindex was needed.
+#  * The old "torch ~2GB" note here was about the DEFAULT PyPI wheel, which
+#    unconditionally drags in the CUDA stack (2,640 MB of wheels). The honest
+#    number for the CPU-only wheel is 894 MB installed (178 MB wheel). Still
+#    ~720 MB more than this ONNX stack (176 MB + 440 MB .onnx), plus ~208 MB
+#    more RSS per gunicorn worker.
+#  * `sentence-transformers` is not needed at all: the project implements its
+#    own mean pooling (embedding_service.py) and would only gain ~56 MB of
+#    scipy/sklearn/Pillow plus a hard torch requirement.
+#  * `spacy`/`huspacy` stays out on purpose: adding it would turn
+#    preprocess_hungarian() from a no-op into real lemmatization, putting
+#    queries in a DIFFERENT text space than the indexed vectors. Full reindex.
+#
+# int8/uint8 quantization is DISQUALIFIED, not merely "less accurate": top-5
+# ranking broke on 6/6 test queries AND the ORT int8 BERT kernels are
+# non-deterministic at default thread counts (29 distinct outputs in 30 runs).
+onnxruntime==1.28.0
+tokenizers>=0.15,<0.16
 
 # Data Processing (minimal)
 numpy==1.26.4

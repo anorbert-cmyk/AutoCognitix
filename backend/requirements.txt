@@ -45,7 +45,16 @@ langchain-openai==0.0.5
 sentence-transformers==2.3.1
 transformers==4.37.2
 torch==2.2.0
-# huspacy - commented out for Railway deployment (requires special installation)
+# NOTE: production does NOT use torch - it runs the ONNX path (onnxruntime +
+# tokenizers, see requirements.prod.txt and
+# docs/EMBEDDING_ARCHITECTURE_DECISION.md). torch stays here because the
+# offline indexer scripts and the ONNX export step need it. onnxruntime is
+# deliberately NOT added here: the end-to-end parity test is gated on the
+# exported .onnx graph, which is built in the Docker stage and absent from
+# CI, so installing the package would not un-skip anything.
+# huspacy - deliberately NOT installed: it would turn preprocess_hungarian()
+# from a no-op into real lemmatization, putting queries in a different text
+# space than the indexed vectors (would require a full reindex).
 # huspacy==0.10.0
 
 # Data Processing

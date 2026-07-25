@@ -4,6 +4,89 @@
 # ============================================
 
 # ============================================
+# Stage 0: ONNX export - HEAVY, DISCARDED
+# ============================================
+# torch + transformers live ONLY here. This stage exports the huBERT graph to
+# ONNX fp32 and is thrown away; nothing from it reaches the runtime image except
+# the .onnx file and vocab.txt. That is what lets production run Hungarian
+# embeddings with onnxruntime + tokenizers alone (~176 MB) instead of the
+# ~894 MB torch stack, and ~208 MB less RSS per gunicorn worker.
+#
+# The revision is PINNED to a commit SHA, not "main": the ~54k vectors already
+# indexed in Qdrant were produced from these weights, and the same value is the
+# default of settings.HUBERT_REVISION, so the image and the index cannot drift.
+FROM python:3.11-slim-bookworm AS onnx-export
+
+ARG HUBERT_MODEL=SZTAKI-HLT/hubert-base-cc
+ARG HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
+# Optional: pass the expected .onnx digest to make an unexpected export fail the
+# build instead of silently shipping different weights.
+ARG HUBERT_ONNX_SHA256=""
+
+ENV HUBERT_MODEL=${HUBERT_MODEL} \
+    HUBERT_REVISION=${HUBERT_REVISION} \
+    PYTHONUTF8=1 \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1
+
+# CPU-only torch wheel (178 MB) - the default PyPI wheel would pull the whole
+# CUDA stack (2,640 MB) for nothing; this stage never sees a GPU.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.2.0+cpu" \
+        "transformers==4.37.2" \
+        "onnx" \
+        "onnxruntime==1.28.0" \
+        "tokenizers>=0.15,<0.16" \
+        "numpy==1.26.4"
+
+# Export + VERIFY in one step. The verification is the whole point of doing this
+# in a build stage: it re-proves, on every build, that
+#   (a) tokenizers/BertWordPieceTokenizer(vocab.txt, lowercase=False) yields the
+#       exact same token IDs as AutoTokenizer (do_lower_case is false for this
+#       model, so a wrong lowercase flag would silently degrade embeddings), and
+#   (b) the ONNX graph reproduces the torch reference embedding - the same torch
+#       path that produced the indexed Qdrant vectors - to cosine > 0.9999.
+# A drifted export therefore FAILS THE BUILD instead of silently shifting the
+# embedding space out from under 54k already-indexed vectors.
+# Pooling/normalization below is a literal copy of app/services/embedding_service.py.
+RUN python -c "\
+import os, numpy as np, torch, onnxruntime as ort; \
+from transformers import AutoModel, AutoTokenizer; \
+from tokenizers import BertWordPieceTokenizer; \
+torch.set_grad_enabled(False); \
+M=os.environ['HUBERT_MODEL']; R=os.environ['HUBERT_REVISION']; O='/models/hubert_fp32.onnx'; \
+os.makedirs('/models', exist_ok=True); \
+tok=AutoTokenizer.from_pretrained(M, revision=R, use_fast=True); \
+model=AutoModel.from_pretrained(M, revision=R, torch_dtype=torch.float32).eval(); \
+tok.save_pretrained('/models'); \
+s=tok('Teszt szoveg', return_tensors='pt'); \
+ax={'input_ids':{0:'batch',1:'seq'},'attention_mask':{0:'batch',1:'seq'},'token_type_ids':{0:'batch',1:'seq'},'last_hidden_state':{0:'batch',1:'seq'}}; \
+torch.onnx.export(model,(s['input_ids'],s['attention_mask'],s['token_type_ids']),O,input_names=['input_ids','attention_mask','token_type_ids'],output_names=['last_hidden_state'],dynamic_axes=ax,opset_version=14,do_constant_folding=True); \
+pool=lambda h,m: (lambda p: p/np.clip(np.linalg.norm(p,ord=2,axis=1,keepdims=True),1e-12,None))((h.astype(np.float32)*m[...,None].astype(np.float32)).sum(axis=1)/np.clip(m[...,None].astype(np.float32).sum(axis=1),1e-9,None)); \
+ref=lambda t: (lambda e: pool(model(**e).last_hidden_state.numpy(), e['attention_mask'].numpy()))(tok(t,padding=True,truncation=True,max_length=512,return_tensors='pt'))[0].astype(np.float64); \
+so=ort.SessionOptions(); so.intra_op_num_threads=1; \
+sess=ort.InferenceSession(O,so,providers=['CPUExecutionProvider']); \
+bt=BertWordPieceTokenizer('/models/vocab.txt', lowercase=False); bt.enable_truncation(max_length=512); \
+onx=lambda t: (lambda e: pool(sess.run(['last_hidden_state'],{'input_ids':np.array([e.ids],dtype=np.int64),'attention_mask':np.array([e.attention_mask],dtype=np.int64),'token_type_ids':np.array([e.type_ids],dtype=np.int64)})[0], np.array([e.attention_mask],dtype=np.int64)))(bt.encode(t))[0].astype(np.float64); \
+T=['rángat a motor gyorsításkor','P0300 - Több hengeres égéskimaradás','Kék füst jön a kipufogóból hidegindításkor.','ÁRAMSZÜNET! Ékezetes, NAGYBETŰS teszt: ŐRÜLT ŰRHAJÓ.','fék']; \
+ids_ok=all(tok(t,truncation=True,max_length=512)['input_ids']==bt.encode(t).ids for t in T); \
+cos=min(float(np.dot(ref(t), onx(t))) for t in T); \
+print('EXPORT VERIFY: token_ids_identical=%s min_cosine=%.10f' % (ids_ok, cos), flush=True); \
+assert ids_ok, 'tokenizers vs AutoTokenizer token ID mismatch (vocab/lowercase drift)'; \
+assert cos > 0.9999, 'ONNX export drifted from the torch reference embedding space: %r' % cos"
+
+# Ship only what the runtime actually reads: the graph and the WordPiece vocab.
+RUN rm -f /models/tokenizer.json /models/tokenizer_config.json /models/special_tokens_map.json && \
+    if [ -n "${HUBERT_ONNX_SHA256}" ]; then \
+        echo "${HUBERT_ONNX_SHA256}  /models/hubert_fp32.onnx" | sha256sum -c -; \
+    else \
+        sha256sum /models/hubert_fp32.onnx; \
+    fi && \
+    ls -la /models
+
+# ============================================
 # Stage 1: Builder - Compile dependencies
 # ============================================
 FROM python:3.11-slim-bookworm AS builder
@@ -22,8 +105,8 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-# Use pre-built requirements.prod.txt (without torch/ML libraries)
-# Embeddings are pre-computed and stored in Qdrant Cloud
+# requirements.prod.txt carries onnxruntime + tokenizers but NOT torch/transformers:
+# the huBERT graph is exported in the `onnx-export` stage above and copied in.
 COPY requirements.prod.txt .
 
 # Install production dependencies (lightweight, no ML)
@@ -67,9 +150,18 @@ COPY --chown=appuser:appgroup alembic.ini .
 # Copy seed data for database initialization
 COPY --chown=appuser:appgroup data/dtc_codes_seed.json ./data/dtc_codes_seed.json
 
+# Copy the exported huBERT ONNX graph + WordPiece vocab from the discarded
+# export stage. ~440 MB .onnx + ~0.7 MB vocab.txt; no torch, no transformers,
+# and no HuggingFace network access at runtime.
+COPY --from=onnx-export --chown=appuser:appgroup /models ./models
+
 # Create directories for logs and temp files
 RUN mkdir -p /app/logs /app/tmp && \
     chown -R appuser:appgroup /app
+
+# Re-declare the pin so the running app and the exported graph can never
+# disagree about which model revision produced the vectors.
+ARG HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
 
 # Environment variables
 ENV PYTHONPATH=/app \
@@ -77,7 +169,12 @@ ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HUBERT_REVISION=${HUBERT_REVISION} \
+    HUBERT_ONNX_PATH=/app/models/hubert_fp32.onnx \
+    HUBERT_VOCAB_PATH=/app/models/vocab.txt \
+    EMBEDDING_BACKEND=onnx \
+    EMBEDDING_ORT_THREADS=2
 
 # Switch to non-root user
 USER appuser
@@ -86,6 +183,19 @@ USER appuser
 EXPOSE 8000
 
 # No Docker HEALTHCHECK - Railway handles health checks via railway.toml (healthcheckPath = "/health")
+#
+# Startup budget vs. Railway's healthcheckTimeout = 100 s (railway.toml):
+#   * /health is static JSON - it touches no database and no embedding backend.
+#   * The ONNX session is built LAZILY on the first embed call (~0.9 s cold),
+#     NOT at import and NOT in the FastAPI lifespan. warmup() is deliberately
+#     not wired into startup.
+#   * The only added boot cost is `import onnxruntime` (~0.2-0.5 s) - two orders
+#     of magnitude cheaper than the torch import it replaces.
+# Boot therefore stays dominated by `alembic upgrade head`, exactly as before.
+#
+# RAM: measured 594.5 MB peak RSS per worker on the ONNX path (vs 802.5 MB on
+# torch) => ~1.19 GB for --workers 2. If the Railway plan is tighter than that,
+# drop to `--workers 1 --threads 4` - the model is loaded per worker.
 
 # Run Alembic migrations then start Gunicorn
 # Using exec to make gunicorn PID 1 for proper signal handling

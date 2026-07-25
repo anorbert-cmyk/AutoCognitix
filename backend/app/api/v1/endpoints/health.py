@@ -331,6 +331,62 @@ async def check_qdrant_health() -> ServiceHealth:
         )
 
 
+async def check_embedding_health() -> ServiceHealth:
+    """
+    Check the Hungarian embedding backend.
+
+    Reports WHICH backend is active (onnx / torch / none) and whether it can
+    actually produce a non-zero, unit-length 768-dim vector. This is the
+    externally visible half of the "never a silent zero vector" guard: before
+    it, a production image without an inference backend looked perfectly
+    healthy while semantic search silently returned nothing.
+
+    Runs in a thread so a cold model load never blocks the event loop.
+    """
+    from app.services.embedding_service import embedding_self_test
+
+    start_time = time.time()
+    try:
+        probe = await asyncio.to_thread(embedding_self_test)
+    except Exception as e:
+        latency = (time.time() - start_time) * 1000
+        logger.error(f"Embedding health check failed: {e}")
+        return ServiceHealth(
+            name="Embedding",
+            status="unhealthy",
+            latency_ms=round(latency, 2),
+            error=str(e),
+        )
+
+    latency = (time.time() - start_time) * 1000
+    probe_status = probe.pop("status", "unknown")
+    error = probe.pop("error", None)
+
+    # "unavailable"/"degraded" map to "degraded", not "unhealthy": the API is
+    # still fully able to serve lexical + graph diagnosis, and flipping the
+    # overall status to unhealthy would make an embedding outage look like a
+    # total service outage to the monitoring dashboard.
+    status_map = {"ok": "healthy", "degraded": "degraded", "unavailable": "degraded"}
+    if probe_status != "ok":
+        logger.error(
+            "Embedding backend not usable",
+            extra={
+                "event": "embedding_backend_unusable",
+                "probe_status": probe_status,
+                "backend": probe.get("backend"),
+                "error": error,
+            },
+        )
+
+    return ServiceHealth(
+        name="Embedding",
+        status=status_map.get(probe_status, "unknown"),
+        latency_ms=round(latency, 2),
+        details=probe,
+        error=error,
+    )
+
+
 async def check_redis_health() -> ServiceHealth:
     """Check Redis cache health."""
     import redis
@@ -493,19 +549,20 @@ async def detailed_health_check(
 
     # Run all health checks concurrently with timeout to prevent hanging readiness probes
     try:
-        postgres, neo4j, qdrant, redis_health = await asyncio.wait_for(
+        postgres, neo4j, qdrant, redis_health, embedding = await asyncio.wait_for(
             asyncio.gather(
                 check_postgres_health(),
                 check_neo4j_health(),
                 check_qdrant_health(),
                 check_redis_health(),
+                check_embedding_health(),
                 return_exceptions=True,
             ),
             timeout=10.0,  # 10 second timeout for all checks
         )
     except asyncio.TimeoutError:
         logger.error("Health check timeout - one or more services not responding")
-        postgres = neo4j = qdrant = redis_health = ServiceHealth(
+        postgres = neo4j = qdrant = redis_health = embedding = ServiceHealth(
             name="All",
             status="unhealthy",
             error="Health check timeout",
@@ -553,6 +610,16 @@ async def detailed_health_check(
     else:
         assert isinstance(redis_health, ServiceHealth)
         services["redis"] = redis_health
+
+    if isinstance(embedding, Exception):
+        services["embedding"] = ServiceHealth(
+            name="Embedding",
+            status="degraded",
+            error=str(embedding),
+        )
+    else:
+        assert isinstance(embedding, ServiceHealth)
+        services["embedding"] = embedding
 
     # Determine overall status
     statuses = [s.status for s in services.values()]

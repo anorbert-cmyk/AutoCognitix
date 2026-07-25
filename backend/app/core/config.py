@@ -176,11 +176,27 @@ class Settings(BaseSettings):
     # Hungarian NLP
     HUBERT_MODEL: str = "SZTAKI-HLT/hubert-base-cc"
     # Pin a specific revision so HuggingFace can't silently push a new model
-    # under us. Override in prod with a verified commit hash; "main" means
-    # "follow the branch tip" (acceptable for local dev, dangerous in prod).
-    HUBERT_REVISION: str = "main"
+    # under us. This is the commit the ~54k indexed Qdrant vectors were produced
+    # from (repo tip since 2024-10-24); the Dockerfile.prod ONNX export stage
+    # uses the SAME value, so image and index can never drift apart.
+    HUBERT_REVISION: str = "028baac7feb87a7b2f042bbdaa5deec6513c6060"
     EMBEDDING_DIMENSION: int = 768
     HUSPACY_MODEL: str = "hu_core_news_lg"
+
+    # --- Embedding backend selection -------------------------------------
+    # "auto"     -> ONNX Runtime if the exported graph is present, else torch.
+    # "onnx"     -> ONNX Runtime only (production default via the image).
+    # "torch"    -> torch/transformers only (local dev + offline indexer).
+    # "disabled" -> no backend; embed calls raise EmbeddingUnavailableError.
+    # No value ever yields a zero vector - a missing backend is an ERROR.
+    EMBEDDING_BACKEND: str = "auto"
+    # Paths are env-overridable so a wrong path is a Railway variable fix, not a
+    # redeploy. Defaults match the Dockerfile.prod COPY target.
+    HUBERT_ONNX_PATH: str = "/app/models/hubert_fp32.onnx"
+    HUBERT_VOCAB_PATH: str = "/app/models/vocab.txt"
+    # ONNX Runtime intra-op threads. Explicit because ORT otherwise grabs every
+    # core, and 2 gunicorn workers would then oversubscribe the container.
+    EMBEDDING_ORT_THREADS: int = 2
 
     # Frontend URL (used for password reset links, etc.)
     FRONTEND_URL: str = "http://localhost:5173"

@@ -180,10 +180,11 @@ def svc_cpu(mock_torch_cpu):
 
 @pytest.fixture
 def svc_no_torch():
-    """Create a service when torch is not available."""
+    """Create a service when NO inference backend is available at all."""
     with (
         patch("app.services.embedding_service.TORCH_AVAILABLE", False),
         patch("app.services.embedding_service.torch", None),
+        patch("app.services.embedding_service.ONNX_RUNTIME_AVAILABLE", False),
     ):
         from app.services.embedding_service import HungarianEmbeddingService
 
@@ -268,9 +269,17 @@ class TestEmbedText:
         result = svc_cpu.embed_text("   ")
         assert result == [0.0] * 768
 
-    def test_no_torch_returns_zero_vector(self, svc_no_torch):
-        result = svc_no_torch.embed_text("Motor hiba")
-        assert result == [0.0] * 768
+    def test_no_backend_raises_instead_of_zero_vector(self, svc_no_torch):
+        """REGRESSION: a missing backend must FAIL, never return [0.0] * 768.
+
+        The zero vector is type-correct and dimension-correct, so every
+        downstream check passed it through - and Hungarian semantic search
+        returned nothing for months without a single error.
+        """
+        from app.core.exceptions import EmbeddingUnavailableError
+
+        with pytest.raises(EmbeddingUnavailableError):
+            svc_no_torch.embed_text("Motor hiba")
 
     def test_with_preprocess(self, svc_cpu, mock_torch_cpu):
         model = _make_mock_model(1, 768)
@@ -293,10 +302,16 @@ class TestEmbedBatch:
         result = svc_cpu.embed_batch([])
         assert result == []
 
-    def test_no_torch_returns_zero_vectors(self, svc_no_torch):
-        result = svc_no_torch.embed_batch(["a", "b"])
-        assert len(result) == 2
-        assert all(v == [0.0] * 768 for v in result)
+    def test_no_backend_raises_instead_of_zero_vectors(self, svc_no_torch):
+        """REGRESSION: the batch path must not silently emit zero vectors either."""
+        from app.core.exceptions import EmbeddingUnavailableError
+
+        with pytest.raises(EmbeddingUnavailableError):
+            svc_no_torch.embed_batch(["a", "b"])
+
+    def test_empty_batch_needs_no_backend(self, svc_no_torch):
+        """An empty batch is trivially empty - it must not require a backend."""
+        assert svc_no_torch.embed_batch([]) == []
 
     def test_batch_returns_correct_count(self, svc_cpu, mock_torch_cpu):
         texts = ["Text 1", "Text 2", "Text 3"]

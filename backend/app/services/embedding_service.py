@@ -1,15 +1,39 @@
 """
 Hungarian NLP and Embedding Service.
 
-This module provides Hungarian language text embedding using huBERT model
+This module provides Hungarian language text embedding using the huBERT model
 and text preprocessing using HuSpaCy.
 
+Inference backends
+------------------
+The transformer forward pass runs through one of two interchangeable backends;
+everything around it (tokenization contract, mask-weighted mean pooling, L2
+normalization, 768-dim output) is IDENTICAL in both, which is what keeps them in
+the same embedding space as the ~54k vectors already indexed in Qdrant:
+
+- ``onnx``  : ONNX Runtime fp32 on an exported huBERT graph, tokenized directly
+  with ``tokenizers.BertWordPieceTokenizer``. This is the PRODUCTION backend.
+  ``transformers`` MUST NOT be imported on this path - importing it drags torch
+  back in (+367 MB RSS measured) and cancels the entire benefit of ONNX.
+- ``torch`` : the original ``transformers`` + torch path. Used for local dev and
+  by the offline indexing scripts, which are the anchor of the embedding space.
+
+Measured parity in this project's pinned environment (torch 2.2.0+cpu,
+transformers 4.37.2, onnxruntime 1.28.0): cosine >= 0.9999991, max abs element
+delta 1.5e-07, identical token IDs on every probe text. No re-indexing is
+required to switch backends. See docs/EMBEDDING_ARCHITECTURE_DECISION.md.
+
+There is deliberately NO third "silently return a zero vector" backend. A zero
+vector is type-correct, dimension-correct and mathematically meaningless: it
+matches nothing in cosine search, so Hungarian semantic search failed silently
+for months. A missing backend now raises ``EmbeddingUnavailableError``.
+
 Performance Optimizations:
-- Lazy model loading (models loaded on first use)
-- GPU memory management with automatic cleanup
+- Lazy model loading (models loaded on first use, NOT at import/boot)
+- GPU memory management with automatic cleanup (torch backend)
 - Optimized batch processing with dynamic batching
-- Embedding cache integration
-- Half-precision (FP16) inference for GPU
+- Embedding cache integration (versioned cache keys)
+- Half-precision (FP16) inference for GPU (torch backend)
 - Async-compatible embedding generation
 """
 
@@ -18,14 +42,16 @@ import gc
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from app.core.config import settings
+from app.core.exceptions import EmbeddingUnavailableError
 
-# Lazy imports for torch and transformers - not available in production
-# (embeddings are pre-computed and stored in Qdrant Cloud)
+# Lazy imports for torch and transformers - NOT installed in the production
+# image on purpose (the ONNX backend replaces them there).
 try:
     import torch
     from transformers import AutoModel, AutoTokenizer
@@ -36,10 +62,22 @@ except ImportError:
     AutoModel = None  # type: ignore[assignment,misc]
     AutoTokenizer = None  # type: ignore[assignment,misc]
     TORCH_AVAILABLE = False
-    logging.warning(
-        "torch/transformers not available - embedding generation disabled. "
-        "Pre-computed embeddings from Qdrant Cloud will be used."
+    logging.info(
+        "torch/transformers not available - the ONNX Runtime backend will be used "
+        "for embedding generation (expected in the production image)."
     )
+
+# ONNX Runtime + the standalone Rust tokenizer: the production inference stack.
+# Both are torch-free and transformers-free.
+try:
+    import onnxruntime as ort
+    from tokenizers import BertWordPieceTokenizer
+
+    ONNX_RUNTIME_AVAILABLE = True
+except ImportError:
+    ort = None  # type: ignore[assignment]
+    BertWordPieceTokenizer = None  # type: ignore[assignment,misc]
+    ONNX_RUNTIME_AVAILABLE = False
 
 # Optional spacy import - not required for basic embedding functionality
 try:
@@ -53,12 +91,121 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Tokenizer contract - shared by BOTH backends and by the offline indexer.
+# Changing this changes the embedding space and requires a full reindex.
+MAX_SEQUENCE_LENGTH = 512
+
+# Redis embedding cache-key version. Bump this whenever the produced vectors
+# could change (backend swap, model/revision bump, pooling change) so pre-fix
+# entries become unreachable at deploy time with ZERO manual steps - no
+# `SCAN`+`DEL` of `embed:*` and no hour-long TTL window in which the fix looks
+# broken. "v2" retires the poisoned zero vectors cached by the pre-ONNX build.
+EMBEDDING_CACHE_VERSION = "v2"
+
 # Thread pool for heavy CPU/GPU-bound model inference (HuBERT embeddings)
 _thread_pool = ThreadPoolExecutor(max_workers=4)
 
 # Separate small pool for lightweight NLP work (e.g. HuSpaCy preprocessing) so
 # fast preprocessing calls never queue behind multi-second model inference.
 _nlp_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nlp")
+
+
+def _mean_pool_l2_numpy(last_hidden: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+    """
+    Mask-weighted mean pooling + L2 normalization, in numpy.
+
+    This is a literal transcription of the torch reference path
+    (:meth:`HungarianEmbeddingService._mean_pooling` followed by
+    ``torch.nn.functional.normalize(..., p=2, dim=1)``) and it is the reason the
+    ONNX backend lands in the SAME embedding space as the already-indexed
+    vectors: the ONNX graph only replaces the transformer forward pass, pooling
+    and normalization stay outside the model and stay identical.
+
+    The ``clamp(min=1e-9)`` on the token counts and the ``ord=2, axis=1``
+    normalization are not stylistic choices - they are the identity of the
+    embedding space. Do not "simplify" them.
+
+    Args:
+        last_hidden: (batch, seq, dim) float32 last_hidden_state.
+        attention_mask: (batch, seq) attention mask.
+
+    Returns:
+        np.ndarray: (batch, dim) float32 L2-normalized embeddings.
+    """
+    mask = attention_mask[..., None].astype(np.float32)
+    summed = (last_hidden.astype(np.float32) * mask).sum(axis=1)
+    counts = np.clip(mask.sum(axis=1), 1e-9, None)
+    pooled = summed / counts
+    # torch F.normalize uses eps=1e-12 in the denominator clamp.
+    norms = np.clip(np.linalg.norm(pooled, ord=2, axis=1, keepdims=True), 1e-12, None)
+    return np.asarray(pooled / norms, dtype=np.float32)
+
+
+class _OnnxEmbeddingBackend:
+    """
+    ONNX Runtime fp32 forward pass for huBERT - torch-free and transformers-free.
+
+    IMPORTANT: nothing in this class may import or reference ``transformers`` or
+    ``torch``. Importing ``transformers`` pulls torch into the process (+367 MB
+    RSS measured) and makes the ONNX path WORSE than plain torch, defeating the
+    whole architecture. ``tests/unit/test_embedding_backends.py`` enforces this.
+
+    Tokenization uses ``BertWordPieceTokenizer(vocab.txt, lowercase=False)``.
+    ``lowercase=False`` is mandatory (the model config says
+    ``do_lower_case: false``); getting it wrong degrades embeddings silently.
+    It was measured to produce token IDs identical to ``AutoTokenizer``.
+    """
+
+    name = "onnx"
+
+    def __init__(self, model_path: str, vocab_path: str, threads: int) -> None:
+        if not ONNX_RUNTIME_AVAILABLE:
+            raise EmbeddingUnavailableError(
+                "onnxruntime/tokenizers are not installed.",
+                details={"backend": "onnx"},
+            )
+
+        session_options = ort.SessionOptions()
+        # Explicit thread caps: ORT otherwise claims every core, and the two
+        # gunicorn workers would oversubscribe the container.
+        session_options.intra_op_num_threads = max(1, threads)
+        session_options.inter_op_num_threads = 1
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        self.model_path = model_path
+        self.vocab_path = vocab_path
+        self._session = ort.InferenceSession(
+            model_path, session_options, providers=["CPUExecutionProvider"]
+        )
+        self._input_names = {i.name for i in self._session.get_inputs()}
+
+        self._tokenizer = BertWordPieceTokenizer(vocab_path, lowercase=False)
+        self._tokenizer.enable_truncation(max_length=MAX_SEQUENCE_LENGTH)
+        # Pad to the longest sequence in the batch == transformers' padding=True.
+        self._tokenizer.enable_padding()
+
+    def encode(self, texts: List[str]) -> Dict[str, np.ndarray]:
+        """Tokenize a batch exactly like ``padding=True, truncation=True, max_length=512``."""
+        encodings = self._tokenizer.encode_batch(texts)
+        encoded = {
+            "input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
+            "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
+            "token_type_ids": np.array([e.type_ids for e in encodings], dtype=np.int64),
+        }
+        # Only feed inputs the exported graph actually declares.
+        return {k: v for k, v in encoded.items() if k in self._input_names}
+
+    def forward(self, encoded: Dict[str, np.ndarray]) -> np.ndarray:
+        """Run the graph and return (batch, seq, dim) last_hidden_state."""
+        outputs = self._session.run(["last_hidden_state"], encoded)
+        return np.asarray(outputs[0])
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        """Tokenize -> forward -> shared pooling/normalization -> plain lists."""
+        encoded = self.encode(texts)
+        last_hidden = self.forward(encoded)
+        pooled = _mean_pool_l2_numpy(last_hidden, encoded["attention_mask"])
+        return [row.tolist() for row in pooled]
 
 
 class HungarianEmbeddingService:
@@ -114,23 +261,148 @@ class HungarianEmbeddingService:
         # Guards lazy model loading so concurrent thread-pool workers never
         # observe a half-initialized model (assigned but not yet .to()/.eval()).
         self._model_load_lock = threading.Lock()
+        self._onnx_backend: Optional[_OnnxEmbeddingBackend] = None
 
-        if TORCH_AVAILABLE:
+        # Decide WHICH backend to use now (cheap: an env read + two stat calls).
+        # Actually LOADING it stays lazy - see _load_onnx_backend /
+        # _load_hubert_model - so process boot never waits on a ~440 MB model
+        # and the Railway healthcheck window is unaffected.
+        self._backend_name = self._select_backend_name()
+
+        if self._backend_name == "torch":
             self._device = self._detect_device()
             self._use_fp16 = self._device.type == "cuda"  # FP16 only on CUDA
             self._optimal_batch_size = self._get_optimal_batch_size()
             logger.info(
-                f"HungarianEmbeddingService initialized: device={self._device}, "
-                f"fp16={self._use_fp16}, batch_size={self._optimal_batch_size}"
+                f"HungarianEmbeddingService initialized: backend=torch, "
+                f"device={self._device}, fp16={self._use_fp16}, "
+                f"batch_size={self._optimal_batch_size}"
+            )
+        elif self._backend_name == "onnx":
+            self._device = None
+            self._use_fp16 = False
+            self._optimal_batch_size = self.BATCH_SIZE_CPU
+            logger.info(
+                "HungarianEmbeddingService initialized: backend=onnx (ONNX Runtime fp32, "
+                "no torch/transformers), model=%s, batch_size=%d",
+                settings.HUBERT_ONNX_PATH,
+                self._optimal_batch_size,
             )
         else:
             self._device = None
             self._use_fp16 = False
-            self._optimal_batch_size = 16
-            logger.warning(
-                "HungarianEmbeddingService initialized WITHOUT torch - "
-                "embedding generation disabled, using pre-computed vectors only"
+            self._optimal_batch_size = self.BATCH_SIZE_CPU
+            logger.error(
+                "HungarianEmbeddingService initialized with NO embedding backend "
+                "(EMBEDDING_BACKEND=%s, onnxruntime=%s, onnx_model=%s, torch=%s). "
+                "Semantic search is DISABLED and embed calls will raise "
+                "EmbeddingUnavailableError - they will NOT return a zero vector.",
+                settings.EMBEDDING_BACKEND,
+                ONNX_RUNTIME_AVAILABLE,
+                settings.HUBERT_ONNX_PATH,
+                TORCH_AVAILABLE,
             )
+
+    @staticmethod
+    def _onnx_artifacts_present() -> bool:
+        """True if onnxruntime/tokenizers are installed AND both artifacts exist."""
+        if not ONNX_RUNTIME_AVAILABLE:
+            return False
+        return (
+            Path(settings.HUBERT_ONNX_PATH).is_file() and Path(settings.HUBERT_VOCAB_PATH).is_file()
+        )
+
+    def _select_backend_name(self) -> Optional[str]:
+        """
+        Resolve the inference backend from ``settings.EMBEDDING_BACKEND``.
+
+        Order for "auto": ONNX (production image) -> torch (dev/indexer) -> none.
+
+        Returns:
+            Optional[str]: "onnx", "torch", or None when nothing is available.
+            None is NOT a fallback that produces vectors - it makes every embed
+            call raise :class:`EmbeddingUnavailableError`.
+        """
+        mode = (settings.EMBEDDING_BACKEND or "auto").strip().lower()
+
+        if mode == "disabled":
+            return None
+        if mode == "onnx":
+            return "onnx" if self._onnx_artifacts_present() else None
+        if mode == "torch":
+            return "torch" if TORCH_AVAILABLE else None
+
+        # "auto" (and any unrecognised value, which we treat as auto but flag)
+        if mode != "auto":
+            logger.warning("Unknown EMBEDDING_BACKEND=%r - falling back to 'auto' selection.", mode)
+        if self._onnx_artifacts_present():
+            return "onnx"
+        if TORCH_AVAILABLE:
+            return "torch"
+        return None
+
+    @property
+    def backend_name(self) -> Optional[str]:
+        """Active inference backend ("onnx", "torch") or None when unavailable."""
+        return self._backend_name
+
+    def _require_backend(self) -> str:
+        """
+        Return the active backend name or raise.
+
+        Raises:
+            EmbeddingUnavailableError: when no backend is available. This
+                REPLACES the old ``return [0.0] * 768`` silent fallback.
+        """
+        if self._backend_name is None:
+            raise EmbeddingUnavailableError(
+                "No embedding backend available (EMBEDDING_BACKEND="
+                f"{settings.EMBEDDING_BACKEND!r}, onnxruntime={ONNX_RUNTIME_AVAILABLE}, "
+                f"torch={TORCH_AVAILABLE}). Semantic search is DISABLED - "
+                "refusing to emit a zero vector.",
+                details={
+                    "embedding_backend_setting": settings.EMBEDDING_BACKEND,
+                    "onnxruntime_available": ONNX_RUNTIME_AVAILABLE,
+                    "torch_available": TORCH_AVAILABLE,
+                    "onnx_model_path": settings.HUBERT_ONNX_PATH,
+                },
+            )
+        return self._backend_name
+
+    def _load_onnx_backend(self) -> _OnnxEmbeddingBackend:
+        """
+        Lazily build the ONNX Runtime session (double-checked locking).
+
+        Cold session creation was measured at ~0.9 s; it happens on the first
+        embed call, never at import or process boot.
+        """
+        backend = self._onnx_backend
+        if backend is not None:
+            return backend
+
+        with self._model_load_lock:
+            if self._onnx_backend is not None:
+                return self._onnx_backend
+            logger.info("Loading ONNX huBERT graph: %s", settings.HUBERT_ONNX_PATH)
+            try:
+                backend = _OnnxEmbeddingBackend(
+                    model_path=settings.HUBERT_ONNX_PATH,
+                    vocab_path=settings.HUBERT_VOCAB_PATH,
+                    threads=settings.EMBEDDING_ORT_THREADS,
+                )
+            except EmbeddingUnavailableError:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to load ONNX huBERT graph: {e}")
+                raise EmbeddingUnavailableError(
+                    f"Could not load the ONNX huBERT graph: {e}",
+                    details={"onnx_model_path": settings.HUBERT_ONNX_PATH},
+                    original_error=e,
+                ) from e
+            # Publish only after full construction, like the torch path.
+            self._onnx_backend = backend
+            logger.info("ONNX huBERT graph loaded (fp32, CPUExecutionProvider)")
+            return backend
 
     def _detect_device(self):
         """
@@ -357,20 +629,29 @@ class HungarianEmbeddingService:
             preprocess: Whether to apply Hungarian preprocessing first.
 
         Returns:
-            List[float]: 768-dimensional embedding vector.
-        """
-        if not TORCH_AVAILABLE:
-            logger.warning("torch not available - returning zero vector")
-            return [0.0] * settings.EMBEDDING_DIMENSION
+            List[float]: 768-dimensional, L2-normalized embedding vector.
+            The only zero vector this can return is for empty input (see below).
 
-        self._load_hubert_model()
+        Raises:
+            EmbeddingUnavailableError: If no inference backend is available.
+                Deliberately NOT a zero vector - see the module docstring.
+        """
+        backend = self._require_backend()
 
         if preprocess:
             text = self.preprocess_hungarian(text)
 
         if not text or not text.strip():
-            # Return zero vector for empty text
+            # Empty input has no semantic content. This zero vector is defensible
+            # on the INDEXING side (an empty record must not get a random point);
+            # on the query side callers must not search with it, and
+            # QdrantService.search() rejects it via the norm guard.
             return [0.0] * settings.EMBEDDING_DIMENSION
+
+        if backend == "onnx":
+            return self._load_onnx_backend().embed([text])[0]
+
+        self._load_hubert_model()
 
         # Tokenize
         if self._tokenizer is None:
@@ -378,7 +659,11 @@ class HungarianEmbeddingService:
         if self._model is None:
             raise RuntimeError("Model not loaded")
         encoded = self._tokenizer(
-            text, padding=True, truncation=True, max_length=512, return_tensors="pt"
+            text,
+            padding=True,
+            truncation=True,
+            max_length=MAX_SEQUENCE_LENGTH,
+            return_tensors="pt",
         )
 
         # Move to device
@@ -421,15 +706,18 @@ class HungarianEmbeddingService:
 
         Returns:
             List[List[float]]: List of 768-dimensional embedding vectors.
+
+        Raises:
+            EmbeddingUnavailableError: If no inference backend is available.
+                Deliberately NOT a list of zero vectors.
         """
-        if not TORCH_AVAILABLE:
-            logger.warning("torch not available - returning zero vectors")
-            return [[0.0] * settings.EMBEDDING_DIMENSION for _ in texts]
-
-        self._load_hubert_model()
-
         if not texts:
             return []
+
+        self._require_backend()
+
+        if self._backend_name == "torch":
+            self._load_hubert_model()
 
         # Use optimal batch size if not specified
         if batch_size is None:
@@ -480,11 +768,39 @@ class HungarianEmbeddingService:
                 batch_size,
             )
 
-        # Cleanup GPU memory after large batches
-        if len(texts) > batch_size * 4:
+        # Cleanup GPU memory after large batches (torch backend only)
+        if self._device is not None and len(texts) > batch_size * 4:
             self._cleanup_gpu_memory()
 
         return all_embeddings
+
+    def _embed_batch_onnx(
+        self,
+        texts_with_indices: List[Tuple[int, str]],
+        results: List[List[float]],
+        batch_size: int,
+    ) -> None:
+        """
+        ONNX Runtime batch path - mirrors the torch path's batching semantics.
+
+        Empty/whitespace texts are skipped (they keep their zero-vector slot,
+        exactly as in the torch path) so the tokenizer never sees them.
+        """
+        backend = self._load_onnx_backend()
+
+        for i in range(0, len(texts_with_indices), batch_size):
+            batch = texts_with_indices[i : i + batch_size]
+            non_empty_items = [(idx, text) for idx, text in batch if text and text.strip()]
+            if not non_empty_items:
+                continue
+
+            indices = [item[0] for item in non_empty_items]
+            batch_texts = [item[1] for item in non_empty_items]
+
+            for orig_idx, embedding in zip(indices, backend.embed(batch_texts)):
+                results[orig_idx] = embedding
+
+            logger.debug(f"ONNX batch {i // batch_size + 1}: {len(batch_texts)} texts embedded")
 
     def _embed_batch_internal(
         self,
@@ -495,11 +811,18 @@ class HungarianEmbeddingService:
         """
         Internal batch embedding with optimized processing.
 
+        Dispatches to the active backend; both produce vectors in the same
+        embedding space because pooling and L2 normalization are shared.
+
         Args:
             texts_with_indices: List of (original_index, text) tuples.
             results: Results list to populate in-place.
             batch_size: Batch size for processing.
         """
+        if self._require_backend() == "onnx":
+            self._embed_batch_onnx(texts_with_indices, results, batch_size)
+            return
+
         # Add GPU memory cleanup before processing
         if self._device.type in ("cuda", "mps"):
             self._cleanup_gpu_memory()
@@ -523,7 +846,11 @@ class HungarianEmbeddingService:
             if self._model is None:
                 raise RuntimeError("Model not loaded")
             encoded = self._tokenizer(
-                batch_texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
+                batch_texts,
+                padding=True,
+                truncation=True,
+                max_length=MAX_SEQUENCE_LENGTH,
+                return_tensors="pt",
             )
 
             # Move to device with correct dtype
@@ -626,21 +953,32 @@ class HungarianEmbeddingService:
 
     @property
     def is_model_loaded(self) -> bool:
-        """Check if the huBERT model is loaded."""
+        """Check if an inference backend is loaded and ready."""
+        if self._backend_name == "onnx":
+            return self._onnx_backend is not None
         return self._model is not None and self._tokenizer is not None
 
     def warmup(self) -> None:
         """
         Warm up the service by loading all models.
 
-        Call this at application startup to avoid cold start latency.
+        Call this explicitly (e.g. from a background task) if you want to pay
+        the model-load cost up front. It is deliberately NOT called from the
+        FastAPI lifespan: the Railway healthcheck has a 100 s budget and the
+        boot path must not wait on a ~440 MB graph.
         """
-        if not TORCH_AVAILABLE:
-            logger.warning("Skipping warmup - torch not available")
+        if self._backend_name is None:
+            logger.error(
+                "Skipping warmup - no embedding backend available. "
+                "Semantic search will raise EmbeddingUnavailableError."
+            )
             return
 
-        logger.info("Warming up HungarianEmbeddingService...")
-        self._load_hubert_model()
+        logger.info("Warming up HungarianEmbeddingService (backend=%s)...", self._backend_name)
+        if self._backend_name == "onnx":
+            self._load_onnx_backend()
+        else:
+            self._load_hubert_model()
 
         if SPACY_AVAILABLE:
             self._load_huspacy_model()
@@ -658,13 +996,97 @@ class HungarianEmbeddingService:
         )
 
         logger.info(
-            f"HungarianEmbeddingService warmup complete: "
+            f"HungarianEmbeddingService warmup complete: backend={self._backend_name}, "
             f"device={self._device}, batch_size={self._optimal_batch_size}"
         )
+
+    # Fixed Hungarian probe sentence for the health self-test. Kept constant so
+    # the produced vector is comparable across deploys.
+    SELF_TEST_TEXT = "A motor rangat gyorsitaskor."
+
+    def self_test(self) -> Dict[str, Any]:
+        """
+        Prove the embedding path can actually produce a usable vector.
+
+        This is the third layer of the "never a silent zero vector" guard: the
+        health endpoint calls it, so an unavailable or degenerate embedding
+        backend is visible from outside the process instead of only showing up
+        as mysteriously empty semantic search results.
+
+        Returns:
+            Dict[str, Any]: ``status`` is one of:
+                - "ok"          - backend produced a unit-norm 768-dim vector
+                - "degraded"    - backend answered, but the vector is wrong
+                                  (zero norm, wrong dimension, non-finite)
+                - "unavailable" - no backend at all / it failed to load
+        """
+        result: Dict[str, Any] = {
+            "backend": self._backend_name,
+            "model": settings.HUBERT_MODEL,
+            "revision": settings.HUBERT_REVISION,
+            "configured_backend": settings.EMBEDDING_BACKEND,
+            "dimension": settings.EMBEDDING_DIMENSION,
+        }
+
+        try:
+            vector = self.embed_text(self.SELF_TEST_TEXT)
+        except EmbeddingUnavailableError as e:
+            result["status"] = "unavailable"
+            result["error"] = e.message
+            return result
+        except Exception as e:  # pragma: no cover - defensive
+            result["status"] = "unavailable"
+            result["error"] = f"{type(e).__name__}: {e}"
+            return result
+
+        norm = float(np.linalg.norm(np.asarray(vector, dtype=np.float64)))
+        result["self_test_norm"] = round(norm, 6)
+        result["self_test_dimension"] = len(vector)
+
+        if (
+            len(vector) != settings.EMBEDDING_DIMENSION
+            or not np.isfinite(norm)
+            or abs(norm - 1.0) > 1e-4
+        ):
+            result["status"] = "degraded"
+            result["error"] = (
+                f"Self-test vector is not unit-length 768-dim (dim={len(vector)}, norm={norm})."
+            )
+            return result
+
+        result["status"] = "ok"
+        return result
 
     # =========================================================================
     # Async Methods (for use in async contexts)
     # =========================================================================
+
+    def _cache_namespace(self, text: str) -> str:
+        """
+        Namespace the Redis embedding cache key.
+
+        ``redis_cache._embedding_cache_key`` already salts with
+        ``HUBERT_MODEL@HUBERT_REVISION``; this adds the two things it cannot
+        know about:
+
+        - ``EMBEDDING_CACHE_VERSION`` - bumped whenever the produced vectors
+          could change. This is what retires the poisoned ``[0.0] * 768``
+          entries the pre-ONNX production build wrote: they simply become
+          unreachable the moment the new image boots. No `SCAN`+`DEL` of
+          ``embed:*``, no operator step, no hour-long window where the fix looks
+          like it did not work.
+        - the active backend name, so a torch-produced and an ONNX-produced
+          vector can never be served for one another. (They were measured
+          equivalent to cos >= 0.9999991, so this is belt-and-braces - but it is
+          one string concat, and it makes a backend swap self-invalidating.)
+
+        Args:
+            text: The raw text the caller asked to embed.
+
+        Returns:
+            str: The namespaced key material handed to the cache service.
+        """
+        return f"{EMBEDDING_CACHE_VERSION}|{self._backend_name or 'none'}|{text}"
 
     async def embed_text_async(
         self,
@@ -684,14 +1106,19 @@ class HungarianEmbeddingService:
 
         Returns:
             List[float]: 768-dimensional embedding vector.
+
+        Raises:
+            EmbeddingUnavailableError: If no inference backend is available.
         """
+        cache_key_text = self._cache_namespace(text)
+
         # Check cache first
         if use_cache and self._cache_enabled:
             try:
                 from app.db.redis_cache import get_cache_service
 
                 cache = await get_cache_service()
-                cached = await cache.get_embedding(text)
+                cached = await cache.get_embedding(cache_key_text)
                 if cached is not None:
                     return cached
             except Exception:
@@ -709,7 +1136,7 @@ class HungarianEmbeddingService:
                 from app.db.redis_cache import get_cache_service
 
                 cache = await get_cache_service()
-                await cache.set_embedding(text, embedding)
+                await cache.set_embedding(cache_key_text, embedding)
             except Exception:
                 pass  # Don't fail on cache error
 
@@ -746,7 +1173,7 @@ class HungarianEmbeddingService:
                 from app.db.redis_cache import get_cache_service
 
                 cache = await get_cache_service()
-                cached = await cache.get_embeddings_batch(texts)
+                cached = await cache.get_embeddings_batch([self._cache_namespace(t) for t in texts])
 
                 for i, (text, emb) in enumerate(zip(texts, cached)):
                     if emb is not None:
@@ -794,7 +1221,7 @@ class HungarianEmbeddingService:
                     # round-trip per text (the client exposes no batched setter).
                     await asyncio.gather(
                         *(
-                            cache.set_embedding(text, emb)
+                            cache.set_embedding(self._cache_namespace(text), emb)
                             for text, emb in zip(uncached_texts, embeddings)
                         )
                     )
@@ -827,6 +1254,16 @@ def get_embedding_service() -> HungarianEmbeddingService:
     if _embedding_service is None:
         _embedding_service = HungarianEmbeddingService()
     return _embedding_service
+
+
+def embedding_self_test() -> Dict[str, Any]:
+    """
+    Run the embedding backend self-test (used by ``/health/detailed``).
+
+    Returns:
+        Dict[str, Any]: See :meth:`HungarianEmbeddingService.self_test`.
+    """
+    return get_embedding_service().self_test()
 
 
 # Convenience functions for direct usage

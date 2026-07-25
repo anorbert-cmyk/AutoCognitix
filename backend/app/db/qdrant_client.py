@@ -5,6 +5,7 @@ This module provides a service class for interacting with Qdrant vector database
 supporting both local and cloud deployments with Hungarian error messages.
 """
 
+import math
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,63 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Minimum L2 norm a query vector must have to be worth searching with.
+# Cosine distance normalizes the query vector, so a (near-)zero-norm vector
+# degenerates to "every dot product is 0.0": it does not return BAD results, it
+# returns MEANINGLESS ones - silently. That exact failure hid a broken
+# production embedding path for months, so it is now a hard error at the gate.
+MIN_QUERY_VECTOR_NORM = 1e-6
+
+
+def _validate_query_vector(query_vector: List[float], collection_name: str) -> None:
+    """
+    Reject a degenerate query vector before it reaches Qdrant.
+
+    A zero (or near-zero) vector is type-correct and dimension-correct, so every
+    downstream check passes it - but under cosine distance every score collapses
+    to 0.0 and any ``score_threshold`` turns the result into an empty list. That
+    looks exactly like "no matches" and is indistinguishable from a healthy
+    query, which is why the broken embedding path stayed invisible for months.
+
+    Raises ``ValueError`` rather than a ``QdrantException``: nothing is wrong
+    with Qdrant, the caller handed us an invalid vector. Every call site already
+    wraps searches in a broad ``except Exception`` that degrades to the lexical /
+    graph path, so this fails loudly in the logs without 500-ing an endpoint.
+
+    Args:
+        query_vector: The vector about to be searched with.
+        collection_name: Target collection (for the error/log message only).
+
+    Raises:
+        ValueError: If the vector is empty, non-finite, or has norm < 1e-6.
+    """
+    if not query_vector:
+        logger.error(
+            "Rejected EMPTY query vector for collection %s - refusing to run a "
+            "meaningless similarity search.",
+            collection_name,
+        )
+        raise ValueError(
+            f"Empty query vector for collection '{collection_name}'; "
+            "refusing to run a similarity search."
+        )
+
+    norm = math.sqrt(math.fsum(float(v) * float(v) for v in query_vector))
+
+    if not math.isfinite(norm) or norm < MIN_QUERY_VECTOR_NORM:
+        logger.error(
+            "Rejected degenerate query vector for collection %s (norm=%r, dim=%d). "
+            "A zero-norm vector matches nothing under cosine distance - this "
+            "usually means the embedding backend is unavailable.",
+            collection_name,
+            norm,
+            len(query_vector),
+        )
+        raise ValueError(
+            f"Degenerate query vector (norm={norm!r}) for collection "
+            f"'{collection_name}'; refusing to run a similarity search."
+        )
 
 
 class QdrantService:
@@ -185,7 +243,14 @@ class QdrantService:
 
         Returns:
             List of search results with scores and payloads
+
+        Raises:
+            ValueError: If ``query_vector`` is empty or (near-)zero-norm. This is
+                the last line of defence against a degenerate vector reaching a
+                similarity search - see :data:`MIN_QUERY_VECTOR_NORM`.
         """
+        _validate_query_vector(query_vector, collection_name)
+
         # Build the must filter list
         must_conditions: List[qdrant_models.FieldCondition] = []
 

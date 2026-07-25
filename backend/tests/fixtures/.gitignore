@@ -1,0 +1,7 @@
+# The repo-root .gitignore excludes `*.json` (and `*.txt`) as "large data files".
+# These fixtures are neither: they are the FROZEN reference vectors that pin the
+# huBERT embedding space, and the whole point of them is that they live in git.
+# Without this negation they would silently never be committed and
+# tests/unit/test_embedding_backends.py would fail on a fresh clone.
+!*.json
+!*.txt
