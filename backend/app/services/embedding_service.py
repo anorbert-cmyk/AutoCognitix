@@ -152,6 +152,20 @@ def _mean_pool_l2_numpy(last_hidden: np.ndarray, attention_mask: np.ndarray) -> 
     return np.asarray(pooled / norms, dtype=np.float32)
 
 
+def _is_degenerate_embedding(vector: Optional[List[float]]) -> bool:
+    """
+    True for a missing or all-zero vector.
+
+    A zero vector is dimension-correct and mathematically meaningless: it is what
+    empty input produces, and it is what the ``v2`` cache-namespace bump was
+    meant to purge. Nothing degenerate may be cached or returned as a real
+    embedding, whoever produced it.
+    """
+    if not vector:
+        return True
+    return not any(vector)
+
+
 class _OnnxEmbeddingBackend:
     """
     ONNX Runtime fp32 forward pass for huBERT - torch-free and transformers-free.
@@ -197,16 +211,31 @@ class _OnnxEmbeddingBackend:
         # Pad to the longest sequence in the batch == transformers' padding=True.
         self._tokenizer.enable_padding()
 
-    def encode(self, texts: List[str]) -> Dict[str, np.ndarray]:
-        """Tokenize a batch exactly like ``padding=True, truncation=True, max_length=512``."""
+    def tokenize(self, texts: List[str]) -> Dict[str, np.ndarray]:
+        """
+        Tokenize a batch exactly like ``padding=True, truncation=True, max_length=512``.
+
+        Returns the COMPLETE tokenizer output, independent of what the exported
+        graph declares. The attention mask belongs to pooling, which happens
+        outside the model, so it must survive even when the graph does not
+        declare it as an input (``do_constant_folding=True`` traced on an
+        all-ones mask folds that input away - the very case
+        :meth:`graph_inputs` exists to tolerate).
+        """
         encodings = self._tokenizer.encode_batch(texts)
-        encoded = {
+        return {
             "input_ids": np.array([e.ids for e in encodings], dtype=np.int64),
             "attention_mask": np.array([e.attention_mask for e in encodings], dtype=np.int64),
             "token_type_ids": np.array([e.type_ids for e in encodings], dtype=np.int64),
         }
-        # Only feed inputs the exported graph actually declares.
+
+    def graph_inputs(self, encoded: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """Keep only the tensors the exported graph actually declares as inputs."""
         return {k: v for k, v in encoded.items() if k in self._input_names}
+
+    def encode(self, texts: List[str]) -> Dict[str, np.ndarray]:
+        """Tokenize and return the feed dict for :meth:`forward` (graph inputs only)."""
+        return self.graph_inputs(self.tokenize(texts))
 
     def forward(self, encoded: Dict[str, np.ndarray]) -> np.ndarray:
         """Run the graph and return (batch, seq, dim) last_hidden_state."""
@@ -215,8 +244,8 @@ class _OnnxEmbeddingBackend:
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         """Tokenize -> forward -> shared pooling/normalization -> plain lists."""
-        encoded = self.encode(texts)
-        last_hidden = self.forward(encoded)
+        encoded = self.tokenize(texts)
+        last_hidden = self.forward(self.graph_inputs(encoded))
         pooled = _mean_pool_l2_numpy(last_hidden, encoded["attention_mask"])
         return [row.tolist() for row in pooled]
 
@@ -241,8 +270,10 @@ class HungarianEmbeddingService:
     """
 
     _instance: Optional["HungarianEmbeddingService"] = None
-    _lock: threading.Lock = threading.Lock()
-    _initialized: bool = False
+    # Re-entrant on purpose: __new__ takes this lock and __init__ takes it again
+    # on the same thread (and get_embedding_service() wraps both). A plain
+    # threading.Lock would self-deadlock.
+    _lock = threading.RLock()
 
     # Optimal batch sizes by device type
     BATCH_SIZE_GPU = 64
@@ -251,6 +282,30 @@ class HungarianEmbeddingService:
 
     # Memory threshold for GPU cleanup (bytes)
     GPU_MEMORY_THRESHOLD = 0.8  # 80% utilization triggers cleanup
+
+    # Class-level defaults for every attribute the instance methods read.
+    # ``_initialized`` is the single publish point (see __init__); the rest exist
+    # so that a read on a not-yet-initialised instance can never raise
+    # AttributeError. That matters beyond tidiness: AttributeError is not
+    # EmbeddingUnavailableError, so it bypasses the dedicated handler in
+    # rag_service.retrieve_from_qdrant and degrades semantic search silently.
+    # With ``_backend_name = None`` the same situation raises the handled,
+    # logged, Sentry-visible EmbeddingUnavailableError instead.
+    _initialized: bool = False
+    _backend_name: Optional[str] = None
+    _device: Any = None
+    _use_fp16: bool = False
+    _optimal_batch_size: int = BATCH_SIZE_CPU
+    _cache_enabled: bool = True
+    _tokenizer: Any = None
+    _model: Any = None
+    _nlp: Any = None
+    _onnx_backend: Optional["_OnnxEmbeddingBackend"] = None
+    # Guards lazy model loading so concurrent thread-pool workers never observe
+    # a half-initialized model (assigned but not yet .to()/.eval()). Class-level
+    # so it exists before any instance is constructed - the singleton has exactly
+    # one instance, so per-class and per-instance are equivalent here.
+    _model_load_lock = threading.Lock()
 
     def __new__(cls) -> "HungarianEmbeddingService":
         """Thread-safe singleton pattern to avoid loading model multiple times."""
@@ -262,59 +317,75 @@ class HungarianEmbeddingService:
         return cls._instance
 
     def __init__(self) -> None:
-        """Initialize the embedding service with models."""
+        """
+        Initialize the embedding service with models.
+
+        Initialisation is ATOMIC: the whole body runs under the class lock and
+        ``self._initialized = True`` is the LAST statement. Publishing it first
+        (as this used to) let a second thread take the early-return path and use
+        an instance whose ``_backend_name`` had not been assigned yet -
+        reproduced as ``AttributeError: 'HungarianEmbeddingService' object has no
+        attribute '_backend_name'`` when ``/health/detailed`` self-tests while a
+        request embeds. Any attribute added below MUST stay above the publish.
+        """
         if self._initialized:
             return
 
-        self._initialized = True
-        self._tokenizer = None
-        self._model = None
-        self._nlp = None  # Optional spacy.Language
-        self._cache_enabled = True
-        # Guards lazy model loading so concurrent thread-pool workers never
-        # observe a half-initialized model (assigned but not yet .to()/.eval()).
-        self._model_load_lock = threading.Lock()
-        self._onnx_backend: Optional[_OnnxEmbeddingBackend] = None
+        with self._lock:
+            # Re-check under the lock: both threads can pass the fast path above,
+            # and the loser must not re-run initialisation.
+            if self._initialized:
+                return
 
-        # Decide WHICH backend to use now (cheap: an env read + two stat calls).
-        # Actually LOADING it stays lazy - see _load_onnx_backend /
-        # _load_hubert_model - so process boot never waits on a ~440 MB model
-        # and the Railway healthcheck window is unaffected.
-        self._backend_name = self._select_backend_name()
+            self._tokenizer = None
+            self._model = None
+            self._nlp = None  # Optional spacy.Language
+            self._cache_enabled = True
+            self._onnx_backend = None
 
-        if self._backend_name == "torch":
-            self._device = self._detect_device()
-            self._use_fp16 = self._device.type == "cuda"  # FP16 only on CUDA
-            self._optimal_batch_size = self._get_optimal_batch_size()
-            logger.info(
-                f"HungarianEmbeddingService initialized: backend=torch, "
-                f"device={self._device}, fp16={self._use_fp16}, "
-                f"batch_size={self._optimal_batch_size}"
-            )
-        elif self._backend_name == "onnx":
-            self._device = None
-            self._use_fp16 = False
-            self._optimal_batch_size = self.BATCH_SIZE_CPU
-            logger.info(
-                "HungarianEmbeddingService initialized: backend=onnx (ONNX Runtime fp32, "
-                "no torch/transformers), model=%s, batch_size=%d",
-                settings.HUBERT_ONNX_PATH,
-                self._optimal_batch_size,
-            )
-        else:
-            self._device = None
-            self._use_fp16 = False
-            self._optimal_batch_size = self.BATCH_SIZE_CPU
-            logger.error(
-                "HungarianEmbeddingService initialized with NO embedding backend "
-                "(EMBEDDING_BACKEND=%s, onnxruntime=%s, onnx_model=%s, torch=%s). "
-                "Semantic search is DISABLED and embed calls will raise "
-                "EmbeddingUnavailableError - they will NOT return a zero vector.",
-                settings.EMBEDDING_BACKEND,
-                ONNX_RUNTIME_AVAILABLE,
-                settings.HUBERT_ONNX_PATH,
-                TORCH_AVAILABLE,
-            )
+            # Decide WHICH backend to use now (cheap: an env read + two stat
+            # calls). Actually LOADING it stays lazy - see _load_onnx_backend /
+            # _load_hubert_model - so process boot never waits on a ~440 MB model
+            # and the Railway healthcheck window is unaffected.
+            backend_name = self._select_backend_name()
+
+            if backend_name == "torch":
+                self._device = self._detect_device()
+                self._use_fp16 = self._device.type == "cuda"  # FP16 only on CUDA
+                self._optimal_batch_size = self._get_optimal_batch_size()
+                logger.info(
+                    f"HungarianEmbeddingService initialized: backend=torch, "
+                    f"device={self._device}, fp16={self._use_fp16}, "
+                    f"batch_size={self._optimal_batch_size}"
+                )
+            elif backend_name == "onnx":
+                self._device = None
+                self._use_fp16 = False
+                self._optimal_batch_size = self.BATCH_SIZE_CPU
+                logger.info(
+                    "HungarianEmbeddingService initialized: backend=onnx (ONNX Runtime fp32, "
+                    "no torch/transformers), model=%s, batch_size=%d",
+                    settings.HUBERT_ONNX_PATH,
+                    self._optimal_batch_size,
+                )
+            else:
+                self._device = None
+                self._use_fp16 = False
+                self._optimal_batch_size = self.BATCH_SIZE_CPU
+                logger.error(
+                    "HungarianEmbeddingService initialized with NO embedding backend "
+                    "(EMBEDDING_BACKEND=%s, onnxruntime=%s, onnx_model=%s, torch=%s). "
+                    "Semantic search is DISABLED and embed calls will raise "
+                    "EmbeddingUnavailableError - they will NOT return a zero vector.",
+                    settings.EMBEDDING_BACKEND,
+                    ONNX_RUNTIME_AVAILABLE,
+                    settings.HUBERT_ONNX_PATH,
+                    TORCH_AVAILABLE,
+                )
+
+            self._backend_name = backend_name
+            # PUBLISH LAST - nothing may be assigned after this line.
+            self._initialized = True
 
     @staticmethod
     def _onnx_artifacts_present() -> bool:
@@ -692,8 +763,8 @@ class HungarianEmbeddingService:
         # Normalize embedding
         embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
 
-        # Convert to list
-        return embedding.squeeze().cpu().tolist()
+        # Convert to list (torch is an untyped optional import -> Any)
+        return embedding.squeeze().cpu().tolist()  # type: ignore[no-any-return]
 
     def embed_batch(
         self,
@@ -718,10 +789,13 @@ class HungarianEmbeddingService:
             use_cache: Whether to use Redis cache for embeddings.
 
         Returns:
-            List[List[float]]: List of 768-dimensional embedding vectors.
+            List[List[float]]: One 768-dimensional vector per input text, in
+            order. The only zero vectors are those of empty/whitespace inputs
+            (same rule as :meth:`embed_text`).
 
         Raises:
-            EmbeddingUnavailableError: If no inference backend is available.
+            EmbeddingUnavailableError: If no inference backend is available, or
+                if the backend produced no vector for a non-empty text.
                 Deliberately NOT a list of zero vectors.
         """
         if not texts:
@@ -763,21 +837,23 @@ class HungarianEmbeddingService:
         else:
             texts_to_embed = [(i, t) for i, t in enumerate(texts)]
 
-        # Initialize result array
-        all_embeddings: List[List[float]] = [
-            [0.0] * settings.EMBEDDING_DIMENSION for _ in range(len(texts))
-        ]
+        # Slots start EMPTY, not zero-filled. A zero vector is a result (empty
+        # input has no semantic content), never a placeholder: seeding with zeros
+        # made "the backend skipped this text" indistinguishable from "this text
+        # was blank", so a silently short backend response used to be published,
+        # returned and cached as if it were a real embedding.
+        pending: List[Optional[List[float]]] = [None] * len(texts)
 
         # Fill in cached results
         for i, emb in enumerate(cached_embeddings):
             if emb is not None:
-                all_embeddings[i] = emb
+                pending[i] = emb
 
         # Process uncached texts in batches
         if texts_to_embed:
             self._embed_batch_internal(
                 texts_to_embed,
-                all_embeddings,
+                pending,
                 batch_size,
             )
 
@@ -785,19 +861,54 @@ class HungarianEmbeddingService:
         if self._device is not None and len(texts) > batch_size * 4:
             self._cleanup_gpu_memory()
 
+        return self._finalize_batch(texts, pending)
+
+    def _finalize_batch(
+        self,
+        texts: List[str],
+        pending: List[Optional[List[float]]],
+    ) -> List[List[float]]:
+        """
+        Turn the per-slot results into the returned vector list.
+
+        An unfilled slot is only acceptable for empty/whitespace input, which
+        embeds to the documented zero vector (same rule as :meth:`embed_text`:
+        an empty record must not get a random point, and
+        ``QdrantService.search()`` rejects a zero-norm query vector). An unfilled
+        slot for REAL text means the backend returned fewer rows than it was
+        given - that must raise, never quietly become a zero vector.
+
+        Raises:
+            EmbeddingUnavailableError: A non-empty text got no vector.
+        """
+        all_embeddings: List[List[float]] = []
+        for text, emb in zip(texts, pending):
+            if emb is not None:
+                all_embeddings.append(emb)
+                continue
+            if text and text.strip():
+                raise EmbeddingUnavailableError(
+                    "The embedding backend returned no vector for a non-empty text "
+                    f"(backend={self._backend_name!r}, batch={len(texts)}). "
+                    "Refusing to substitute a zero vector.",
+                    details={"backend": self._backend_name, "batch": len(texts)},
+                )
+            all_embeddings.append([0.0] * settings.EMBEDDING_DIMENSION)
+
         return all_embeddings
 
     def _embed_batch_onnx(
         self,
         texts_with_indices: List[Tuple[int, str]],
-        results: List[List[float]],
+        results: List[Optional[List[float]]],
         batch_size: int,
     ) -> None:
         """
         ONNX Runtime batch path - mirrors the torch path's batching semantics.
 
-        Empty/whitespace texts are skipped (they keep their zero-vector slot,
-        exactly as in the torch path) so the tokenizer never sees them.
+        Empty/whitespace texts are skipped (their slot stays ``None``, exactly as
+        in the torch path) so the tokenizer never sees them; ``embed_batch``
+        decides what an unfilled slot means.
         """
         backend = self._load_onnx_backend()
 
@@ -818,7 +929,7 @@ class HungarianEmbeddingService:
     def _embed_batch_internal(
         self,
         texts_with_indices: List[Tuple[int, str]],
-        results: List[List[float]],
+        results: List[Optional[List[float]]],
         batch_size: int,
     ) -> None:
         """
@@ -1143,8 +1254,10 @@ class HungarianEmbeddingService:
             _thread_pool, lambda: self.embed_text(text, preprocess)
         )
 
-        # Store in cache
-        if use_cache and self._cache_enabled:
+        # Store in cache - never a degenerate vector (empty input embeds to
+        # zeros; writing that under the v2 namespace re-poisons the cache the
+        # version bump was introduced to clean).
+        if use_cache and self._cache_enabled and not _is_degenerate_embedding(embedding):
             try:
                 from app.db.redis_cache import get_cache_service
 
@@ -1172,7 +1285,9 @@ class HungarianEmbeddingService:
             use_cache: Whether to use Redis cache.
 
         Returns:
-            List[Optional[List[float]]]: List of embedding vectors (None for failed entries).
+            List[Optional[List[float]]]: List of embedding vectors, ``None`` for
+            any entry with no real embedding (empty/whitespace input). Those
+            entries are not cached either.
         """
         if not texts:
             return []
@@ -1220,9 +1335,11 @@ class HungarianEmbeddingService:
                 ),
             )
 
-            # Fill in results
+            # Fill in results. A degenerate (all-zero) vector is reported as
+            # None - this method's contract is Optional precisely so a slot
+            # without a real embedding is not handed back as if it had one.
             for idx, emb in zip(uncached_indices, embeddings):
-                results[idx] = emb
+                results[idx] = None if _is_degenerate_embedding(emb) else emb
 
             # Cache new embeddings
             if use_cache and self._cache_enabled:
@@ -1232,10 +1349,13 @@ class HungarianEmbeddingService:
                     cache = await get_cache_service()
                     # Fire the cache writes concurrently instead of one serial
                     # round-trip per text (the client exposes no batched setter).
+                    # Degenerate vectors are excluded: caching them would write
+                    # [0.0]*768 back into the v2 namespace.
                     await asyncio.gather(
                         *(
                             cache.set_embedding(self._cache_namespace(text), emb)
                             for text, emb in zip(uncached_texts, embeddings)
+                            if not _is_degenerate_embedding(emb)
                         )
                     )
                 except Exception:
@@ -1261,12 +1381,21 @@ def get_embedding_service() -> HungarianEmbeddingService:
     Get the global embedding service instance.
 
     Returns:
-        HungarianEmbeddingService: The singleton embedding service instance.
+        HungarianEmbeddingService: The singleton embedding service instance,
+        guaranteed fully initialised (never a half-built one).
     """
     global _embedding_service
-    if _embedding_service is None:
-        _embedding_service = HungarianEmbeddingService()
-    return _embedding_service
+    service = _embedding_service
+    if service is not None:
+        return service
+
+    # Construct under the same re-entrant lock the class singleton uses, so this
+    # module-level global can never publish an instance another thread is still
+    # initialising either.
+    with HungarianEmbeddingService._lock:
+        if _embedding_service is None:
+            _embedding_service = HungarianEmbeddingService()
+        return _embedding_service
 
 
 def embedding_self_test() -> Dict[str, Any]:

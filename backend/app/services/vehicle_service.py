@@ -581,7 +581,7 @@ class VehicleService:
         model: str,
         year: Optional[int] = None,
         limit: int = _DEFAULT_COMMON_ISSUES_LIMIT,
-    ) -> List[Dict[str, Any]]:
+    ) -> Optional[List[Dict[str, Any]]]:
         """Get the most common DTC issues for a vehicle from the complaint graph.
 
         Aggregates the DTC codes mentioned across NHTSA complaints linked to the
@@ -590,28 +590,45 @@ class VehicleService:
         are enriched from the curated PostgreSQL DTC table when available, falling
         back to the graph node's own properties.
 
-        Degrades gracefully to an empty list on any Neo4j/driver error or when the
-        graph has no matching data - this endpoint must never surface a 500.
+        Degrades gracefully on any Neo4j/driver error - this endpoint must never
+        surface a 500 - but the two "nothing to show" outcomes are DISTINCT in the
+        return value, not merely in the logs:
 
-        Both paths return ``[]``, so they are only distinguishable in the logs: a
-        driver/query failure (outage, wrong NEO4J_URI/credentials, Aura free-tier
-        auto-pause) is logged at ERROR with the marker ``common-issues neo4j
-        QUERY FAILED``, while a genuine no-rows result is logged at INFO with
-        ``rows=0`` by ``_get_common_issues_neo4j``. Never collapse the two.
+        - ``[]``  the graph answered and has no matching row (genuine absence),
+          logged at INFO with ``rows=0`` by ``_get_common_issues_neo4j``.
+        - ``None`` the graph did not answer (outage, wrong NEO4J_URI/credentials,
+          Aura free-tier auto-pause), logged at ERROR with the marker
+          ``common-issues neo4j QUERY FAILED``.
+
+        Never collapse the two: the caller turns ``None`` into an explicit
+        ``sources.issues = "unavailable"`` on the wire, which is what stops the UI
+        from presenting an outage as a factual absence of data.
         """
+        make_clean = make.strip()
+        model_clean = model.strip()
+        if not make_clean or not model_clean:
+            # Same guard as the PostgreSQL sibling below, for the same reason:
+            # Cypher's `'golf gti' STARTS WITH ''` is true for EVERY row, so a
+            # blank model would rank the make's ENTIRE complaint history under the
+            # user's chosen model (and run an unbounded aggregation on the graph).
+            # A blank make is already inert (`_neo4j_make_variants("")` -> `[]`),
+            # but is rejected here too so both halves fail the same way.
+            # Genuine absence, not an outage: `[]`, never `None`.
+            return []
+
         try:
-            rows = await self._get_common_issues_neo4j(make, model, year, limit)
+            rows = await self._get_common_issues_neo4j(make_clean, model_clean, year, limit)
         except Exception as e:
             logger.error(
                 "common-issues neo4j QUERY FAILED (graph unreachable or query invalid) "
                 "make=%s model=%s year=%s error=%s: %s",
-                sanitize_log(make),
-                sanitize_log(model),
+                sanitize_log(make_clean),
+                sanitize_log(model_clean),
                 sanitize_log(str(year)),
                 type(e).__name__,
                 sanitize_exception(e),
             )
-            return []
+            return None
 
         if not rows:
             return []
@@ -734,7 +751,7 @@ class VehicleService:
         model: str,
         year: Optional[int] = None,
         limit: int = _DEFAULT_COMPONENTS_LIMIT,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> Tuple[Optional[List[Dict[str, Any]]], int]:
         """Rank a vehicle's NHTSA complaint components by report frequency.
 
         This is the *real* common-issues signal. The DTC-based ranking above can
@@ -749,10 +766,17 @@ class VehicleService:
         the ``limit`` returned ones), so ``share`` stays meaningful and a caller
         can tell "no data for this vehicle" from "data exists, list truncated".
 
-        Degrades gracefully: any PostgreSQL error logs at ERROR and returns
-        ``([], 0)`` - this endpoint must never surface a 500. A genuine no-rows
-        result logs at INFO with ``rows=0 total=0``. The two are only
-        distinguishable in the logs; never collapse them.
+        Degrades gracefully - this endpoint must never surface a 500 - and, like
+        its Neo4j sibling, keeps the two "nothing to show" outcomes DISTINCT in
+        the return value rather than only in the logs:
+
+        - ``([], 0)``   PostgreSQL answered and holds no complaint for this
+          vehicle (genuine absence), logged at INFO with ``rows=0 total=0``.
+        - ``(None, 0)`` PostgreSQL did not answer, logged at ERROR with the
+          marker ``common-issues components QUERY FAILED``.
+
+        Never collapse the two: the caller turns ``None`` into an explicit
+        ``sources.components = "unavailable"`` on the wire.
         """
         make_clean = make.strip()
         model_clean = model.strip()
@@ -760,6 +784,7 @@ class VehicleService:
             # A blank make/model is not a vehicle. Guarded explicitly because an
             # empty model would otherwise build the pattern "%" and aggregate the
             # make's ENTIRE complaint history under the user's chosen model.
+            # Genuine absence, not an outage: `[]`, never `None`.
             return [], 0
 
         try:
@@ -774,7 +799,7 @@ class VehicleService:
                 type(e).__name__,
                 sanitize_exception(e),
             )
-            return [], 0
+            return None, 0
 
         total = int(rows[0]["total_complaints"] or 0) if rows else 0
 

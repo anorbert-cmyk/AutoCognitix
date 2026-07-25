@@ -9,17 +9,24 @@
  *    alkatrészcsoport-rangsor). Az `issues` (DTC-kódok) lista a gráf ritka
  *    panasz→DTC kapcsolatai miatt a legtöbb járműnél ÜRES — ezért csak
  *    másodlagos, feltételesen megjelenő szekció, és üresen nyomtalanul eltűnik.
- * 2. A panaszkorpusz amerikai piaci NHTSA-adat, a márka/modell választó viszont
+ * 2. A két lista két FÜGGETLEN adatbázisból jön (PostgreSQL, illetve Neo4j), és
+ *    külön-külön esik üresre. Ezért az `issues` szekció akkor is megjelenik, ha a
+ *    `components` üres: az egyik forrás kiesése nem dobhatja el a másik valós
+ *    adatát.
+ * 3. A panaszkorpusz amerikai piaci NHTSA-adat, a márka/modell választó viszont
  *    európai gyártókat is kínál. A "nincs találat" eset NEM hiba: külön,
- *    őszintén megfogalmazott üres állapotot kap.
- * 3. A számok a NÁLUNK TÁROLT bejelentések mintáján alapulnak (az importáló
+ *    őszintén megfogalmazott üres állapotot kap — de CSAK akkor, ha a válasz
+ *    `sources` mezője szerint a forrás tényleg válaszolt. Kiesett forrásnál
+ *    (`'unavailable'`) az üres lista semmit nem bizonyít a járműről, ezért ott
+ *    "most nem elérhető" állapot jár újrapróbálással, nem adathiány-állítás.
+ * 4. A számok a NÁLUNK TÁROLT bejelentések mintáján alapulnak (az importáló
  *    márkánként és alkatrészcsoportonként korlátoz), ezért sehol nem hívjuk
  *    őket "összes bejelentés"-nek. Az elsődleges nagyságrend-jelző az arány
  *    (`share`), a nyers darabszám másodlagos.
- * 4. Alapértelmezés: MINDEN évjárat (a végpont `year` nélkül lényegesen
+ * 5. Alapértelmezés: MINDEN évjárat (a végpont `year` nélkül lényegesen
  *    gazdagabb eredményt ad). Évjáratra szűrni csak kifejezett kapcsolóval
  *    lehet.
- * 5. A `component_hu` lehet null — ilyenkor a nyers angol `component` címkére
+ * 6. A `component_hu` lehet null — ilyenkor a nyers angol `component` címkére
  *    esünk vissza, soha nem találgatunk fordítást.
  */
 
@@ -173,6 +180,13 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
   const issues = data?.issues ?? []
   const totalComplaints = data?.total_complaints ?? 0
 
+  // A `sources` POZITÍV jelzés: kizárólag az `'unavailable'` érték jelenti azt,
+  // hogy a forrás nem válaszolt. Minden más — beleértve a mező hiányát egy régi
+  // backend-válaszban — azt jelenti, hogy a forrás felelt, vagyis pontosan a
+  // mező bevezetése előtti viselkedést kapjuk vissza.
+  const componentsUnavailable = data?.sources?.components === 'unavailable'
+  const issuesUnavailable = data?.sources?.issues === 'unavailable'
+
   // ── Évjárat kapcsoló ────────────────────────────────────────────────────────
 
   const yearToggle = vehicleYear ? (
@@ -239,11 +253,37 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
     )
   }
 
-  // ── Üres állapotok ──────────────────────────────────────────────────────────
+  // ── Alkatrészcsoport-rangsor és üres állapotai ──────────────────────────────
 
-  if (components.length === 0) {
+  const hasComponents = components.length > 0
+
+  /**
+   * A `components` szekció: rangsor, vagy a hozzá tartozó üres/kiesett állapot.
+   *
+   * Szándékosan NEM korai `return` a komponensből: az `issues` lista önálló
+   * forrásból jön, és akkor is meg kell jelennie, ha ez a szekció üres.
+   */
+  const renderComponents = () => {
+    if (!hasComponents && componentsUnavailable) {
+      // A forrás nem válaszolt. Az üres lista itt az adat ELÉRÉSÉNEK hiánya, nem
+      // az adaté — tilos bármit tényként állítani a járműről.
+      return (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          {yearToggle}
+          <ErrorState
+            type="server"
+            title="A bejelentési adatok most nem elérhetők"
+            message="A bejelentéseket kiszolgáló adatbázis nem válaszolt, ezért most nem tudjuk megmutatni, mit jelentettek erről a járműről. Ez nem jelenti azt, hogy nincs adat — próbáld újra kicsit később."
+            onRetry={() => {
+              void refetch()
+            }}
+          />
+        </div>
+      )
+    }
+
     // Évjáratra szűrve nincs találat, de az összes évjárat nézetben lehet.
-    if (yearFilter !== undefined) {
+    if (!hasComponents && yearFilter !== undefined) {
       return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
           {yearToggle}
@@ -260,27 +300,26 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
       )
     }
 
-    // A tényleges "nincs adat" eset. Ez NEM hiba: a korpusz amerikai piaci
-    // NHTSA-adat, és a választható márkák egy része sosem került ki az USA-ba.
+    // A tényleges "nincs adat" eset — a forrás válaszolt, csak nincs mit mondania.
+    // Ez NEM hiba: a korpusz amerikai piaci NHTSA-adat, és a választható márkák
+    // egy része sosem került ki az USA-ba.
+    if (!hasComponents) {
+      return (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+          <EmptyState
+            icon={<Car className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
+            title="Erre a járműre nincs NHTSA-adat"
+            description="Az adatbázis amerikai piaci fogyasztói bejelentésekből áll, ez a modell pedig ott nem volt forgalomban."
+          />
+          <p className="mx-auto max-w-lg text-center text-sm text-slate-600 leading-relaxed">
+            Ez nem hiba és nem is jelent hibamentes járművet — csak annyit jelent, hogy erről a
+            modellről nincs amerikai bejelentés az adatbázisunkban.
+          </p>
+        </div>
+      )
+    }
+
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-        <EmptyState
-          icon={<Car className="h-6 w-6 text-muted-foreground" aria-hidden="true" />}
-          title="Erre a járműre nincs NHTSA-adat"
-          description="Az adatbázis amerikai piaci fogyasztói bejelentésekből áll, ez a modell pedig ott nem volt forgalomban."
-        />
-        <p className="mx-auto max-w-lg text-center text-sm text-slate-600 leading-relaxed">
-          Ez nem hiba és nem is jelent hibamentes járművet — csak annyit jelent, hogy erről a
-          modellről nincs amerikai bejelentés az adatbázisunkban.
-        </p>
-      </div>
-    )
-  }
-
-  // ── Tartalom ────────────────────────────────────────────────────────────────
-
-  return (
-    <section className="space-y-4" aria-labelledby="common-issues-heading">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Fejléc + kontextus */}
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
@@ -343,11 +382,28 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
           </p>
         </div>
       </div>
+    )
+  }
+
+  // ── Tartalom ────────────────────────────────────────────────────────────────
+
+  // A szekció neve a rangsor címéből jön, ha az látszik; egyébként állandó
+  // felirat, hogy soha ne maradjon lógó `aria-labelledby` hivatkozás.
+  const sectionLabel = hasComponents
+    ? { 'aria-labelledby': 'common-issues-heading' }
+    : { 'aria-label': 'Gyakori hibák' }
+
+  return (
+    <section className="space-y-4" {...sectionLabel}>
+      {renderComponents()}
 
       {/* ── Hibakódok (másodlagos) ──────────────────────────────────────────────
           A gráfban kevés a panasz→DTC kapcsolat, ezért ez a szekció a legtöbb
           járműnél egyáltalán nem jelenik meg. Üresen nem hagy maga után se
-          címet, se keretet — nem néz ki törött szekciónak. */}
+          címet, se keretet — nem néz ki törött szekciónak.
+
+          Saját forrásból jön, ezért a `components` üressége (vagy kiesése) nem
+          nyomja el: ha van kód, itt megjelenik. */}
       {issues.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100">
@@ -399,6 +455,22 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
             })}
           </ul>
         </div>
+      )}
+
+      {/* A hibakód-forrás kiesése: a hiányzó szekció önmagában semmit nem állít,
+          de az sem igaz, hogy nincs kód — ezt egy sorban, őszintén jelezzük.
+          Ha a másik forrás IS kiesett, a fenti nagy állapot már elmondta
+          ugyanezt, ezért ott nem ismételjük meg. */}
+      {issues.length === 0 && issuesUnavailable && !componentsUnavailable && (
+        <ErrorState
+          compact
+          type="server"
+          title="A hibakódok most nem elérhetők"
+          message="A kódokat kiszolgáló adatbázis nem válaszolt."
+          onRetry={() => {
+            void refetch()
+          }}
+        />
       )}
     </section>
   )

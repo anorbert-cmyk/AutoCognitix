@@ -15,12 +15,25 @@ And creates a unified graph with relationships.
 import asyncio
 import json
 import os
-import re
+import sys
 from pathlib import Path
 from datetime import datetime
 
 from neo4j import AsyncGraphDatabase
 from tqdm import tqdm
+
+# DTC extraction - canonical SAE J2012 rules live in
+# backend/app/core/dtc_codes.py and are IMPORTED, never copied. The pattern
+# that used to live here (r'\b[PCBU][0-9A-F]{4}\b') carried both historical
+# defects at once, and this script writes straight into Neo4j:
+#   - the too-loose hex tail matched ordinary words and manufacturer IDs
+#     (PEACE, PACED, U760E, PC861), which is how they became :DTC nodes;
+#   - the \b boundary matched "P3F25" inside the VIN fragment "1FADP3F25FL",
+#     because \b sits happily between a digit and a letter.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import extract_dtc_codes  # noqa: E402
 
 # Neo4j Aura connection - Load from environment variables
 # Set these in your .env file or export them before running
@@ -35,15 +48,7 @@ if not NEO4J_URI or not NEO4J_PASSWORD:
     print("Or set them in your .env file")
     sys.exit(1)
 
-DATA_DIR = Path(__file__).parent.parent / "data"
-
-
-def extract_dtc_codes(text: str) -> list[str]:
-    """Extract DTC codes from text (P0XXX, C0XXX, B0XXX, U0XXX pattern)."""
-    if not text:
-        return []
-    pattern = r'\b[PCBU][0-9A-F]{4}\b'
-    return list(set(re.findall(pattern, text.upper())))
+DATA_DIR = PROJECT_ROOT / "data"
 
 
 class Neo4jLoader:
@@ -67,7 +72,7 @@ class Neo4jLoader:
         async with self.driver.session() as session:
             result = await session.run("RETURN 1 AS test")
             await result.single()
-        print(f"✅ Connected to Neo4j Aura")
+        print("✅ Connected to Neo4j Aura")
 
     async def close(self):
         """Close connection."""

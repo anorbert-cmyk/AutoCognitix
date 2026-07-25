@@ -480,9 +480,12 @@ async def scrape_sitemap(client: httpx.AsyncClient) -> List[str]:
 
             for loc in soup.find_all("loc"):
                 url = loc.get_text(strip=True)
-                # Check for DTC code pattern
-                match = re.search(r'/dtc/([PCBU][0-9]{4})/?$', url, re.IGNORECASE)
-                if match:
+                # Pull the /dtc/<segment>, then let the canonical SAE J2012
+                # validator decide. The old inline r'/dtc/([PCBU][0-9]{4})/?$'
+                # was decimal-only, so hex codes (P26B7, P090C, P0A94, B00A0)
+                # never made it out of the sitemap.
+                match = re.search(r'/dtc/([A-Za-z][0-9A-Za-z]{4})/?$', url)
+                if match and validate_dtc_code(match.group(1)):
                     codes.append(match.group(1).upper())
 
         except Exception as e:

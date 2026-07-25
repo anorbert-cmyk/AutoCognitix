@@ -364,10 +364,24 @@ class TestDTCRelatedCodesEndpoint:
     @pytest.mark.asyncio
     async def test_related_codes_for_nonexistent_returns_404(self, async_client, seeded_db):
         """Test that nonexistent code returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999/related")
+        # Structurally valid but not seeded, matching the /{code} sibling.
+        # "P9999" fails SAE J2012 (second character must be 0-3) and is now a
+        # 400 on both endpoints - see the format test below.
+        response = await async_client.get("/api/v1/dtc/P3FFF/related")
 
         # Endpoint raises 404 when the base DTC code doesn't exist
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_related_codes_reject_the_same_formats_as_the_detail_endpoint(
+        self, async_client, seeded_db
+    ):
+        """/{code} and /{code}/related bind the same parameter and must agree."""
+        for code in ["INVALID", "X0101", "P01", "PEACE", "P9324", "P9999"]:
+            detail = await async_client.get(f"/api/v1/dtc/{code}")
+            related = await async_client.get(f"/api/v1/dtc/{code}/related")
+            assert detail.status_code == 400, f"Expected 400 for /{code}"
+            assert related.status_code == 400, f"Expected 400 for /{code}/related"
 
 
 class TestDTCCategoriesEndpoint:

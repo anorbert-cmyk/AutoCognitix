@@ -1049,17 +1049,22 @@ class TestGetVehicleCommonIssues:
         assert issues == []
 
     @pytest.mark.asyncio
-    async def test_neo4j_error_returns_empty_not_raise(self, service):
-        """Driver/query error degrades to [] so the endpoint never returns 500."""
+    async def test_neo4j_error_returns_none_not_raise(self, service):
+        """Driver/query error degrades to None so the endpoint never returns 500.
+
+        None (source did not answer), NOT [] (source answered, nothing to show):
+        the endpoint maps the two onto `sources.issues` so the UI can tell a
+        graph outage from a vehicle that genuinely has no DTC mentions.
+        """
         with patch("asyncio.to_thread", side_effect=Exception("Neo4j down")):
             issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
 
-        assert issues == []
+        assert issues is None
 
     @pytest.mark.asyncio
     async def test_neo4j_error_logs_at_error_level(self, service, caplog):
-        """A Neo4j outage must be greppable at ERROR, not silently indistinguishable
-        from 'no data' - both return 200/[] to the client.
+        """A Neo4j outage must be greppable at ERROR as well as visible in the
+        return value - the log is the operator's channel, None is the client's.
         """
         with (
             caplog.at_level(logging.INFO, logger="app.services.vehicle_service"),
@@ -1067,7 +1072,7 @@ class TestGetVehicleCommonIssues:
         ):
             issues = await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
 
-        assert issues == []  # contract unchanged: caller still gets an empty list
+        assert issues is None  # never raises; the caller still gets a value
 
         errors = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert len(errors) == 1
@@ -1107,12 +1112,33 @@ class TestGetVehicleCommonIssues:
         ):
             issues = await service.get_vehicle_common_issues("Mazda", "MX-5")
 
+        # [] not None: the graph ANSWERED, it just has nothing for this vehicle.
+        # This is the half of the pair that may be shown as an absence of data.
         assert issues == []
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
         infos = [r for r in caplog.records if "common-issues neo4j OK" in r.getMessage()]
         assert len(infos) == 1  # exactly one success marker - no double logging
         assert "rows=0" in infos[0].getMessage()
+
+    @pytest.mark.asyncio
+    async def test_blank_model_short_circuits_without_querying_the_graph(self, service):
+        """A blank model must never reach Cypher.
+
+        ``'golf gti' STARTS WITH ''`` is true for EVERY row, so an empty model is
+        not a narrower filter - it is no filter at all. Unguarded, this returned
+        the top DTC codes across the make's ENTIRE complaint history labelled as
+        the caller's model, off an unbounded aggregation on the graph. The
+        PostgreSQL sibling has always been guarded; this pins the Neo4j half.
+
+        Genuine absence, so ``[]`` (not ``None``): nothing was down.
+        """
+        with patch("asyncio.to_thread") as to_thread:
+            assert await service.get_vehicle_common_issues("Volkswagen", "   ") == []
+            assert await service.get_vehicle_common_issues("Volkswagen", "") == []
+            assert await service.get_vehicle_common_issues("   ", "Golf") == []
+
+        to_thread.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_postgres_enrichment_error_falls_back_to_graph(self, service):
@@ -1435,9 +1461,11 @@ class TestGetVehicleComplaintComponents:
         assert "total=0" in infos[0].getMessage()
 
     @pytest.mark.asyncio
-    async def test_db_error_returns_empty_and_logs_error(self, service, caplog):
-        """A PostgreSQL outage must degrade to ([], 0), never raise, and must be
-        distinguishable in the logs from a genuine empty result.
+    async def test_db_error_returns_none_and_logs_error(self, service, caplog):
+        """A PostgreSQL outage must degrade to (None, 0), never raise, and must be
+        distinguishable from a genuine empty result in the RETURN VALUE as well
+        as in the logs - the client cannot read our logs, and an empty list it
+        cannot explain is what made the UI claim the car was never sold in the US.
         """
         broken_ctx = AsyncMock()
         broken_ctx.__aenter__ = AsyncMock(side_effect=Exception("PG down"))
@@ -1451,7 +1479,7 @@ class TestGetVehicleComplaintComponents:
                 "Volkswagen", "Golf", year=2018
             )
 
-        assert components == []
+        assert components is None
         assert total == 0
 
         errors = [r for r in caplog.records if r.levelno == logging.ERROR]

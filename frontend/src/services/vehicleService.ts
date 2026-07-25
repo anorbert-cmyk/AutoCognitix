@@ -195,13 +195,20 @@ export const DEFAULT_COMMON_ISSUES_LIMIT = 10
  *
  * A testvér-függvényekkel ellentétben itt nincs korai `make`/`model` guard: a
  * válasz objektum, üres helyettesítője csak kitalált `make`/`model` mezőkkel
- * lenne előállítható. A hívást a hook `enabled` feltétele őrzi.
+ * lenne előállítható. A hívást a hook `enabled` feltétele őrzi. (Csupa szóközből
+ * álló `make`/`model` esetén a végpont 422-t ad — nem csendben a teljes márka
+ * bejelentés-történetét.)
+ *
+ * A válasz `sources` mezője forrásonként megmondja, hogy az adott lista azért
+ * üres-e, mert tényleg nincs adat (`'ok'`), vagy mert a forrás nem válaszolt
+ * (`'unavailable'`). A hívó felület CSAK az előbbit közölheti adathiányként.
  *
  * @param make Vehicle manufacturer
  * @param model Vehicle model
  * @param year Optional model year filter (omit to aggregate all years)
  * @param limit Maximum number of complaint components to return (1-50)
- * @returns Component ranking, DTC ranking and the stored complaint total
+ * @returns Component ranking, DTC ranking, the stored complaint total and the
+ *   per-source load status
  * @throws ApiError on request failure
  */
 export async function getVehicleCommonIssues(

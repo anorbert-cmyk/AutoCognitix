@@ -27,7 +27,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import psutil
 from fastapi import Request, Response
@@ -43,7 +43,7 @@ from prometheus_client import (
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
-from app.core.dtc_codes import is_valid_dtc_code
+from app.core.metrics_paths import dtc_segment_label
 
 # =============================================================================
 # Application Info
@@ -787,6 +787,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         """
         parts = path.split("/")
         normalized_parts = []
+        previous: Optional[str] = None
 
         for part in parts:
             if not part:
@@ -798,15 +799,18 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             # Replace VIN patterns with placeholder
             elif len(part) == 17 and part.isalnum():
                 normalized_parts.append("{vin}")
-            # Replace DTC codes with placeholder. Structural rules live in
-            # app.core.dtc_codes (SAE J2012), shared with the API validators and
-            # app/middleware/metrics.py, so a segment that merely starts with
-            # P/B/C/U ("CHEVROLET", "PARTS") is no longer collapsed into the
-            # {dtc_code} label and lost.
-            elif is_valid_dtc_code(part):
-                normalized_parts.append("{dtc_code}")
             else:
-                normalized_parts.append(part)
+                # DTC labelling (valid code -> {dtc_code}; anything else sitting
+                # in the /dtc/{code} slot -> {invalid_dtc}) lives in
+                # app.core.metrics_paths, shared with app/middleware/metrics.py.
+                # Recognition is the SAE J2012 rule from app.core.dtc_codes, so
+                # a make like "CHEVROLET" is not folded into {dtc_code}; the
+                # positional catch-all is what stops the ~164k DTC-shaped junk
+                # segments an unauthenticated caller can spray from each opening
+                # their own time series.
+                normalized_parts.append(dtc_segment_label(part, previous) or part)
+
+            previous = part
 
         return "/" + "/".join(normalized_parts) if normalized_parts else "/"
 

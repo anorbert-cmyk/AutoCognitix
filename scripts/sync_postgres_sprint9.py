@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -64,18 +63,12 @@ BATCH_EPA = 1000
 # Max complaints to load if no sampled file exists
 MAX_COMPLAINTS = 200_000
 
-# DTC extraction - canonical rules (SAE J2012) live in
-# backend/app/core/dtc_codes.py. Loaded by file path instead of
-# `from app.core.dtc_codes import ...` because importing the `app.core`
-# package executes app/core/__init__.py, which builds the FastAPI Settings
-# object and would make this importer require SECRET_KEY / JWT_SECRET_KEY just
-# to run a regex.
-_DTC_RULES_PATH = PROJECT_DIR / "backend" / "app" / "core" / "dtc_codes.py"
-_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
-if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
-    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
-dtc_rules = importlib.util.module_from_spec(_dtc_spec)
-_dtc_spec.loader.exec_module(dtc_rules)
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. Importing `app.core` no longer constructs the
+# FastAPI Settings object, so this runs with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_DIR / "backend"))
+
+from app.core import dtc_codes as dtc_rules  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Country mapping for common makes

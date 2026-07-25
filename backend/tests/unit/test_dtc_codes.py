@@ -8,16 +8,27 @@ normalizer and the standalone scripts. The tests cover both entry points:
   - the single-code validator (``is_valid_dtc_code`` / ``normalize_dtc_code``),
   - the free-text extractor (``extract_dtc_codes`` / ``contains_dtc_code``),
 
-plus drift guards asserting that the reference implementation in
-``scripts/sync_neo4j_sprint9.py`` and every migrated script agree with it.
+plus a two-layer drift guard over ``scripts/``:
+
+  - layer 1 (always runs, source-level): no file under ``scripts/`` may carry a
+    DTC regex of its own, and every DTC-aware script must import the canonical
+    module. Uses ``ast``/``tokenize``, so it needs none of the scripts'
+    runtime dependencies.
+  - layer 2 (behavioural): for the scripts that import cleanly, the wrapper
+    around the canonical function must give the same answers.
 
 No database, no network: the scripts are loaded by path with importlib.
 """
 
+import ast
 import importlib.util
+import io
 import os
+import re
 import subprocess
 import sys
+import tempfile
+import tokenize
 from pathlib import Path
 from types import ModuleType
 
@@ -35,6 +46,7 @@ from app.core.dtc_codes import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+BACKEND_DIR = PROJECT_ROOT / "backend"
 
 
 def _load_script(relative_path: str) -> ModuleType:
@@ -328,31 +340,223 @@ DRIFT_CORPUS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Drift guard, layer 1 (always runs): nothing may re-implement the rule
+# ---------------------------------------------------------------------------
+# The old sync_postgres guard was gated on `pytest.importorskip("psycopg2")`.
+# psycopg2 is not in backend/requirements.txt, which is the only install step
+# in .github/workflows/ci.yml, so that guard was PERMANENTLY skipped and the
+# copy it was meant to protect could drift with nothing failing.
+#
+# The guards below read SOURCE instead of importing it, so they always run: no
+# database driver, no optional dependency, no network. They are also strictly
+# stronger than what they replace, because the first one polices every file in
+# scripts/ rather than the handful somebody remembered to list.
+#
+# Layer 2 (further down) keeps the behavioural comparisons for the scripts that
+# import cleanly, so wrapper functions are checked as well as import lines.
+
+# A P/B/C/U character class immediately followed by a four-wide quantifier.
+# That is precisely the shape of both historical mistakes - `[PBCU][0-9]{4}`
+# (too strict, drops every hex code) and `[PCBU][0-9A-Fa-f]{4}` (too loose,
+# imports PEACE / PACED / U760E / PC861). The canonical
+# `[PBCU][0-3][0-9A-F]{3}` does not match it, because the second character
+# class is followed by another class rather than by `{4}`.
+FORBIDDEN_DTC_REGEX_SHAPE = re.compile(r"\[[PBCUpbcu]{4,8}\]\s*(?:\[[^\]]+\]|\\d)\{4\}")
+
+# Two survivors that deliberately keep a decimal four-digit shape because they
+# do NOT answer "is this string a DTC?". Listed explicitly (file -> reason) so
+# a NEW copy can never hide behind a blanket exclusion.
+FORBIDDEN_SHAPE_ALLOWLIST = {
+    # Parses section headers of the dtcdb CSV ("DTC Codes - P0100-P0199 - ...").
+    # The range endpoints are that file's own decimal section labels, so the
+    # count is 2: one per end of the range.
+    "import_dtcdb.py": 2,
+    # Security allowlist for a URL path segment ("p0000-p0099") used to build
+    # scraper URLs; it guards against injection, it does not classify codes.
+    # Also a range, hence 2.
+    "utils/url_validator.py": 2,
+}
+
+
+def _strip_comments(source: str) -> str:
+    """Return `source` with comment tokens removed (docstrings are kept)."""
+    out = []
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type != tokenize.COMMENT:
+            out.append(token.string)
+    return "\n".join(out)
+
+
+def _script_paths():
+    return sorted(p for p in SCRIPTS_DIR.rglob("*.py") if "__pycache__" not in p.parts)
+
+
 @pytest.mark.unit
-def test_no_drift_from_reference_implementation():
-    """`app.core.dtc_codes` must agree with `scripts/sync_neo4j_sprint9.py`.
+def test_no_script_reimplements_the_dtc_rule():
+    """No file under scripts/ may carry a DTC regex of its own.
 
-    That script is the audited reference (85 tests in test_dtc_extraction.py)
-    and cannot import the backend package, so the two definitions can only be
-    kept honest by asserting they behave identically on a shared corpus.
+    This is the guard that would have caught the three point-fixes: it fails on
+    a NEW copy appearing anywhere in scripts/, not just in a listed file.
     """
-    pytest.importorskip("neo4j", reason="neo4j driver required to import the sync script")
-    reference = _load_script("sync_neo4j_sprint9.py")
+    offenders = {}
+    for path in _script_paths():
+        relative = path.relative_to(SCRIPTS_DIR).as_posix()
+        hits = FORBIDDEN_DTC_REGEX_SHAPE.findall(_strip_comments(path.read_text(encoding="utf-8")))
+        allowed = FORBIDDEN_SHAPE_ALLOWLIST.get(relative, 0)
+        if len(hits) > allowed:
+            offenders[relative] = hits
 
-    assert reference.DTC_CODE_PATTERN.pattern == DTC_CODE_PATTERN.pattern
-    assert reference.DTC_CODE_STRICT.pattern == DTC_CODE_STRICT.pattern
+    assert not offenders, (
+        "These files re-implement the DTC rule instead of importing "
+        f"app.core.dtc_codes: {offenders}"
+    )
 
-    for text in DRIFT_CORPUS:
-        assert extract_dtc_codes(text) == reference.extract_dtc_codes(text), text
-        assert is_valid_dtc_code(text) == reference.is_valid_dtc_code(text), text
 
-    for code in [*REAL_CODES, "X0301", ""]:
-        assert dtc_category(code) == reference.dtc_category(code), code
+# Every script that decides "is this string a DTC?". Each must reach the
+# canonical module - directly, or through scripts/utils.py (asserted below to
+# be canonical itself).
+DTC_AWARE_SCRIPTS = [
+    "cli/autocognitix_cli.py",
+    "cli/diagtool.py",
+    "diagnose.py",
+    "download_all_obdb.py",
+    "import_data.py",
+    "import_dtcdb.py",
+    "import_obd_codes.py",
+    "import_obdb.py",
+    "import_obdb_github.py",
+    "import_training_data.py",
+    "load_all_to_neo4j.py",
+    "merge_dtc_all_sources.py",
+    "merge_dtc_sources.py",
+    "sample_complaints.py",
+    "scrape_autocodes.py",
+    "scrape_bbareman.py",
+    "scrape_dtcbase.py",
+    "scrape_engine_codes.py",
+    "scrape_klavkarr.py",
+    "scrape_obd_codes.py",
+    "scrape_troublecodes.py",
+    "sync_neo4j_sprint9.py",
+    "sync_nhtsa.py",
+    "sync_nhtsa_complete.py",
+    "sync_nhtsa_vehicles.py",
+    "sync_postgres_sprint9.py",
+    "utils.py",
+    "validate_data.py",
+]
+
+CANONICAL_MODULES = {"app.core.dtc_codes", "backend.app.core.dtc_codes"}
+# scripts/utils.py re-exports the canonical validator; importing from it counts.
+SHARED_UTILS_MODULES = {"scripts.utils", "utils"}
+SHARED_UTILS_NAMES = {"validate_dtc_code", "get_category_from_code"}
+
+
+def _reaches_canonical_rules(path):
+    """True if the module imports the canonical DTC rules (AST, no execution)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        names = {alias.name for alias in node.names}
+        # from app.core.dtc_codes import ... / from backend.app.core.dtc_codes import ...
+        if node.module in CANONICAL_MODULES:
+            return True
+        # from app.core import dtc_codes [as dtc_rules]
+        if node.module.endswith("app.core") and "dtc_codes" in names:
+            return True
+        # from scripts.utils import validate_dtc_code
+        if node.module in SHARED_UTILS_MODULES and names & SHARED_UTILS_NAMES:
+            return True
+    return False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relative_path", DTC_AWARE_SCRIPTS)
+def test_script_imports_the_canonical_rules(relative_path):
+    """Each DTC-aware script must IMPORT the rule, never restate it.
+
+    Source-level (ast.parse), so this runs without neo4j, psycopg2, typer,
+    click, httpx or bs4 installed - unlike the guards it replaced.
+    """
+    path = SCRIPTS_DIR / relative_path
+    assert path.exists(), f"script listed in DTC_AWARE_SCRIPTS is missing: {path}"
+    assert _reaches_canonical_rules(path), (
+        f"{relative_path} does not import app.core.dtc_codes (directly or via scripts/utils.py)"
+    )
+
+
+@pytest.mark.unit
+def test_shared_scripts_utils_delegates_to_the_canonical_rules():
+    """scripts/utils.py is the gateway for six scrapers - it must delegate."""
+    assert _reaches_canonical_rules(SCRIPTS_DIR / "utils.py")
+
+
+@pytest.mark.unit
+def test_canonical_module_is_importable_without_settings():
+    """`app.core.dtc_codes` must import with no SECRET_KEY and no .env.
+
+    This is the property that lets the standalone scripts import the rule
+    instead of copying it. It broke silently before, because
+    `app/core/__init__.py` eagerly imported `app.core.config`, which builds the
+    Pydantic Settings object. Run in a subprocess with a scrubbed environment
+    and a cwd that holds no .env, so an ambient secret cannot mask a
+    regression.
+    """
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"SECRET_KEY", "JWT_SECRET_KEY"} and not k.startswith("AUTOCOGNITIX_")
+    }
+    env["PYTHONPATH"] = str(BACKEND_DIR)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "from app.core.dtc_codes import is_valid_dtc_code, extract_dtc_codes\n"
+            "assert is_valid_dtc_code('P26B7')\n"
+            "assert extract_dtc_codes('VIN 1FADP3F25FL code P0301') == ['P0301']\n"
+            "assert 'app.core.config' not in sys.modules, 'settings were built on import'\n"
+            "print('OK')\n",
+        ],
+        cwd=tempfile.gettempdir(),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "OK" in result.stdout
 
 
 # ---------------------------------------------------------------------------
-# Drift guard: the migrated scripts must delegate, not re-implement
+# Drift guard, layer 2: the scripts that import cleanly must BEHAVE identically
 # ---------------------------------------------------------------------------
+# Layer 1 proves the import line exists; these prove the wrapper around it did
+# not distort the answer (case folding, ordering, set-vs-list, empty input).
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("relative_path", "attribute", "dependency"),
+    [
+        ("sync_neo4j_sprint9.py", "extract_dtc_codes", "neo4j"),
+        ("sync_neo4j_sprint9.py", "is_valid_dtc_code", "neo4j"),
+        ("sync_neo4j_sprint9.py", "dtc_category", "neo4j"),
+    ],
+)
+def test_sync_neo4j_uses_the_canonical_function_object(relative_path, attribute, dependency):
+    """The strongest possible no-drift statement: same function object.
+
+    This replaces the old corpus comparison against
+    `scripts/sync_neo4j_sprint9.py`, which was described as "the canonical
+    reference implementation". It is not one any more - it imports the rule.
+    """
+    pytest.importorskip(dependency, reason=f"{dependency} required to import {relative_path}")
+    module = _load_script(relative_path)
+    assert getattr(module, attribute) is globals()[attribute]
+
+
 @pytest.mark.unit
 def test_sample_complaints_uses_the_shared_primitive():
     module = _load_script("sample_complaints.py")
@@ -374,14 +578,30 @@ def test_validate_data_uses_the_shared_primitive():
 
 
 @pytest.mark.unit
-def test_sync_postgres_uses_the_shared_primitive():
-    pytest.importorskip("psycopg2", reason="psycopg2 required to import sync_postgres_sprint9")
-    pytest.importorskip("tqdm", reason="tqdm required to import sync_postgres_sprint9")
-    module = _load_script("sync_postgres_sprint9.py")
+def test_scripts_utils_validator_matches_the_canonical_rule():
+    """scripts/utils.py feeds six scrapers - check behaviour, not just imports."""
+    module = _load_script("utils.py")
     for text in DRIFT_CORPUS:
-        assert module.extract_dtc_codes(text) == extract_dtc_codes(text), text
+        if text is None:
+            continue
+        assert module.validate_dtc_code(text) == is_valid_dtc_code(text), text
+    for code in [*REAL_CODES, "X0301", ""]:
+        assert module.get_category_from_code(code) == dtc_category(code), code
 
 
+@pytest.mark.unit
+def test_sync_nhtsa_extraction_matches_the_canonical_rule():
+    pytest.importorskip("httpx", reason="httpx required to import sync_nhtsa")
+    module = _load_script("sync_nhtsa.py")
+    for text in DRIFT_CORPUS:
+        if text is None:
+            continue
+        assert module.extract_dtc_codes(text) == set(extract_dtc_codes(text)), text
+
+
+# These three need a CLI toolkit to import. typer (and therefore click) IS in
+# backend/requirements.txt, so they run in CI; the unconditional structural
+# guard above is what carries the guarantee when they are skipped locally.
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("relative_path", "dependency"),
@@ -487,9 +707,21 @@ for code in ["P0300", "P26B7", "p0a94", "B00A0", "P0301"]:
     got = N.normalize("/api/v1/dtc/" + code)
     assert got == "/api/v1/dtc/{{dtc_code}}", (code, got)
 
-for junk in ["PEACE", "UA80E", "P93AF", "P9324", "search", "stats"]:
+# Junk is still NOT a code - but in the {{code}} position it collapses to a
+# single {{invalid_dtc}} series instead of one series per sprayed value. See
+# app/core/metrics_paths.py and tests/unit/test_metrics.py.
+for junk in ["PEACE", "UA80E", "P93AF", "P9324"]:
     got = N.normalize("/api/v1/dtc/" + junk)
-    assert got == "/api/v1/dtc/" + junk, (junk, got)
+    assert got == "/api/v1/dtc/{{invalid_dtc}}", (junk, got)
+
+# ... while the literal sibling routes under /dtc keep their own labels.
+for literal in ["search", "categories", "bulk"]:
+    got = N.normalize("/api/v1/dtc/" + literal)
+    assert got == "/api/v1/dtc/" + literal, (literal, got)
+
+# A non-code segment OUTSIDE the {{code}} position is untouched: the SAE
+# tightening exists so a make named "PACED" keeps its own label.
+assert N.normalize("/api/v1/vehicles/PEACE/models") == "/api/v1/vehicles/PEACE/models"
 
 # other segment kinds must keep working
 assert N.normalize("/api/v1/vehicles/1HGBH41JXMN109186") == "/api/v1/vehicles/{{vin}}"

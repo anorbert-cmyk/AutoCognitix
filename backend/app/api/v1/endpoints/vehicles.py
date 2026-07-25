@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from app.api.v1.schemas.vehicle import (
+    CommonIssuesSources,
+    DataSourceStatus,
     PaginatedResponse,
     VehicleCommonIssue,
     VehicleCommonIssuesResponse,
@@ -44,12 +46,51 @@ _VEHICLE_PARAM_RE = re.compile(r"^[a-zA-Z0-9\s\-\.]+$")
 
 
 def _validate_vehicle_param(value: str, max_len: int = 50) -> str:
-    """Validate a vehicle make/model path parameter against SSRF and header injection."""
+    """Validate a vehicle make/model path parameter against SSRF and header injection.
+
+    Also rejects a value that is only whitespace. ``_VEHICLE_PARAM_RE`` accepts a
+    lone space (``/Volkswagen/%20/common-issues``), which strips to ``""`` - and
+    an empty model is not a narrower filter, it is NO filter: the SQL leg builds
+    ``LIKE '%'`` and the Cypher leg's ``'golf gti' STARTS WITH ''`` is true for
+    every row, so the request would silently return the make's ENTIRE complaint
+    history labelled as the user's chosen model, off an unbounded aggregation.
+
+    Rejecting here rather than in each service leg is deliberate: it is the one
+    place every consumer of these path params passes through (recalls,
+    complaints AND common-issues, both of whose legs are covered by this single
+    check), and a caller who sends a blank model gets told so instead of
+    receiving a plausible-looking wrong answer. The service legs keep their own
+    equivalent guards as defence in depth, since they are directly callable.
+
+    422 matches how FastAPI itself reports a parameter that fails its
+    constraints (this endpoint's own ``limit`` bounds return 422); the
+    pre-existing 400s above are left as they are so no existing client contract
+    changes.
+    """
     if len(value) > max_len:
         raise HTTPException(status_code=400, detail="Paraméter túl hosszú.")
     if not _VEHICLE_PARAM_RE.match(value):
         raise HTTPException(status_code=400, detail="Érvénytelen paraméter.")
-    return value.strip()
+    cleaned = value.strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A gyártó és a modell nem lehet üres.",
+        )
+    return cleaned
+
+
+def _source_status(payload: Optional[List[Any]]) -> DataSourceStatus:
+    """Map a service leg's degraded return onto its per-source response status.
+
+    Every leg of ``/common-issues`` swallows its own datastore failure and
+    returns ``None`` for it, as distinct from an empty list, which means "the
+    datastore answered, there is genuinely nothing". Funnelling that through one
+    helper keeps a future third source a single obvious line - and because
+    ``CommonIssuesSources`` has no defaults, forgetting that line fails loudly at
+    response construction instead of quietly claiming "ok".
+    """
+    return DataSourceStatus.OK if payload is not None else DataSourceStatus.UNAVAILABLE
 
 
 # =============================================================================
@@ -305,6 +346,7 @@ COMMON_ISSUES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
                         },
                     ],
                     "total_complaints": 1502,
+                    "sources": {"components": "ok", "issues": "ok"},
                 }
             }
         },
@@ -826,7 +868,10 @@ Two independent rankings are returned:
 any data for this vehicle at all" signal.
 
 Both rankings degrade to empty on a datastore outage - this endpoint returns
-200 with truthful empty lists rather than a 500.
+200 with truthful empty lists rather than a 500 - and `sources` says WHICH of
+the two that happened to (`ok` / `unavailable`). An empty list from an
+`unavailable` source proves nothing about the vehicle, so clients must not
+render it as an absence of data.
 
 **Example:**
 `/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018&limit=10`
@@ -856,7 +901,8 @@ async def get_vehicle_common_issues(
 
     Returns:
         Common issues response with the DTC ranking, the NHTSA complaint
-        component ranking, and the total complaint count.
+        component ranking, the total complaint count, and the per-source load
+        status that tells an outage apart from a genuine absence of data.
     """
     make = _validate_vehicle_param(make)
     model = _validate_vehicle_param(model)
@@ -869,7 +915,7 @@ async def get_vehicle_common_issues(
         # InterfaceError" rule does not apply here (it is enforced inside
         # VehicleService._query_complaint_components, which issues exactly one
         # statement on its own session). Both calls swallow their own datastore
-        # errors and degrade to empty, so neither can break the other.
+        # errors and report it as None, so neither can break the other.
         issues_data, (components_data, total_complaints) = await asyncio.gather(
             vehicle_service.get_vehicle_common_issues(
                 make=make,
@@ -884,6 +930,14 @@ async def get_vehicle_common_issues(
             ),
         )
 
+        # None = that datastore never answered. It still renders as an empty
+        # list (the 200 contract), but `sources` says so explicitly instead of
+        # letting the client mistake the gap for "this vehicle has no data".
+        sources = CommonIssuesSources(
+            components=_source_status(components_data),
+            issues=_source_status(issues_data),
+        )
+
         issues = [
             VehicleCommonIssue(
                 code=issue["code"],
@@ -893,7 +947,7 @@ async def get_vehicle_common_issues(
                 frequency=issue.get("frequency"),
                 occurrence_count=issue.get("occurrence_count"),
             )
-            for issue in issues_data
+            for issue in issues_data or []
         ]
 
         components = [
@@ -907,7 +961,7 @@ async def get_vehicle_common_issues(
                 injury_count=component["injury_count"],
                 death_count=component["death_count"],
             )
-            for component in components_data
+            for component in components_data or []
         ]
 
         return VehicleCommonIssuesResponse(
@@ -917,6 +971,7 @@ async def get_vehicle_common_issues(
             issues=issues,
             components=components,
             total_complaints=total_complaints,
+            sources=sources,
         )
 
     except Exception as e:

@@ -30,7 +30,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -90,38 +89,19 @@ POPULAR_MAKES = [
 DEFAULT_START_YEAR = 2015
 DEFAULT_END_YEAR = 2024
 
-# DTC code pattern - SAE J2012 structure:
-#   char 1   : P | B | C | U
-#   char 2   : 0-3  (0/2 = SAE generic, 1/3 = manufacturer specific)
-#   char 3-5 : hex
+# DTC extraction - canonical SAE J2012 rules live in
+# backend/app/core/dtc_codes.py and are IMPORTED, never copied. The comment
+# that used to sit here said "KEEP IN SYNC with scripts/sync_neo4j_sprint9.py",
+# which is precisely the maintenance burden this import removes.
 #
-# The previous pattern here was r'\b([PCBU][0-9A-Fa-f]{4})\b', which accepts
-# any hex-shaped token and is how "PEACE", "PACED", "P93AF", "UA80E" and
-# "UA80F" got written into data/dtc_codes/all_codes_complete.json as if they
-# were DTC codes. NHTSA narratives are also full of service campaign IDs
-# (P9324, PC861, PC214) and transmission designations (U760E) that the old
-# pattern matched. The second-character 0-3 rule rejects all of them while
-# keeping every one of the 6,809 genuine curated codes.
-#
-# KEEP IN SYNC with extract_dtc_codes() in scripts/sync_neo4j_sprint9.py -
-# backend/tests/unit/test_dtc_extraction.py asserts both agree.
-DTC_PATTERN = re.compile(
-    r'(?<![0-9A-Za-z])'          # left boundary: not inside a longer token
-    r'([PBCUpbcu])'              # system letter
-    r'[\s\-]?'                   # optional single separator ("P-0301")
-    r'([0-3][0-9A-Fa-f]{3})'     # 0-3 + 3 hex digits
-    r'(?![0-9A-Za-z])'           # right boundary
-)
+# The separate EXTENDED_DTC_PATTERNS list is gone too: the canonical extractor
+# already tolerates the marker forms it existed for ("DTC: P 0301", "P-0301"),
+# and it does so *with* the boundary guard the extended pattern was missing -
+# that one would happily read "P0301" out of "DTC: XP0301".
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
-# Extended patterns for codes introduced by an explicit marker. Same structure,
-# but the marker allows a looser separator ("DTC: P 0301").
-EXTENDED_DTC_PATTERNS = [
-    re.compile(
-        r'(?:DTC|trouble\s+code|error\s+code|code)\s*[:\-]?\s*'
-        r'([PBCUpbcu])[\s\-]?([0-3][0-9A-Fa-f]{3})(?![0-9A-Za-z])',
-        re.IGNORECASE,
-    ),
-]
+from app.core.dtc_codes import dtc_category as _dtc_category  # noqa: E402
+from app.core.dtc_codes import extract_dtc_codes as _extract_dtc_codes  # noqa: E402
 
 
 # =============================================================================
@@ -142,35 +122,14 @@ def extract_dtc_codes(text: str) -> Set[str]:
     Returns:
         Set of unique DTC codes found (uppercase).
     """
-    if not text:
-        return set()
-
-    codes = set()
-
-    # Primary pattern - standard DTC format (group 1 = letter, group 2 = digits)
-    for match in DTC_PATTERN.finditer(text):
-        codes.add(f"{match.group(1)}{match.group(2)}".upper())
-
-    # Extended patterns (marker-introduced codes, same two groups)
-    for pattern in EXTENDED_DTC_PATTERNS:
-        for match in pattern.finditer(text):
-            codes.add(f"{match.group(1)}{match.group(2)}".upper())
-
-    return codes
+    return set(_extract_dtc_codes(text))
 
 
 def get_category_from_code(code: str) -> str:
     """Determine the category from a DTC code prefix."""
     if not code:
         return "unknown"
-    prefix = code[0].upper()
-    categories = {
-        "P": "powertrain",
-        "C": "chassis",
-        "B": "body",
-        "U": "network",
-    }
-    return categories.get(prefix, "unknown")
+    return _dtc_category(code)
 
 
 def get_severity_from_code(code: str) -> str:

@@ -503,6 +503,30 @@ export interface VehicleComplaintComponent {
   death_count: number
 }
 
+/**
+ * Egy adatforrás betöltési státusza.
+ *
+ * `'unavailable'` = a forrás adatbázisa NEM válaszolt, tehát a hozzá tartozó
+ * üres lista az adat ELÉRÉSÉNEK hiányát jelzi, nem az adat hiányát. Ilyenkor
+ * tilos tényként állítani bármit a járműről ("nincs bejelentés", "ez a modell
+ * ott nem volt forgalomban") — az kitalált állítás lenne.
+ */
+export type DataSourceStatus = 'ok' | 'unavailable'
+
+/**
+ * Forrásonkénti betöltési státusz a common-issues válaszban.
+ *
+ * A két lista két FÜGGETLEN adatbázisból jön, és mindkettő külön-külön esik
+ * üresre kiesés esetén. Minden forrás SAJÁT, KÖTELEZŐ mezőt kap: így egy jövőbeli
+ * harmadik forrás sem tudja csendben megörökölni az „ok” állapotot.
+ */
+export interface CommonIssuesSources {
+  /** NHTSA panaszkorpusz (PostgreSQL) — a `components` és `total_complaints` forrása */
+  components: DataSourceStatus
+  /** Panasz→DTC gráf (Neo4j) — az `issues` forrása */
+  issues: DataSourceStatus
+}
+
 export interface VehicleCommonIssuesResponse {
   make: string
   model: string
@@ -512,6 +536,9 @@ export interface VehicleCommonIssuesResponse {
   /** A `share` nevezője: a járműre TÁROLT bejelentések száma (minta, nem a
    *  NHTSA teljes bejelentésszáma). 0 = nincs bejelentési adat. */
   total_complaints: number
+  /** Forrásonkénti státusz: megkülönbözteti a "nincs adat" és a "nem sikerült
+   *  betölteni" esetet. Csak az előbbi jeleníthető meg adathiányként. */
+  sources: CommonIssuesSources
 }
 
 // =============================================================================

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.core.config import settings
+from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.core.metrics import (
     set_data_metrics,
@@ -350,7 +351,10 @@ async def check_embedding_health() -> ServiceHealth:
         probe = await asyncio.to_thread(embedding_self_test)
     except Exception as e:
         latency = (time.time() - start_time) * 1000
-        logger.error(f"Embedding health check failed: {e}")
+        # sanitize_exception, not the raw exception: the probe loads a model
+        # whose name comes from configuration, and CWE-117 does not care that
+        # the value looked trustworthy to whoever wrote the log line.
+        logger.error(f"Embedding health check failed: {sanitize_exception(e)}")
         return ServiceHealth(
             name="Embedding",
             status="unhealthy",
@@ -368,13 +372,17 @@ async def check_embedding_health() -> ServiceHealth:
     # total service outage to the monitoring dashboard.
     status_map = {"ok": "healthy", "degraded": "degraded", "unavailable": "degraded"}
     if probe_status != "ok":
+        # Every value in `extra` is sanitized, including the ones that look
+        # like fixed enums: `probe_status`, `backend` and `error` all come out
+        # of embedding_self_test(), which builds `error` as
+        # f"{type(e).__name__}: {e}" from an arbitrary exception message.
         logger.error(
             "Embedding backend not usable",
             extra={
                 "event": "embedding_backend_unusable",
-                "probe_status": probe_status,
-                "backend": probe.get("backend"),
-                "error": error,
+                "probe_status": sanitize_log(probe_status),
+                "backend": sanitize_log(probe.get("backend")),
+                "error": sanitize_log(error),
             },
         )
 
@@ -411,11 +419,15 @@ async def _check_embedding_health_bounded() -> ServiceHealth:
             check_embedding_health(), timeout=EMBEDDING_HEALTH_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError:
+        # Numbers go through sanitize_log too - the project rule is deliberately
+        # unconditional so a field's type never has to be re-audited when its
+        # source changes (this one is module-level today, settings-driven
+        # tomorrow).
         logger.error(
             "Embedding health check timed out",
             extra={
                 "event": "embedding_health_timeout",
-                "timeout_seconds": EMBEDDING_HEALTH_TIMEOUT_SECONDS,
+                "timeout_seconds": sanitize_log(str(EMBEDDING_HEALTH_TIMEOUT_SECONDS)),
             },
         )
         return ServiceHealth(

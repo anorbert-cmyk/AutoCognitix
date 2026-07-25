@@ -26,7 +26,6 @@ import asyncio
 import gc
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime
@@ -90,10 +89,22 @@ DTC_SCAN_MAX_PAIRS = 250_000
 # Warn when the graph passes this fraction of the Aura Free relationship cap.
 REL_WARN_FRACTION = 0.9
 
-SCRIPT_DIR = Path(__file__).parent
+SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
 CHECKPOINT_FILE = SCRIPT_DIR / "checkpoints" / "neo4j_sprint9.json"
+
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied.
+# backend/app/core/dtc_codes.py carries the full rationale and the measured
+# false-positive numbers. `app.core` no longer builds the FastAPI Settings
+# object on import, so this works with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_DIR / "backend"))
+
+from app.core.dtc_codes import (  # noqa: E402
+    dtc_category,
+    extract_dtc_codes,
+    is_valid_dtc_code,
+)
 
 # Marks Complaint nodes that exist ONLY because a DTC code was extracted from
 # them (they are outside the safety-ranked top-50K node set).
@@ -118,77 +129,11 @@ COMPLAINT_FILES = [
 # backend/tests/unit/test_dtc_extraction.py, no database required)
 # ---------------------------------------------------------------------------
 #
-# SAE J2012 / OBD-II structure of a diagnostic trouble code:
-#   char 1   : P (powertrain) | B (body) | C (chassis) | U (network)
-#   char 2   : 0-3  (0/2 = SAE generic, 1/3 = manufacturer specific)
-#   char 3-5 : hex  (0-9 A-F) subsystem + fault index
-#
-# That "0-3" second character is the whole precision story. The two patterns
-# this project used before were both wrong in opposite directions:
-#
-#   [PBCU][0-9]{4}        (sync_neo4j_sprint9) - decimal only, so it DROPS every
-#                          hex code (P26B7, P090C, P0A94, B00A0 ...) and still
-#                          ACCEPTS "P9324", which is a Nissan service campaign
-#                          number, not a DTC.
-#   [PCBU][0-9A-Fa-f]{4}  (sync_nhtsa) - accepts anything hex-shaped, which is
-#                          how PEACE / PACED / UA80E / UA80F / P93AF ended up as
-#                          "DTC codes" in data/dtc_codes/all_codes_complete.json.
-#
-# Measured on 26,237 real NHTSA complaint narratives (30 make/model/year sets
-# pulled from api.nhtsa.gov):
-#   old strict : 373 mentions, of which 15 false positives ("P9324")
-#   old loose  : 478 mentions, of which 39 false positives (PEACE, PC861,
-#                PC214, PC490, PC426, PC491, U760E, BEEDA, P9324)
-#   this one   : 443 mentions, 0 observed false positives
-#                (+19% recall vs. strict, -7% volume vs. loose = the junk)
-DTC_CODE_PATTERN = re.compile(
-    r"(?<![0-9A-Za-z])"  # left boundary - never match inside a longer token
-    r"([PBCUpbcu])"  # system letter
-    r"[\s\-]?"  # optional single separator: "P-0301", "P 0301"
-    r"([0-3][0-9A-Fa-f]{3})"  # 0-3 + 3 hex digits
-    r"(?![0-9A-Za-z])"  # right boundary
-)
-
-# Canonical shape of an already-normalised code (used to validate the curated
-# set too - it currently contains 5 entries that fail this: PEACE, PACED,
-# P93AF, UA80E, UA80F, all injected by the old loose regex in sync_nhtsa.py).
-DTC_CODE_STRICT = re.compile(r"^[PBCU][0-3][0-9A-F]{3}$")
-
-DTC_CATEGORY_BY_PREFIX = {
-    "P": "powertrain",
-    "B": "body",
-    "C": "chassis",
-    "U": "network",
-}
-
-
-def is_valid_dtc_code(code: Optional[str]) -> bool:
-    """True if `code` is a structurally valid OBD-II DTC (after upper-casing)."""
-    if not code:
-        return False
-    return bool(DTC_CODE_STRICT.match(code.strip().upper()))
-
-
-def extract_dtc_codes(text: Optional[str]) -> List[str]:
-    """
-    Extract structurally valid DTC codes from free text.
-
-    Case-insensitive, tolerates a single space or hyphen between the system
-    letter and the digits, and never matches inside a longer alphanumeric token
-    (so VIN fragments and part numbers are rejected).
-
-    Returns a sorted list of unique upper-case codes.
-    """
-    if not text:
-        return []
-    return sorted(
-        {f"{letter.upper()}{digits.upper()}" for letter, digits in DTC_CODE_PATTERN.findall(text)}
-    )
-
-
-def dtc_category(code: str) -> str:
-    """Category for a DTC code prefix (used for extraction-created DTC nodes)."""
-    return DTC_CATEGORY_BY_PREFIX.get(code[:1].upper(), "unknown")
+# These used to be re-implemented here, and this script was documented as "the
+# canonical reference implementation". It is not any more: the SAE J2012 rules
+# (including the measured false-positive numbers and why the second character
+# must be 0-3) live in backend/app/core/dtc_codes.py, and are imported above.
+# One definition, no hand-syncing.
 
 
 def load_curated_dtc_codes() -> Set[str]:

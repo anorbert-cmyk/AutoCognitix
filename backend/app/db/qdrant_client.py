@@ -520,41 +520,107 @@ class QdrantService:
                     )
         return alerts
 
-    async def delete_by_user(self, user_id: str) -> int:
-        """
-        Delete all vectors associated with a user (GDPR Article 17).
+    async def _legacy_collections_present(self) -> List[str]:
+        """Which of the pre-unification per-type collections actually exist.
 
-        Args:
-            user_id: The user ID whose vectors should be deleted
+        On a current deployment none of them do - every write path was migrated
+        to ``settings.QDRANT_UNIFIED_COLLECTION`` - and deleting from a missing
+        collection is a 404 from Qdrant, not a real erasure failure. Probing
+        first is what lets :meth:`delete_by_user` treat every remaining failure
+        as fatal instead of having to swallow the benign case.
 
-        Returns:
-            Number of collections processed
+        A probe failure is logged and treated as "none present": the unified
+        delete right after it is the one that decides the outcome, and it will
+        surface the same outage far less ambiguously.
         """
-        collections_processed = 0
-        for collection in [
+        legacy = [
             self.DTC_COLLECTION,
             self.SYMPTOM_COLLECTION,
             self.COMPONENT_COLLECTION,
             self.REPAIR_COLLECTION,
             self.ISSUE_COLLECTION,
-        ]:
+        ]
+        try:
+            existing = {c.name for c in (await self.client.get_collections()).collections}
+        except Exception as e:
+            logger.warning(
+                "Could not enumerate collections for the GDPR legacy sweep",
+                extra={"error_type": type(e).__name__},
+            )
+            return []
+        return [name for name in legacy if name in existing]
+
+    async def delete_by_user(self, user_id: str) -> int:
+        """
+        Delete all vectors associated with a user (GDPR Article 17).
+
+        Targets ``settings.QDRANT_UNIFIED_COLLECTION`` first - that is where
+        every write path has put vectors since the unification, so it is the
+        only collection that can actually hold the user's data. Before this,
+        the sweep iterated ONLY the legacy per-type collections, all of which
+        are documented as never populated, which meant erasure touched nothing
+        at all while reporting success.
+
+        The legacy sweep is kept, but only for collections that are actually
+        present: an instance seeded before the unification can still hold
+        user-tagged points in them, and dropping the sweep would strand those
+        forever with no way to notice.
+
+        Failures are NOT swallowed. A ``logger.warning`` inside the loop used to
+        leave ``cleanup_errors`` empty in ``DELETE /api/v1/auth/me``, so a failed
+        purge was reported to the data subject as a completed erasure - the one
+        outcome Article 17 does not permit. Any failure now propagates, and that
+        endpoint's ``except Exception`` turns it into a partial-deletion error
+        the caller can retry.
+
+        Args:
+            user_id: The user ID whose vectors should be deleted
+
+        Returns:
+            Number of collections a delete was successfully executed against.
+
+        Raises:
+            QdrantException: If ANY targeted collection could not be purged.
+        """
+        selector = qdrant_models.FilterSelector(
+            filter=qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="user_id",
+                        match=qdrant_models.MatchValue(value=user_id),
+                    )
+                ]
+            )
+        )
+
+        targets = [settings.QDRANT_UNIFIED_COLLECTION]
+        targets += [c for c in await self._legacy_collections_present() if c not in targets]
+
+        collections_processed = 0
+        failed: List[str] = []
+        for collection in targets:
             try:
                 await self.client.delete(
                     collection_name=collection,
-                    points_selector=qdrant_models.FilterSelector(
-                        filter=qdrant_models.Filter(
-                            must=[
-                                qdrant_models.FieldCondition(
-                                    key="user_id",
-                                    match=qdrant_models.MatchValue(value=user_id),
-                                )
-                            ]
-                        )
-                    ),
+                    points_selector=selector,
                 )
                 collections_processed += 1
             except Exception as e:
-                logger.warning(f"Failed to delete user vectors from {collection}: {e}")
+                failed.append(collection)
+                logger.error(
+                    "GDPR erasure failed for a Qdrant collection",
+                    extra={"collection": collection, "error_type": type(e).__name__},
+                )
+
+        if failed:
+            raise QdrantException(
+                message="A felhasznaloi vektorok torlese nem sikerult minden gyujtemenyben.",
+                details={
+                    "failed_collections": failed,
+                    "deleted_collections": collections_processed,
+                },
+            )
+
         return collections_processed
 
     async def delete_collection(self, collection_name: str) -> None:

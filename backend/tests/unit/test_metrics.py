@@ -468,6 +468,79 @@ class TestMetricsMiddleware:
         result = middleware._normalize_endpoint("/api//v1/")
         assert result == "/api/v1"
 
+    # -- label-cardinality catch-all on the /dtc routes -------------------
+    #
+    # /api/v1/dtc/{code} is unauthenticated. Recognising only real SAE codes is
+    # correct, but falling through to the RAW segment meant every DTC-SHAPED
+    # miss opened its own Prometheus series: [PBCU] x [4-9A-F] x hex^3 ~= 164k
+    # reachable label values one sprayer can create. The endpoint answers 400;
+    # the middleware runs first.
+
+    @pytest.mark.parametrize("segment", ["P4AAA", "P5AAA", "UA80E", "PEACE", "P93AF", "P9324"])
+    def test_a_dtc_shaped_miss_does_not_enter_the_label(self, segment: str):
+        middleware = MetricsMiddleware(app=MagicMock())
+        result = middleware._normalize_endpoint(f"/api/v1/dtc/{segment}")
+        assert result == "/api/v1/dtc/{invalid_dtc}"
+        assert segment not in result
+
+    def test_sprayed_junk_collapses_to_one_series(self):
+        """The property that actually caps the registry: N inputs, 1 label."""
+        middleware = MetricsMiddleware(app=MagicMock())
+        sprayed = {
+            middleware._normalize_endpoint(f"/api/v1/dtc/P{h1}{h2}{h3}{h4}")
+            for h1 in "456789ABCDEF"
+            for h2 in "0123456789ABCDEF"
+            for h3 in "0F"
+            for h4 in "0F"
+        }
+        assert sprayed == {"/api/v1/dtc/{invalid_dtc}"}
+
+    def test_the_invalid_label_is_distinct_from_the_valid_one(self):
+        """{dtc_code} must keep meaning "a real code was requested"."""
+        middleware = MetricsMiddleware(app=MagicMock())
+        assert middleware._normalize_endpoint("/api/v1/dtc/P0300") == "/api/v1/dtc/{dtc_code}"
+        assert middleware._normalize_endpoint("/api/v1/dtc/PEACE") == "/api/v1/dtc/{invalid_dtc}"
+
+    def test_the_related_subpath_is_covered_too(self):
+        middleware = MetricsMiddleware(app=MagicMock())
+        assert (
+            middleware._normalize_endpoint("/api/v1/dtc/PEACE/related")
+            == "/api/v1/dtc/{invalid_dtc}/related"
+        )
+
+    @pytest.mark.parametrize("literal", ["search", "categories", "bulk"])
+    def test_literal_sibling_routes_keep_their_own_label(self, literal: str):
+        """Collapsing /dtc/search into {invalid_dtc} would erase a real route."""
+        middleware = MetricsMiddleware(app=MagicMock())
+        assert middleware._normalize_endpoint(f"/api/v1/dtc/{literal}") == f"/api/v1/dtc/{literal}"
+
+    def test_the_catch_all_is_scoped_to_the_code_position(self):
+        """A make named PACED is not the {code} parameter and keeps its label."""
+        middleware = MetricsMiddleware(app=MagicMock())
+        result = middleware._normalize_endpoint("/api/v1/vehicles/PACED/models")
+        assert result == "/api/v1/vehicles/PACED/models"
+
+    def test_a_numeric_segment_under_dtc_is_still_an_id(self):
+        middleware = MetricsMiddleware(app=MagicMock())
+        assert middleware._normalize_endpoint("/api/v1/dtc/12345") == "/api/v1/dtc/{id}"
+
+    def test_dtc_static_subpaths_match_the_router(self):
+        """Drift guard: a new literal route under /dtc must be registered here.
+
+        Otherwise it silently starts reporting as {invalid_dtc} and disappears
+        from the dashboards.
+        """
+        from app.api.v1.endpoints.dtc_codes import router
+        from app.core.metrics_paths import DTC_STATIC_SUBPATHS
+
+        literals = {
+            route.path.strip("/").split("/")[0]  # type: ignore[attr-defined]
+            for route in router.routes
+            if not route.path.strip("/").split("/")[0].startswith("{")  # type: ignore[attr-defined]
+        }
+        literals.discard("")  # the POST "/" collection route
+        assert literals == set(DTC_STATIC_SUBPATHS)
+
     def test_is_uuid_valid(self):
         assert MetricsMiddleware._is_uuid("550e8400-e29b-41d4-a716-446655440000") is True
 

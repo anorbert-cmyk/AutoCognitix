@@ -262,9 +262,12 @@ async def scrape_code_list_page(client: httpx.AsyncClient) -> List[Dict[str, Any
             href = a.get("href", "")
             text = a.get_text(strip=True)
 
-            # Check for DTC code pattern
-            match = re.search(r'/([PCBU][0-9]{4})/?$', href, re.IGNORECASE)
-            if match:
+            # Pull the last path segment, then let the canonical SAE J2012
+            # validator decide. The old inline r'/([PCBU][0-9]{4})/?$' was
+            # decimal-only, so every hex code this site publishes (P26B7,
+            # P090C, P0A94, B00A0) was silently skipped.
+            match = re.search(r'/([A-Za-z][0-9A-Za-z]{4})/?$', href)
+            if match and validate_dtc_code(match.group(1)):
                 code = match.group(1).upper()
 
                 # Try to get description from link text or parent

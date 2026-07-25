@@ -253,6 +253,11 @@ describe('VehicleDetailPage — "Gyakori hibák" fül', () => {
         issues: [],
         components: [],
         total_complaints: 0,
+        // A `sources` immár KIMONDJA, hogy a forrás válaszolt. Ez a szöveg
+        // ("ez a modell ott nem volt forgalomban") tényállítás a járműről, ezért
+        // csak tényleges adathiánynál hangozhat el — kiesett forrásnál nem. A
+        // megkülönböztetést a CommonIssuesPanel saját tesztfájlja fedi le.
+        sources: { components: 'ok', issues: 'ok' },
       },
       isLoading: false,
       isError: false,
@@ -268,6 +273,8 @@ describe('VehicleDetailPage — "Gyakori hibák" fül', () => {
     expect(screen.getByText(/nem is jelent hibamentes járművet/i)).toBeInTheDocument();
     // Nem a semmitmondó általános szöveg
     expect(screen.queryByText(/^Nincs adat$/)).not.toBeInTheDocument();
+    // …és nem is a kiesett-forrás állapot
+    expect(screen.queryByText('A bejelentési adatok most nem elérhetők')).not.toBeInTheDocument();
   });
 
   it('betöltés közben role="status"-szal jelez', async () => {

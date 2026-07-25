@@ -18,7 +18,7 @@ import hashlib
 import threading
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
 
@@ -139,6 +139,26 @@ _SOURCE_BY_PAYLOAD_TYPE: Dict[str, RetrievalSource] = {
     "complaint": RetrievalSource.QDRANT_COMPLAINT,
 }
 
+# The "similar cases" leg reads owner-reported narratives out of Qdrant payloads,
+# and the payloads were written by two different indexers with two different
+# shapes: one stores the narrative under ``description``, the other embeds the
+# narrative but persists only metadata (odi_number/make/model/component/...) and
+# no text at all. Probing the known text keys keeps both readable; a payload with
+# none of them carries NO symptom information and must be dropped rather than
+# rendered as an empty numbered line in the Hungarian prompt.
+_SYMPTOM_TEXT_KEYS: Tuple[str, ...] = ("description", "narrative", "summary", "complaint_text")
+
+
+def _symptom_narrative(content: Optional[Dict[str, Any]]) -> str:
+    """Return the narrative text of a symptom/complaint payload ("" if it has none)."""
+    if not content:
+        return ""
+    for key in _SYMPTOM_TEXT_KEYS:
+        value = content.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
 
 @dataclass
 class VehicleInfo:
@@ -164,7 +184,16 @@ class VehicleInfo:
 
 @dataclass
 class RetrievedItem:
-    """Item retrieved from any source."""
+    """
+    Item retrieved from any source.
+
+    ``score`` is the RELEVANCE of the item as reported by its source: cosine
+    similarity for Qdrant hits, a fixed confidence for direct/graph matches.
+    :meth:`RAGService.calculate_confidence` reads it with that meaning, so
+    nothing may overwrite it with a score from a different scale -
+    :class:`HybridRanker` therefore returns re-scored *copies* instead of
+    mutating the items it is given (they are shared with the retrieval cache).
+    """
 
     content: Dict[str, Any]
     source: RetrievalSource
@@ -300,12 +329,21 @@ class HybridRanker:
         """
         Combine multiple ranked lists using RRF.
 
+        The returned items are COPIES carrying the fused score; the input items
+        are never touched. That is not a style preference: the lists handed in
+        are the objects ``retrieve_from_qdrant`` cached and returns by
+        reference, and ``calculate_confidence`` reads ``item.score`` as a cosine
+        similarity. Writing the RRF score (``1/(k+rank)``, ~0.016) back into
+        them replaced a ~0.85 similarity in the user-facing confidence and kept
+        the corrupted values in the cache for its whole TTL.
+
         Args:
             ranked_lists: List of ranked item lists from different sources.
             weights: Optional weights for each list (default: equal weights).
 
         Returns:
-            Combined and re-ranked list of items.
+            Combined and re-ranked list of NEW items whose ``score`` is the
+            fused RRF score (an ordering signal, not a similarity).
         """
         if not ranked_lists:
             return []
@@ -336,14 +374,9 @@ class HybridRanker:
             item_scores.keys(), key=lambda item_key: item_scores[item_key], reverse=True
         )
 
-        # Update item scores and return
-        result = []
-        for key in sorted_keys:
-            item = item_objects[key]
-            item.score = item_scores[key]
-            result.append(item)
-
-        return result
+        # Re-score COPIES - see the docstring. ``replace`` keeps content and
+        # metadata by reference (they are read-only here) and only swaps score.
+        return [replace(item_objects[key], score=item_scores[key]) for key in sorted_keys]
 
     def _get_item_key(self, item: RetrievedItem) -> str:
         """Generate unique key for an item."""
@@ -351,7 +384,12 @@ class HybridRanker:
         return hashlib.sha256(content_str.encode()).hexdigest()
 
     def normalize_scores(self, items: List[RetrievedItem]) -> List[RetrievedItem]:
-        """Normalize scores to 0-1 range."""
+        """Normalize scores to 0-1 range, returning copies (inputs untouched).
+
+        Same contract as :meth:`reciprocal_rank_fusion`: a ranker never mutates
+        the items it is given, because they may be the cached retrieval objects
+        whose ``score`` is a similarity other code depends on.
+        """
         if not items:
             return items
 
@@ -359,13 +397,10 @@ class HybridRanker:
         min_score = min(item.score for item in items)
 
         if max_score == min_score:
-            for item in items:
-                item.score = 1.0
-        else:
-            for item in items:
-                item.score = (item.score - min_score) / (max_score - min_score)
+            return [replace(item, score=1.0) for item in items]
 
-        return items
+        span = max_score - min_score
+        return [replace(item, score=(item.score - min_score) / span) for item in items]
 
 
 # =============================================================================
@@ -521,10 +556,28 @@ class RAGService:
         # Normalize Hungarian text to NFC form for consistent search
         query = unicodedata.normalize("NFC", query)
 
-        # Check cache. ``type_`` is part of the key: under the unified collection
-        # two retrieval legs can otherwise share collection+query+filters and
-        # serve each other's results.
-        cached = self._cache.get("qdrant", target_collection, type_, query, filters)
+        # Cache key = EVERY argument that changes the result set. ``type_`` is in
+        # it because under the unified collection two retrieval legs otherwise
+        # share collection+query+filters and serve each other's results; ``top_k``
+        # and ``score_threshold`` are in it because they change the size and the
+        # cut-off of that set (chat_service asks for top_k=3 on a bare DTC code,
+        # assemble_context asks for top_k=10 on the same reduced query, and the
+        # second caller used to be served the first one's 3 items). ``preprocess``
+        # is in it because it changes the vector the query is embedded into.
+        # No slicing of a wider cached result: Qdrant's HNSW search depends on
+        # ``limit``, so a top_k=10 result is not guaranteed to contain the same
+        # first 3 hits a top_k=3 search would return.
+        cache_key = (
+            "qdrant",
+            target_collection,
+            type_,
+            query,
+            filters,
+            top_k,
+            score_threshold,
+            preprocess,
+        )
+        cached = self._cache.get(*cache_key)
         if cached is not None:
             return cast("List[RetrievedItem]", cached)
 
@@ -606,7 +659,7 @@ class RAGService:
             )
 
             # Cache results
-            self._cache.set(items, "qdrant", target_collection, type_, query, filters)
+            self._cache.set(items, *cache_key)
             return items
 
         except Exception as e:
@@ -970,16 +1023,37 @@ class RAGService:
         dtc_data = [item.content for item in combined_dtc[:10]]
         context.dtc_context = format_dtc_context(dtc_data)
 
-        symptom_data = [
-            {
-                "description": item.content.get("description", ""),
-                "score": item.score,
-                "resolution": item.content.get("resolution", ""),
-                "related_dtc": item.content.get("related_dtc", []),
-            }
-            for item in context.symptom_items[:5]
-        ]
-        context.symptom_context = format_symptom_context(symptom_data)
+        # Only hits that actually carry a narrative become "similar cases". A
+        # complaint payload without one (see _symptom_narrative) would render as
+        # a blank numbered line - "1.  (hasonlosag: 78%)" - in the LLM prompt and
+        # would suppress the honest "Nincs hasonlo eset" branch, because an empty
+        # list is what makes that branch fire.
+        symptom_data = []
+        for item in context.symptom_items:
+            narrative = _symptom_narrative(item.content)
+            if not narrative:
+                continue
+            symptom_data.append(
+                {
+                    "description": narrative,
+                    "score": item.score,
+                    "resolution": item.content.get("resolution", ""),
+                    "related_dtc": item.content.get("related_dtc", []),
+                }
+            )
+
+        dropped = len(context.symptom_items) - len(symptom_data)
+        if dropped > 0:
+            # Visible telemetry for a payload-shape drift that is otherwise
+            # invisible: the hits exist, they just carry no readable text.
+            logger.info(
+                "rag symptom leg: %d/%d hits carry no narrative payload and were "
+                "dropped from the prompt and from confidence scoring",
+                dropped,
+                len(context.symptom_items),
+            )
+
+        context.symptom_context = format_symptom_context(symptom_data[:5])
 
         context.repair_context = format_repair_context(graph_data)
 
@@ -1033,11 +1107,17 @@ class RAGService:
             factors += 0.2
 
         # Factor 3: Symptom matching (0-0.2)
-        if context.symptom_items:
-            symptom_scores = [item.score for item in context.symptom_items]
-            if symptom_scores:
-                avg_symptom = sum(symptom_scores) / len(symptom_scores)
-                score += avg_symptom * 0.2
+        # Only narrative-bearing hits count. A complaint payload with no text
+        # contributes nothing to the prompt, so letting its similarity inflate
+        # the confidence would report evidence the diagnosis never saw. With no
+        # usable symptom evidence the factor is simply absent from the average,
+        # matching how factors 1, 4 and 5 treat missing evidence.
+        symptom_scores = [
+            item.score for item in context.symptom_items if _symptom_narrative(item.content)
+        ]
+        if symptom_scores:
+            avg_symptom = sum(symptom_scores) / len(symptom_scores)
+            score += avg_symptom * 0.2
             factors += 0.2
 
         # Factor 4: Graph context richness (0-0.2)

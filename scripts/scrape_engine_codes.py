@@ -242,8 +242,12 @@ class EngineCodesScraper:
         for anchor in soup.find_all("a", href=True):
             href = anchor["href"]
 
-            # Match patterns like /p0100.html, /b0001.html, etc.
-            if re.match(r'^/?[pbcu]\d{4}\.html$', href, re.IGNORECASE):
+            # Match patterns like /p0100.html, /p26b7.html, /b00a0.html.
+            # The stem is validated with the canonical SAE J2012 rule; the old
+            # inline r'^/?[pbcu]\d{4}\.html$' was decimal-only and skipped
+            # every hex code page this site publishes.
+            stem = re.match(r'^/?([A-Za-z][0-9A-Za-z]{4})\.html$', href)
+            if stem and validate_dtc_code(stem.group(1)):
                 # Normalize URL
                 if not href.startswith("/"):
                     href = "/" + href
@@ -258,8 +262,8 @@ class EngineCodesScraper:
                     netloc = parsed.netloc.lower()
                     allowed_domain = "engine-codes.com"
                     if netloc == allowed_domain or netloc.endswith("." + allowed_domain):
-                        match = re.search(r'/([pbcu]\d{4})\.html', href, re.IGNORECASE)
-                        if match:
+                        match = re.search(r'/([A-Za-z][0-9A-Za-z]{4})\.html', href)
+                        if match and validate_dtc_code(match.group(1)):
                             links.add(f"/{match.group(1).lower()}.html")
             except Exception:
                 pass  # Skip invalid URLs
@@ -480,9 +484,10 @@ class EngineCodesScraper:
         Returns:
             Code data dictionary or None.
         """
-        # Extract code from path
-        match = re.search(r'/([pbcu]\d{4})\.html', code_path, re.IGNORECASE)
-        if not match:
+        # Extract code from path (validated against the canonical SAE J2012
+        # rule, so hex code pages such as /p26b7.html are accepted).
+        match = re.search(r'/([A-Za-z][0-9A-Za-z]{4})\.html', code_path)
+        if not match or not validate_dtc_code(match.group(1)):
             logger.warning(f"Invalid code path: {code_path}")
             return None
 

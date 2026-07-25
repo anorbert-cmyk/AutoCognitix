@@ -37,6 +37,13 @@ from tqdm import tqdm
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The inline r'^[PCBU][0-9A-F]{4}$' replaced
+# below was too loose (it admitted PEACE / PACED / U760E / PC861 / P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -186,8 +193,8 @@ async def scrape_range(
                     code_cell = cells[0].get_text(strip=True).upper()
                     desc_cell = cells[1].get_text(strip=True)
 
-                    # Validate DTC code format
-                    if re.match(r'^[PCBU][0-9A-F]{4}$', code_cell, re.IGNORECASE):
+                    # Validate DTC code format (canonical SAE J2012 rule)
+                    if is_valid_dtc_code(code_cell):
                         codes.append({
                             "code": code_cell,
                             "description_en": desc_cell,
@@ -199,8 +206,8 @@ async def scrape_range(
             # Try finding codes in div/span elements
             for element in soup.find_all(["div", "span", "p"]):
                 text = element.get_text(strip=True)
-                match = re.match(r'^([PCBU][0-9A-F]{4})\s*[-:]\s*(.+)$', text, re.IGNORECASE)
-                if match:
+                match = re.match(r'^([A-Za-z][0-9A-Za-z]{4})\s*[-:]\s*(.+)$', text)
+                if match and is_valid_dtc_code(match.group(1)):
                     codes.append({
                         "code": match.group(1).upper(),
                         "description_en": match.group(2).strip(),
@@ -313,7 +320,7 @@ def normalize_codes(codes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not code or code in seen:
             continue
 
-        if not re.match(r'^[PCBU][0-9A-F]{4}$', code, re.IGNORECASE):
+        if not is_valid_dtc_code(code):
             continue
 
         seen.add(code)

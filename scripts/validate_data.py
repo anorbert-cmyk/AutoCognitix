@@ -4,7 +4,6 @@ DTC adatvalidációs script
 Ellenőrzi a DTC kódok minőségét és konzisztenciáját.
 """
 
-import importlib.util
 import json
 import re
 import sys
@@ -18,18 +17,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Magyar karakterek a validációhoz
 HUNGARIAN_CHARS = set("áéíóöőúüűÁÉÍÓÖŐÚÜŰ")
 
-# DTC kód formátum - a kanonikus szabályok (SAE J2012) itt élnek:
-# backend/app/core/dtc_codes.py. Fájl útvonal alapján töltjük be, nem
-# `from app.core.dtc_codes import ...` formában, mert az `app.core` csomag
-# importja lefuttatja az app/core/__init__.py-t, ami felépíti a FastAPI
-# Settings objektumot - így a script SECRET_KEY / JWT_SECRET_KEY nélkül
-# elszállna egy ötkarakteres string ellenőrzésekor.
-_DTC_RULES_PATH = PROJECT_ROOT / "backend" / "app" / "core" / "dtc_codes.py"
-_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
-if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
-    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
-dtc_rules = importlib.util.module_from_spec(_dtc_spec)
-_dtc_spec.loader.exec_module(dtc_rules)
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. Importing `app.core` no longer constructs the
+# FastAPI Settings object, so this runs with no .env and no SECRET_KEY.
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core import dtc_codes as dtc_rules  # noqa: E402
 
 # Gibberish detektáláshoz használt minták
 GIBBERISH_PATTERNS = [

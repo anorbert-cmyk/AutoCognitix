@@ -874,6 +874,69 @@ class TestVehicleCommonIssues:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("common-issues neo4j OK" in r.getMessage() for r in caplog.records)
 
+    @pytest.mark.asyncio
+    async def test_sources_report_ok_when_both_datastores_answer(
+        self, async_client: AsyncClient, app
+    ):
+        """Empty AND `ok` is the ONLY combination a client may present as an
+        absence of data ("no NHTSA record for this vehicle").
+        """
+        mock = AsyncMock()
+        mock.get_vehicle_common_issues.return_value = []
+        mock.get_vehicle_complaint_components.return_value = ([], 0)
+        app.dependency_overrides[get_vehicle_service] = lambda: mock
+
+        response = await async_client.get("/api/v1/vehicles/Skoda/Octavia/common-issues")
+
+        assert response.status_code == 200
+        assert response.json()["sources"] == {"components": "ok", "issues": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_sources_flag_the_graph_unavailable_on_a_swallowed_neo4j_error(
+        self, async_client: AsyncClient
+    ):
+        """The swallowed outage must be visible to the CLIENT, not just in the logs.
+
+        Uses the real VehicleService so the swallow and the flag are checked
+        together. The empty `issues` list is unchanged (the 200 contract), but it
+        is now labelled as "could not load" rather than "nothing to report".
+        """
+        with patch("asyncio.to_thread", side_effect=RuntimeError("ServiceUnavailable")):
+            response = await async_client.get("/api/v1/vehicles/Volkswagen/Golf/common-issues")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["issues"] == []
+        assert data["sources"]["issues"] == "unavailable"
+        # The sibling source is independent and must not be tarred with it
+        assert data["sources"]["components"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_param_is_rejected(self, async_client: AsyncClient, app):
+        """A whitespace-only make/model is refused instead of matching everything.
+
+        `_VEHICLE_PARAM_RE` accepts a lone space, which strips to "" - and an
+        empty model is not a narrower filter but NO filter (SQL `LIKE '%'`,
+        Cypher `'golf gti' STARTS WITH ''`). Rejected once in the endpoint, so
+        BOTH legs are covered; the service is never even called.
+        """
+        mock = AsyncMock()
+        mock.get_vehicle_common_issues.return_value = []
+        mock.get_vehicle_complaint_components.return_value = ([], 0)
+        app.dependency_overrides[get_vehicle_service] = lambda: mock
+
+        for path in (
+            "/api/v1/vehicles/Volkswagen/%20/common-issues",
+            "/api/v1/vehicles/Volkswagen/%20%20/common-issues",
+            "/api/v1/vehicles/%20/Golf/common-issues",
+        ):
+            response = await async_client.get(path)
+            assert response.status_code == 422, path
+            assert response.json()["detail"] == "A gyártó és a modell nem lehet üres."
+
+        mock.get_vehicle_common_issues.assert_not_awaited()
+        mock.get_vehicle_complaint_components.assert_not_awaited()
+
 
 class TestVehicleComplaintComponents:
     """The `components` half of GET /{make}/{model}/common-issues.
@@ -1100,13 +1163,39 @@ class TestVehicleComplaintComponents:
         errors = [r for r in caplog.records if r.levelno == logging.ERROR]
         assert len(errors) == 1
         assert "common-issues components QUERY FAILED" in errors[0].getMessage()
+        # ...and the client is told, instead of having to read our logs
+        assert data["sources"] == {"components": "unavailable", "issues": "ok"}
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_model_does_not_aggregate_the_whole_make(
+        self, async_client: AsyncClient, seeded_complaints
+    ):
+        """The concrete D2 failure, against real seeded rows.
+
+        Unguarded, `/Volkswagen/%20/common-issues` compiled to `LIKE '%'` and
+        returned EVERY Volkswagen component - JETTA's STEERING complaint
+        included, even though the caller asked about a (blank) model. The
+        request must be refused, not answered with the make's whole history.
+        """
+        # Control: the make really does have rows that could leak, and one of
+        # them belongs to a different model.
+        control = await async_client.get("/api/v1/vehicles/Volkswagen/Jetta/common-issues")
+        assert control.status_code == 200
+        assert [c["component"] for c in control.json()["components"]] == ["STEERING"]
+
+        response = await async_client.get("/api/v1/vehicles/Volkswagen/%20/common-issues")
+
+        assert response.status_code == 422
+        body = response.json()
+        assert "components" not in body
+        assert "STEERING" not in response.text
 
     @pytest.mark.asyncio
     async def test_legacy_issues_field_still_present(
         self, async_client: AsyncClient, app, seeded_complaints
     ):
         """Additive contract guard: the DTC `issues` list must survive alongside
-        the new `components` / `total_complaints` fields.
+        the `components` / `total_complaints` / `sources` fields.
         """
         mock = AsyncMock()
         mock.get_vehicle_common_issues.return_value = [
@@ -1142,7 +1231,18 @@ class TestVehicleComplaintComponents:
 
         assert response.status_code == 200
         data = response.json()
-        assert set(data) == {"make", "model", "year", "issues", "components", "total_complaints"}
+        # `sources` is the additive field from the truthfulness fix; the exact-set
+        # assertion is the point of this test, so it has to name it.
+        assert set(data) == {
+            "make",
+            "model",
+            "year",
+            "issues",
+            "components",
+            "total_complaints",
+            "sources",
+        }
+        assert data["sources"] == {"components": "ok", "issues": "ok"}
         assert [i["code"] for i in data["issues"]] == ["P0301"]
         assert data["issues"][0]["occurrence_count"] == 42
         assert data["components"][0]["component"] == "ELECTRICAL SYSTEM"

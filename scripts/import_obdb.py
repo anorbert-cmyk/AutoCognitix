@@ -36,6 +36,13 @@ from tqdm import tqdm
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# DTC rules (SAE J2012) - single source of truth, IMPORTED not copied:
+# backend/app/core/dtc_codes.py. The pattern replaced here (^[PCBU][0-9A-F]{4}$) was too loose: it
+# admitted hex-shaped non-codes (PEACE, PACED, U760E, PC861, P9324).
+sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+
+from app.core.dtc_codes import is_valid_dtc_code  # noqa: E402
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -245,7 +252,7 @@ def extract_dtc_codes(signalset: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Handle dtcs as dict
     if isinstance(dtcs, dict):
         for code, code_data in dtcs.items():
-            if not re.match(r'^[PCBU][0-9A-F]{4}$', code, re.IGNORECASE):
+            if not is_valid_dtc_code(code):
                 continue
 
             description = code_data if isinstance(code_data, str) else code_data.get("description", "")

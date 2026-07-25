@@ -499,9 +499,27 @@ class TestRelatedCodesEndpoint:
     @pytest.mark.asyncio
     async def test_related_codes_for_nonexistent_returns_404(self, async_client, seeded_db):
         """Test that related codes for nonexistent code returns 404."""
-        response = await async_client.get("/api/v1/dtc/P9999/related")
+        # Structurally valid but not seeded, matching the /{code} sibling.
+        # "P9999" fails SAE J2012 (second character must be 0-3), so it is a
+        # format error, not a lookup miss - see the 400 case below.
+        response = await async_client.get("/api/v1/dtc/P3FFF/related")
 
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_related_codes_reject_the_same_formats_as_the_detail_endpoint(
+        self, async_client, seeded_db
+    ):
+        """/{code} and /{code}/related bind the same parameter and must agree.
+
+        /related previously had NO format validation, so a spelling the detail
+        endpoint answered with 400 reached the Neo4j lookup by the back door.
+        """
+        for code in ["INVALID", "X0101", "P01", "PEACE", "P9324", "P9999"]:
+            detail = await async_client.get(f"/api/v1/dtc/{code}")
+            related = await async_client.get(f"/api/v1/dtc/{code}/related")
+            assert detail.status_code == 400, f"Expected 400 from /{code}"
+            assert related.status_code == 400, f"Expected 400 from /{code}/related"
 
     @pytest.mark.asyncio
     async def test_related_codes_include_relevance(self, async_client, seeded_db):

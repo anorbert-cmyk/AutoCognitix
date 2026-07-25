@@ -40,9 +40,12 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic at runtime via globals() introspection.
-# CodeQL's static analyzer can't see that usage, so we mark them explicitly.
-revision: str = "020_complaint_component_idx"  # codeql[py/unused-global-variable]
-down_revision: Union[str, None] = "019_fix_archive_drift"  # codeql[py/unused-global-variable]
+# The static analyzer can't see that usage, so we mark them explicitly with the
+# `lgtm[...]` directive this project uses everywhere else (CLAUDE.md; migrations
+# 016/017/018). A `codeql[...]` comment is not a suppression the scanner honours,
+# so these two lines would still have been reported.
+revision: str = "020_complaint_component_idx"  # lgtm[py/unused-global-variable]
+down_revision: Union[str, None] = "019_fix_archive_drift"  # lgtm[py/unused-global-variable]
 
 __all__ = ["revision", "down_revision", "upgrade", "downgrade"]
 
