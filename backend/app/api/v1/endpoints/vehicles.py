@@ -18,6 +18,7 @@ from app.api.v1.schemas.vehicle import (
     PaginatedResponse,
     VehicleCommonIssue,
     VehicleCommonIssuesResponse,
+    VehicleComplaintComponent,
     VehicleMake,
     VehicleModel,
     VehicleYearsResponse,
@@ -280,6 +281,29 @@ COMMON_ISSUES_RESPONSES: Dict[Union[int, str], Dict[str, Any]] = {
                             "occurrence_count": 150,
                         }
                     ],
+                    "components": [
+                        {
+                            "component": "ELECTRICAL SYSTEM",
+                            "component_hu": "Elektromos rendszer",
+                            "complaint_count": 412,
+                            "share": 0.2743,
+                            "crash_count": 3,
+                            "fire_count": 1,
+                            "injury_count": 2,
+                            "death_count": 0,
+                        },
+                        {
+                            "component": "SERVICE BRAKES",
+                            "component_hu": "Üzemi fék",
+                            "complaint_count": 288,
+                            "share": 0.1917,
+                            "crash_count": 11,
+                            "fire_count": 0,
+                            "injury_count": 6,
+                            "death_count": 0,
+                        },
+                    ],
+                    "total_complaints": 1502,
                 }
             }
         },
@@ -775,7 +799,7 @@ async def get_vehicle_complaints(
 
 
 # =============================================================================
-# Common Issues (from Neo4j)
+# Common Issues (DTC graph + NHTSA complaint components)
 # =============================================================================
 
 
@@ -785,32 +809,53 @@ async def get_vehicle_complaints(
     responses=COMMON_ISSUES_RESPONSES,
     summary="Get common vehicle issues",
     description="""
-**Get common DTC codes and issues** for a specific vehicle from the Neo4j knowledge graph.
+**Get the most commonly reported problems** for a specific vehicle.
 
-Returns issues that are commonly reported for this make/model combination,
-including frequency and occurrence data.
+Two independent rankings are returned:
+
+- `components` - vehicle components ranked by **NHTSA consumer-complaint
+  frequency** (PostgreSQL), with `share` of this vehicle's total complaints and
+  the crash / fire / injury / death counts behind them. This is the ranking with
+  real coverage.
+- `issues` - DTC codes mined from complaint narratives via the Neo4j graph.
+  Kept for backwards compatibility; consumer narratives rarely quote literal
+  fault codes, so this list is frequently empty even for a well-covered vehicle.
+
+`total_complaints` is the denominator for `share` and doubles as the "is there
+any data for this vehicle at all" signal.
+
+Both rankings degrade to empty on a datastore outage - this endpoint returns
+200 with truthful empty lists rather than a 500.
 
 **Example:**
-`/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018`
+`/api/v1/vehicles/Volkswagen/Golf/common-issues?year=2018&limit=10`
     """,
 )
 async def get_vehicle_common_issues(
     make: str = Path(..., description="Vehicle make (e.g., Volkswagen)"),
     model: str = Path(..., description="Vehicle model (e.g., Golf)"),
     year: Optional[int] = Query(None, ge=1900, le=2030, description="Optional year filter"),
+    limit: int = Query(
+        10,
+        ge=1,
+        le=50,
+        description="Maximum number of complaint components to return",
+    ),
     vehicle_service: VehicleService = Depends(get_vehicle_service),
 ) -> VehicleCommonIssuesResponse:
     """
-    Get common issues for a specific vehicle from the knowledge graph.
+    Get common issues for a specific vehicle.
 
     Args:
         make: Vehicle manufacturer name
         model: Vehicle model name
         year: Optional year filter
+        limit: Maximum number of complaint components to return
         vehicle_service: Vehicle service instance
 
     Returns:
-        Common issues response with list of DTC codes and their frequency
+        Common issues response with the DTC ranking, the NHTSA complaint
+        component ranking, and the total complaint count.
     """
     make = _validate_vehicle_param(make)
     model = _validate_vehicle_param(model)
@@ -820,6 +865,16 @@ async def get_vehicle_common_issues(
             make=make,
             model=model,
             year=year,
+        )
+
+        # Sequential, NOT asyncio.gather: the two calls hit different datastores
+        # but the component query runs on an AsyncSession, and concurrent
+        # execute() on one session raises InterfaceError. Keep them ordered.
+        components_data, total_complaints = await vehicle_service.get_vehicle_complaint_components(
+            make=make,
+            model=model,
+            year=year,
+            limit=limit,
         )
 
         issues = [
@@ -834,11 +889,27 @@ async def get_vehicle_common_issues(
             for issue in issues_data
         ]
 
+        components = [
+            VehicleComplaintComponent(
+                component=component["component"],
+                component_hu=component.get("component_hu"),
+                complaint_count=component["complaint_count"],
+                share=component["share"],
+                crash_count=component["crash_count"],
+                fire_count=component["fire_count"],
+                injury_count=component["injury_count"],
+                death_count=component["death_count"],
+            )
+            for component in components_data
+        ]
+
         return VehicleCommonIssuesResponse(
             make=make,
             model=model,
             year=year,
             issues=issues,
+            components=components,
+            total_complaints=total_complaints,
         )
 
     except Exception as e:

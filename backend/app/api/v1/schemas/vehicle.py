@@ -139,6 +139,39 @@ class VehicleCommonIssue(BaseModel):
     occurrence_count: Optional[int] = Field(None, description="Number of reported occurrences")
 
 
+class VehicleComplaintComponent(BaseModel):
+    """A vehicle component ranked by NHTSA consumer-complaint frequency.
+
+    Sourced from the imported NHTSA complaint corpus in PostgreSQL. Unlike the
+    DTC-based `VehicleCommonIssue` list - which depends on a complaint narrative
+    literally quoting a fault code, something consumers almost never do - the
+    component field is present on every complaint row, so this list actually
+    carries data.
+    """
+
+    component: str = Field(
+        ..., description="Raw NHTSA component label (uppercase, e.g. 'ELECTRICAL SYSTEM')"
+    )
+    component_hu: Optional[str] = Field(
+        None,
+        description=(
+            "Hungarian label, or null when no verified translation exists "
+            "(clients should fall back to `component`)"
+        ),
+    )
+    complaint_count: int = Field(..., description="Complaints filed against this component")
+    share: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of this vehicle's total complaints (0..1)",
+    )
+    crash_count: int = Field(..., description="Complaints that reported a crash")
+    fire_count: int = Field(..., description="Complaints that reported a fire")
+    injury_count: int = Field(..., description="Total injuries reported")
+    death_count: int = Field(..., description="Total deaths reported")
+
+
 class VehicleCommonIssuesResponse(BaseModel):
     """Schema for vehicle common issues response."""
 
@@ -146,3 +179,15 @@ class VehicleCommonIssuesResponse(BaseModel):
     model: str = Field(..., description="Vehicle model")
     year: Optional[int] = Field(None, description="Optional year filter")
     issues: List[VehicleCommonIssue] = Field(default_factory=list, description="Common issues")
+    components: List[VehicleComplaintComponent] = Field(
+        default_factory=list,
+        description="Components ranked by NHTSA complaint frequency (descending)",
+    )
+    total_complaints: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Total NHTSA complaints stored for this vehicle across ALL components "
+            "(the denominator for `share`; 0 means no complaint data)"
+        ),
+    )

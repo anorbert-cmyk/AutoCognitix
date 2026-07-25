@@ -6,21 +6,38 @@ vehicle_makes/vehicle_models tables if Neo4j returns empty results.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from neomodel import db as neomodel_db
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
+
+if TYPE_CHECKING:  # local-variable annotation only - never evaluated at runtime
+    from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.core.logging import get_logger
 from app.core.sql_utils import escape_ilike
-from app.db.postgres.models import DTCCode, VehicleMake, VehicleModel as VehicleModelDB
+from app.db.postgres.models import (
+    DTCCode,
+    VehicleComplaint,
+    VehicleMake,
+    VehicleModel as VehicleModelDB,
+)
 from app.db.postgres.session import async_session_maker
 
 logger = get_logger(__name__)
 
 # Default cap on the number of ranked common-issue rows returned.
 _DEFAULT_COMMON_ISSUES_LIMIT = 20
+
+# Default cap on the number of ranked NHTSA complaint components returned.
+_DEFAULT_COMPONENTS_LIMIT = 10
+
+# Label used for complaints whose NHTSA component field is missing/blank. This
+# is the same sentinel the flat-file importer writes (scripts/import_flat_complaints.py
+# -> `fields[11].strip() or "UNKNOWN"`), so NULL rows fold into the corpus's own
+# bucket instead of forming a second, differently-named "unknown" group.
+_UNKNOWN_COMPONENT = "UNKNOWN"
 
 # Bare-label complaint aggregation for a vehicle's most common DTC issues.
 #
@@ -52,6 +69,77 @@ _COMMON_ISSUES_CYPHER = """
     ORDER BY occurrence_count DESC, code ASC
     LIMIT $limit
 """
+
+# NHTSA component label -> Hungarian label.
+#
+# Keys are the EXACT uppercase strings NHTSA ships in FLAT_CMPL COMPDESC (the
+# `vehicle_complaints.components` column); lookup is by `value.upper()`.
+# Seeded from the real corpus distribution measured at import time
+# (data/nhtsa/complaints_flat/flat_import_stats.json `top_components`), which
+# covers the overwhelming majority of rows out of ~752 distinct values.
+#
+# Deliberately partial: an unmapped component yields ``component_hu = None`` so
+# the UI can fall back to the raw English label. Never guess a translation -
+# a wrong Hungarian component name is worse than an honest English one.
+_COMPONENT_LABELS_HU: Dict[str, str] = {
+    "AIR BAGS": "Légzsákok",
+    "AIR BAGS:FRONTAL": "Légzsákok: frontális",
+    "BACK OVER PREVENTION": "Hátramenet-figyelő rendszer",
+    "CHILD SEAT": "Gyermekülés",
+    "ELECTRICAL SYSTEM": "Elektromos rendszer",
+    "ELECTRONIC STABILITY CONTROL (ESC)": "Elektronikus menetstabilizátor (ESC)",
+    "ENGINE": "Motor",
+    "ENGINE AND ENGINE COOLING": "Motor és motorhűtés",
+    "ENGINE AND ENGINE COOLING:ENGINE": "Motor és motorhűtés: motor",
+    "EQUIPMENT": "Felszerelés",
+    "EXTERIOR LIGHTING": "Külső világítás",
+    "EXTERIOR LIGHTING:HEADLIGHTS": "Külső világítás: fényszórók",
+    "FORWARD COLLISION AVOIDANCE: AUTOMATIC EMERGENCY BRAKING": (
+        "Frontális ütközés elkerülése: automatikus vészfékezés"
+    ),
+    "FUEL SYSTEM, DIESEL": "Üzemanyagrendszer (dízel)",
+    "FUEL SYSTEM, GASOLINE": "Üzemanyagrendszer (benzin)",
+    "FUEL/PROPULSION SYSTEM": "Üzemanyag- és hajtásrendszer",
+    "LATCHES/LOCKS/LINKAGES": "Zárak, reteszek, csuklópontok",
+    "PARKING BRAKE": "Rögzítőfék",
+    "POWER TRAIN": "Hajtáslánc",
+    "POWER TRAIN:AUTOMATIC TRANSMISSION": "Hajtáslánc: automata váltó",
+    "POWER TRAIN:MANUAL TRANSMISSION": "Hajtáslánc: kézi váltó",
+    "SEAT BELTS": "Biztonsági övek",
+    "SEATS": "Ülések",
+    "SERVICE BRAKES": "Üzemi fék",
+    "SERVICE BRAKES, AIR": "Üzemi fék (levegős)",
+    "SERVICE BRAKES, HYDRAULIC": "Üzemi fék (hidraulikus)",
+    "STEERING": "Kormányzás",
+    "STRUCTURE": "Karosszéria és váz",
+    "STRUCTURE:BODY": "Karosszéria",
+    "SUSPENSION": "Futómű",
+    "TIRES": "Gumiabroncsok",
+    "TRAILER HITCHES": "Vonóhorog",
+    _UNKNOWN_COMPONENT: "Ismeretlen",
+    "UNKNOWN OR OTHER": "Ismeretlen vagy egyéb",
+    "VEHICLE SPEED CONTROL": "Sebességszabályozás",
+    "VISIBILITY/WIPER": "Látási viszonyok / ablaktörlő",
+    "WHEELS": "Kerekek",
+}
+
+
+def _make_spelling_variants(make: str) -> List[str]:
+    """Lowercased NHTSA `make` spellings to match a caller-supplied make against.
+
+    NHTSA's own corpus is not internally consistent: the flat file ships BOTH
+    ``MERCEDES-BENZ`` (17,347 rows) and ``MERCEDES BENZ`` (11,134 rows) as
+    separate makes. A single equality on the canonical hyphenated spelling
+    would silently drop 39% of that brand's complaints.
+
+    Returns 1-3 lowercase variants (hyphen/space interchange, de-duplicated,
+    order-stable). Kept as an ``IN`` list rather than a ``LIKE``/regex so the
+    planner can still use the ``lower(make)`` index (BitmapOr of equality
+    scans).
+    """
+    normalized = " ".join(make.strip().lower().split())
+    variants = [normalized, normalized.replace("-", " "), normalized.replace(" ", "-")]
+    return list(dict.fromkeys(v for v in variants if v))
 
 
 class VehicleService:
@@ -560,6 +648,175 @@ class VehicleService:
                 }
             )
         return issues
+
+    async def get_vehicle_complaint_components(
+        self,
+        make: str,
+        model: str,
+        year: Optional[int] = None,
+        limit: int = _DEFAULT_COMPONENTS_LIMIT,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Rank a vehicle's NHTSA complaint components by report frequency.
+
+        This is the *real* common-issues signal. The DTC-based ranking above can
+        only see complaints whose free-text narrative literally quotes a fault
+        code, which consumers essentially never do - the whole graph holds ~107
+        complaint->DTC edges. Component frequency, by contrast, is a first-class
+        NHTSA field present on every one of the imported complaint rows, so it
+        actually has data to show.
+
+        Returns ``(components, total_complaints)`` where ``total_complaints`` is
+        the denominator across ALL component groups for this vehicle (not just
+        the ``limit`` returned ones), so ``share`` stays meaningful and a caller
+        can tell "no data for this vehicle" from "data exists, list truncated".
+
+        Degrades gracefully: any PostgreSQL error logs at ERROR and returns
+        ``([], 0)`` - this endpoint must never surface a 500. A genuine no-rows
+        result logs at INFO with ``rows=0 total=0``. The two are only
+        distinguishable in the logs; never collapse them.
+        """
+        make_clean = make.strip()
+        model_clean = model.strip()
+        if not make_clean or not model_clean:
+            # A blank make/model is not a vehicle. Guarded explicitly because an
+            # empty model would otherwise build the pattern "%" and aggregate the
+            # make's ENTIRE complaint history under the user's chosen model.
+            return [], 0
+
+        try:
+            rows = await self._query_complaint_components(make_clean, model_clean, year, limit)
+        except Exception as e:
+            logger.error(
+                "common-issues components QUERY FAILED (PostgreSQL unreachable or query "
+                "invalid) make=%s model=%s year=%s error=%s: %s",
+                sanitize_log(make_clean),
+                sanitize_log(model_clean),
+                sanitize_log(str(year)),
+                type(e).__name__,
+                sanitize_exception(e),
+            )
+            return [], 0
+
+        total = int(rows[0]["total_complaints"] or 0) if rows else 0
+
+        components: List[Dict[str, Any]] = []
+        for row in rows:
+            component = row["component"]
+            count = int(row["complaint_count"] or 0)
+            components.append(
+                {
+                    "component": component,
+                    "component_hu": _COMPONENT_LABELS_HU.get(component.upper()),
+                    "complaint_count": count,
+                    # Guarded division: `total` can only be 0 when there are no
+                    # rows at all, but a 0 denominator must never raise here.
+                    "share": round(count / total, 4) if total else 0.0,
+                    "crash_count": int(row["crash_count"] or 0),
+                    "fire_count": int(row["fire_count"] or 0),
+                    "injury_count": int(row["injury_count"] or 0),
+                    "death_count": int(row["death_count"] or 0),
+                }
+            )
+
+        # Success marker - `rows=0` here means PostgreSQL genuinely has no
+        # complaint for this vehicle, NOT that the DB is down (that path logs
+        # ERROR above).
+        logger.info(
+            "common-issues components OK: make=%s model=%s year=%s rows=%d total=%d",
+            sanitize_log(make_clean),
+            sanitize_log(model_clean),
+            sanitize_log(str(year)),
+            len(components),
+            total,
+        )
+        return components, total
+
+    async def _query_complaint_components(
+        self,
+        make: str,
+        model: str,
+        year: Optional[int],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Single grouped aggregation over ``vehicle_complaints``.
+
+        Emits one statement, executed once on one AsyncSession - concurrent
+        ``session.execute()`` calls on a single AsyncSession raise InterfaceError,
+        so the grand total is carried by a window function on the SAME query
+        instead of a second round trip::
+
+            SELECT COALESCE(NULLIF(TRIM(components), ''), 'UNKNOWN') AS component,
+                   count(*)                                          AS complaint_count,
+                   COALESCE(sum(CASE WHEN crash THEN 1 ELSE 0 END), 0) AS crash_count,
+                   COALESCE(sum(CASE WHEN fire  THEN 1 ELSE 0 END), 0) AS fire_count,
+                   COALESCE(sum(injuries), 0)                        AS injury_count,
+                   COALESCE(sum(deaths), 0)                          AS death_count,
+                   sum(count(*)) OVER ()                             AS total_complaints
+              FROM vehicle_complaints
+             WHERE lower(make) IN (:make_variants)
+               AND lower(model) LIKE :model_prefix ESCAPE '\\'
+               [AND model_year = :year]
+             GROUP BY 1
+             ORDER BY complaint_count DESC, component ASC
+             LIMIT :limit
+
+        ``sum(count(*)) OVER ()`` is evaluated after GROUP BY but before
+        ORDER BY/LIMIT, so it is the total across every component group, not
+        just the returned page.
+
+        Matching notes (verified against the live NHTSA corpus, not assumed):
+        - Stored values are UPPERCASE (``VOLKSWAGEN``, ``GOLF GTI``) while
+          callers pass user spellings, hence ``lower()`` on both sides. It is
+          ``lower(col) = ...`` / ``lower(col) LIKE ...`` rather than ``ilike``
+          precisely so the ``lower(make), lower(model)`` functional index
+          (migration 020) is usable - ``ILIKE`` can never use a btree index.
+        - The model is a PREFIX match because NHTSA stores trim-qualified names:
+          ``GOLF`` -> {GOLF, GOLF GTI, GOLF R, GOLF SPORTWAGEN}, and the app's
+          seeded ``GLC``/``XC60`` only reach {GLC-CLASS...}/{XC60 T5, T6, T8}
+          this way. Exact matching returns zero rows for those. The make
+          equality keeps the prefix scoped to one brand.
+        - ``escape_ilike`` neutralises ``%``/``_``/``\\`` in the user value even
+          though the endpoint's parameter regex already rejects them; the escape
+          character is passed explicitly because SQLite (test harness) has no
+          default LIKE escape while PostgreSQL does.
+        """
+        component_expr = func.coalesce(
+            func.nullif(func.trim(VehicleComplaint.components), ""), _UNKNOWN_COMPONENT
+        )
+        complaint_count = func.count().label("complaint_count")
+
+        # Explicitly annotated: mypy would otherwise narrow the list to
+        # BinaryExpression from the first element and reject the year clause.
+        conditions: List[ColumnElement[bool]] = [
+            func.lower(VehicleComplaint.make).in_(_make_spelling_variants(make)),
+            func.lower(VehicleComplaint.model).like(f"{escape_ilike(model.lower())}%", escape="\\"),
+        ]
+        if year is not None:
+            conditions.append(VehicleComplaint.model_year == year)
+
+        stmt = (
+            select(
+                component_expr.label("component"),
+                complaint_count,
+                func.coalesce(
+                    func.sum(case((VehicleComplaint.crash.is_(True), 1), else_=0)), 0
+                ).label("crash_count"),
+                func.coalesce(
+                    func.sum(case((VehicleComplaint.fire.is_(True), 1), else_=0)), 0
+                ).label("fire_count"),
+                func.coalesce(func.sum(VehicleComplaint.injuries), 0).label("injury_count"),
+                func.coalesce(func.sum(VehicleComplaint.deaths), 0).label("death_count"),
+                func.sum(func.count()).over().label("total_complaints"),
+            )
+            .where(*conditions)
+            .group_by(component_expr)
+            .order_by(complaint_count.desc(), component_expr.asc())
+            .limit(limit)
+        )
+
+        async with async_session_maker() as session:
+            result = await session.execute(stmt)
+            return [dict(row) for row in result.mappings().all()]
 
     def _issue_from_graph_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """Map a raw graph aggregation row to a VehicleCommonIssue dict (no enrichment)."""
