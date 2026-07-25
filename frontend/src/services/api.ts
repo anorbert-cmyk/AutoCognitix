@@ -472,6 +472,48 @@ export interface Complaint {
   summary?: string
 }
 
+// A /vehicles/{make}/{model}/common-issues végpont DTC-eleme. A panasz→DTC
+// kapcsolatok a gráfban ritkák (a fogyasztói leírások szinte soha nem idéznek
+// szó szerint hibakódot), ezért ez a lista a legtöbb járműnél üres — ez normális
+// állapot, nem hiba.
+export interface VehicleCommonIssue {
+  code: string
+  description_en?: string | null
+  description_hu?: string | null
+  severity?: string | null
+  /** Minőségi gyakorisági sáv: 'rare' | 'uncommon' | 'common' | 'very_common' */
+  frequency?: string | null
+  occurrence_count?: number | null
+}
+
+// NHTSA panasz-gyakoriság szerint rangsorolt alkatrészcsoport. Ez a végpont
+// megbízható adata: az alkatrészcsoport minden bejelentésen szerepel.
+export interface VehicleComplaintComponent {
+  /** Nyers NHTSA címke, csupa nagybetűvel (pl. 'ELECTRICAL SYSTEM') */
+  component: string
+  /** Magyar címke, vagy null, ha nincs ellenőrzött fordítás — ilyenkor a
+   *  kliens a nyers `component` értékre esik vissza (soha nem találgat). */
+  component_hu?: string | null
+  complaint_count: number
+  /** A járműre tárolt összes bejelentés hányada (0..1) */
+  share: number
+  crash_count: number
+  fire_count: number
+  injury_count: number
+  death_count: number
+}
+
+export interface VehicleCommonIssuesResponse {
+  make: string
+  model: string
+  year?: number | null
+  issues: VehicleCommonIssue[]
+  components: VehicleComplaintComponent[]
+  /** A `share` nevezője: a járműre TÁROLT bejelentések száma (minta, nem a
+   *  NHTSA teljes bejelentésszáma). 0 = nincs bejelentési adat. */
+  total_complaints: number
+}
+
 // =============================================================================
 // API Response Types - Auth
 // =============================================================================
