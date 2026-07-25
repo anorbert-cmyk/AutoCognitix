@@ -62,11 +62,17 @@ Two entry points, deliberately kept separate
   tolerant of the separators humans type (``P-0301``, ``P 0301``).
 
 This module is intentionally dependency-free (stdlib ``re`` only) so the
-standalone scripts can load it without booting the FastAPI settings object.
+standalone scripts under ``scripts/`` can import it without booting the FastAPI
+settings object. That only became true once ``app/core/__init__.py`` stopped
+eagerly importing ``app.core.config``: while it did, ``from app.core.dtc_codes
+import ...`` transitively constructed ``Settings()`` and died without a
+``SECRET_KEY``, so the scripts each kept a hand-synced copy of the rule
+instead - which is how ten divergent regexes accumulated in the first place.
 
-The canonical reference implementation these semantics mirror lives in
-``scripts/sync_neo4j_sprint9.py``; ``backend/tests/unit/test_dtc_codes.py``
-contains a drift guard asserting the two never diverge.
+This module is the ONLY definition. Nothing may restate it:
+``backend/tests/unit/test_dtc_codes.py`` fails if any file under ``scripts/``
+carries a DTC regex of its own, if a DTC-aware script stops importing this
+module, or if this module ever stops being importable without a ``.env``.
 """
 
 import re
