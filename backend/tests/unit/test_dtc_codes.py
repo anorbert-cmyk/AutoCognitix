@@ -58,11 +58,7 @@ def _subprocess_env(**overrides: str) -> dict:
     after every test has passed. These probes assert behaviour, not coverage,
     so they simply opt out.
     """
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("COV_CORE_", "COVERAGE_"))
-    }
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE_", "COVERAGE_"))}
     env.update(overrides)
     return env
 
