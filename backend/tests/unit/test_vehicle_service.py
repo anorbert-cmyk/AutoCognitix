@@ -14,6 +14,7 @@ from sqlalchemy.dialects import postgresql
 from app.services.vehicle_service import (
     VehicleService,
     _make_spelling_variants,
+    _neo4j_make_variants,
     get_vehicle_service,
 )
 
@@ -1191,7 +1192,10 @@ class TestGetVehicleCommonIssues:
         # is no longer a dependency
         assert "HAS_COMPLAINT" not in query
         assert "(v:Vehicle)" not in query
-        assert "c.make" in query
+        # make is compared against the BARE property so the :Complaint(make)
+        # index can serve it; model stays case-folded on purpose (see
+        # test_make_predicate_is_sargable_and_model_stays_case_insensitive)
+        assert "c.make IN $make_variants" in query
         assert "toLower(c.model) STARTS WITH toLower($model)" in query
         assert "c.year" in query
         assert captured["params"]["year"] == 2018
@@ -1217,12 +1221,74 @@ class TestGetVehicleCommonIssues:
         assert "Golf" not in query
         assert "2018" not in query
         assert "7" not in query
-        assert captured["params"] == {
-            "make": evil_make,
-            "model": "Golf",
-            "year": 2018,
-            "limit": 7,
-        }
+        assert set(captured["params"]) == {"make_variants", "model", "year", "limit"}
+        assert captured["params"]["model"] == "Golf"
+        assert captured["params"]["year"] == 2018
+        assert captured["params"]["limit"] == 7
+        # The make is expanded into stored-spelling variants, but every one of
+        # them still travels as a BOUND list value - never as Cypher text.
+        assert evil_make in captured["params"]["make_variants"]
+        for variant in captured["params"]["make_variants"]:
+            assert variant not in query
+
+    @pytest.mark.asyncio
+    async def test_make_predicate_is_sargable_and_model_stays_case_insensitive(self, service):
+        """Regression guard for the non-sargable-filter fix.
+
+        ``toLower(c.make) = toLower($make)`` wrapped the PROPERTY in a function,
+        which no index on :Complaint(make) can serve - every call was a full
+        label scan over the whole Complaint set. The make predicate must keep
+        the property bare so it stays an index seek.
+
+        The model predicate deliberately does NOT get the same treatment:
+        load_all_to_neo4j / load_neo4j_robust write Title-Case models straight
+        from the NHTSA API dumps, and model case cannot be enumerated safely
+        (str.title() mangles RAV4 -> Rav4, CR-V -> Cr-V, GLC -> Glc). Folding it
+        on the property side is the correct trade - it is only a post-filter
+        over the make-scoped seek result. This test pins BOTH halves so neither
+        is "optimised" into losing rows.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["query"] = args[0]
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Volkswagen", "Golf", year=2018)
+
+        query = captured["query"]
+        # The make property is never wrapped - the predicate stays index-usable
+        assert "toLower(c.make)" not in query
+        assert "toUpper(c.make)" not in query
+        assert "c.make IN $make_variants" in query
+        # ...and the model half is NOT "fixed" into dropping Title-Case rows
+        assert "toUpper($model)" not in query
+        assert "c.model STARTS WITH $model" not in query
+        assert "toLower(c.model) STARTS WITH toLower($model)" in query
+
+    @pytest.mark.asyncio
+    async def test_make_variants_cover_both_nhtsa_mercedes_spellings(self, service):
+        """The graph holds MERCEDES-BENZ and MERCEDES BENZ as separate makes
+        (17,347 / 11,134 rows), in uppercase from the flat file and Title-Case
+        from the API dumps. All four must be sought or ~39% of the brand's
+        complaints silently vanish - the same split the PostgreSQL ranking
+        already handles via _make_spelling_variants.
+        """
+        captured = {}
+
+        async def _to_thread(fn, *args, **kwargs):
+            captured["params"] = args[1]
+            return [], None
+
+        with patch("asyncio.to_thread", side_effect=_to_thread):
+            await service.get_vehicle_common_issues("Mercedes-Benz", "GLC")
+
+        variants = captured["params"]["make_variants"]
+        assert "MERCEDES-BENZ" in variants
+        assert "MERCEDES BENZ" in variants
+        assert "Mercedes-Benz" in variants
+        assert "Mercedes Benz" in variants
 
     @pytest.mark.asyncio
     async def test_no_year_omits_year_filter(self, service):
@@ -1503,6 +1569,60 @@ class TestGetVehicleComplaintComponents:
         assert _make_spelling_variants("Volkswagen") == ["volkswagen"]
         assert _make_spelling_variants("  Land   Rover  ") == ["land rover", "land-rover"]
         assert _make_spelling_variants("   ") == []
+
+
+class TestNeo4jMakeVariants:
+    """Stored-spelling enumeration that keeps ``c.make`` bare (index-seekable).
+
+    Neo4j's Complaint.make is NOT uniformly uppercase: sync_neo4j_sprint9 writes
+    .upper(), but load_all_to_neo4j and load_neo4j_robust pass through the
+    Title-Case makes that import_nhtsa_complaints / sync_nhtsa stamp onto their
+    API dumps. Both cases must be sought.
+    """
+
+    def test_single_spelling_make_yields_upper_title_lower(self):
+        assert _neo4j_make_variants("Volkswagen") == ["Volkswagen", "VOLKSWAGEN", "volkswagen"]
+
+    def test_covers_both_nhtsa_mercedes_spellings_in_both_cases(self):
+        variants = _neo4j_make_variants("Mercedes-Benz")
+        for expected in (
+            "MERCEDES-BENZ",
+            "Mercedes-Benz",
+            "MERCEDES BENZ",
+            "Mercedes Benz",
+        ):
+            assert expected in variants
+
+    def test_acronym_make_survives_title_casing(self):
+        """str.title() turns "bmw" into "Bmw", which is in no loader's output.
+        The .upper() variant is what actually matches the stored "BMW".
+        """
+        assert "BMW" in _neo4j_make_variants("bmw")
+
+    def test_reuses_spelling_knowledge_from_postgres_helper(self):
+        """Every lowercase spelling the PostgreSQL ranking looks for must have a
+        Neo4j counterpart - the two rankings may not disagree on which
+        spellings belong to a brand.
+        """
+        for make in ("Mercedes Benz", "Land Rover", "Volkswagen"):
+            lowered = _make_spelling_variants(make)
+            variants = _neo4j_make_variants(make)
+            assert lowered  # sanity: the helper found spellings at all
+            for spelling in lowered:
+                assert spelling.upper() in variants
+                assert spelling in variants
+
+    def test_deduplicated_and_order_stable(self):
+        variants = _neo4j_make_variants("Volkswagen")
+        assert len(variants) == len(set(variants))
+        assert variants[0] == "Volkswagen"  # caller's own spelling first
+
+    def test_blank_make_yields_empty_list(self):
+        """``c.make IN []`` matches nothing, which is the honest answer for a
+        blank make - never an unscoped scan of the whole Complaint set.
+        """
+        assert _neo4j_make_variants("   ") == []
+        assert _neo4j_make_variants("") == []
 
 
 # ===========================================================================

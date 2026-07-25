@@ -56,10 +56,48 @@ _UNKNOWN_COMPONENT = "UNKNOWN"
 # edge set created LAST in the loader run order, i.e. the first casualty of
 # Aura Free's 400K relationship cap. Model uses STARTS WITH because NHTSA
 # stores trim-qualified model names ("GOLF GTI", "GOLF R") that an exact match
-# would silently drop; the make equality keeps the prefix scoped.
+# would silently drop; the make filter keeps the prefix scoped.
+#
+# SARGABILITY - why `c.make` is bare and `c.model` is not.
+#
+# This predicate used to read `toLower(c.make) = toLower($make)`. Wrapping the
+# PROPERTY in a function makes the comparison non-sargable: no index on
+# Complaint.make can serve it, so every call degenerated into a full label scan
+# over the whole Complaint set (~50K nodes today, and the full-corpus DTC
+# extraction in sync_neo4j_sprint9 is designed to add tens of thousands more).
+#
+# The obvious fix - move the function to the parameter side, `c.make =
+# toUpper($make)` - was REJECTED after checking every writer of the property.
+# Only two of the four upper-case it:
+#
+#   sync_neo4j_sprint9.load_complaints      make .upper(), model .upper()   OK
+#   sync_neo4j_sprint9.normalize_complaint  make .upper(), model .upper()   OK
+#   load_all_to_neo4j.load_complaints       make .upper(), model RAW        MIXED
+#   load_neo4j_robust.load_complaints       make RAW,      model RAW        MIXED
+#
+# The raw values are not the flat file's uppercase MAKETXT/MODELTXT: those two
+# loaders read the API-sourced dumps written by import_nhtsa_complaints.py /
+# sync_nhtsa.py, which stamp every record with the Title-Case make/model from
+# their own hardcoded target lists ("Volkswagen", "Mercedes-Benz", "Golf",
+# "C-Class"). Both loaders also create the MENTIONED_IN edges this very query
+# matches on, so those Title-Case nodes are squarely in scope. `toUpper($model)`
+# would silently drop them - the exact failure mode this filter must not have.
+#
+# So the fix splits by predicate:
+#   - `c.make IN $make_variants` - bare property, hence an index SEEK on
+#     :Complaint(make). The list holds the stored spellings (upper/title/lower x
+#     hyphen/space, see _neo4j_make_variants), so nothing is dropped. make is
+#     the selective half, so this alone removes the full label scan.
+#   - `toLower(c.model) STARTS WITH toLower($model)` - deliberately left
+#     case-folded on the property. Model case CANNOT be enumerated safely
+#     (str.title() mangles "RAV4"->"Rav4", "CR-V"->"Cr-V", "GLC"->"Glc"), and a
+#     wrong guess here loses rows. It is now only a post-filter over the
+#     make-scoped seek result, not over the whole label, so it is cheap.
+# Both sides use Cypher's own toLower() so the two operands are folded by the
+# identical function - never mix a Python .lower() with a Cypher toLower().
 _COMMON_ISSUES_CYPHER = """
     MATCH (c:Complaint)-[:MENTIONS_DTC|MENTIONED_IN]-(d:DTC)
-    WHERE toLower(c.make) = toLower($make)
+    WHERE c.make IN $make_variants
       AND toLower(c.model) STARTS WITH toLower($model){year_filter}
     RETURN d.code AS code,
            d.description_en AS description_en,
@@ -140,6 +178,38 @@ def _make_spelling_variants(make: str) -> List[str]:
     normalized = " ".join(make.strip().lower().split())
     variants = [normalized, normalized.replace("-", " "), normalized.replace(" ", "-")]
     return list(dict.fromkeys(v for v in variants if v))
+
+
+def _neo4j_make_variants(make: str) -> List[str]:
+    """Stored ``Complaint.make`` spellings to seek for a caller-supplied make.
+
+    Neo4j's ``Complaint.make`` is not consistently normalised - two of the four
+    loaders that write it store the Title-Case make from their hardcoded target
+    lists instead of NHTSA's uppercase MAKETXT (see the SARGABILITY note on
+    ``_COMMON_ISSUES_CYPHER``). Enumerating the spellings on the PARAMETER side
+    is what lets the query compare a bare ``c.make`` - an index seek - without
+    dropping the Title-Case rows that ``toUpper($make)`` would miss.
+
+    Layered on :func:`_make_spelling_variants` so the NHTSA hyphen/space
+    knowledge (``MERCEDES-BENZ`` 17,347 rows vs ``MERCEDES BENZ`` 11,134 rows -
+    39% of the brand) lives in exactly ONE place and the Neo4j and PostgreSQL
+    rankings agree on which spellings belong to a brand.
+
+    Case coverage is enumerated, not guessed: every make either comes from the
+    uppercase flat file or from one of the 20 Title-Case constants in
+    ``import_nhtsa_complaints.TOP_MAKES`` / ``sync_nhtsa.POPULAR_MAKES``, and
+    ``{upper, title}`` reproduces all 20 exactly (``.upper()`` covers "BMW",
+    which ``.title()`` would mangle to "Bmw"). The caller's own spelling is kept
+    as a further fallback. Bounded at 3 spellings x 3 cases + 1, and it collapses
+    to 3 entries for a single-spelling make like "Volkswagen".
+
+    Returns ``[]`` for a blank make, which makes ``c.make IN []`` match nothing.
+    """
+    as_typed = " ".join(make.strip().split())
+    variants: List[str] = [as_typed] if as_typed else []
+    for lowered in _make_spelling_variants(make):
+        variants.extend((lowered.upper(), lowered.title(), lowered))
+    return list(dict.fromkeys(variants))
 
 
 class VehicleService:
@@ -564,17 +634,26 @@ class VehicleService:
     ) -> List[Dict[str, Any]]:
         """Run the bare-label complaint aggregation against Neo4j.
 
-        See ``_COMMON_ISSUES_CYPHER`` for the schema rationale. make/model/year are
-        all filtered on the ``Complaint`` node, which carries them natively.
+        See ``_COMMON_ISSUES_CYPHER`` for the schema and sargability rationale.
+        make/model/year are all filtered on the ``Complaint`` node, which carries
+        them natively. ``make`` is expanded into its stored spellings here rather
+        than case-folded in Cypher, so the property side stays bare and the
+        predicate can use the :Complaint(make) index.
 
         The year filter is a STATIC template fragment; the user-supplied year is
         bound as the ``$year`` parameter. No caller-controlled value is ever
-        interpolated into the Cypher string - keep it that way.
+        interpolated into the Cypher string - keep it that way. The make variants
+        are derived from the caller's value but likewise travel as a bound
+        parameter, never as query text.
 
         Raises on any driver/query error so the caller can log it distinctly from
         a genuine empty result.
         """
-        params: Dict[str, Any] = {"make": make, "model": model, "limit": limit}
+        params: Dict[str, Any] = {
+            "make_variants": _neo4j_make_variants(make),
+            "model": model,
+            "limit": limit,
+        }
         year_filter = ""
         if year is not None:
             year_filter = "\n      AND c.year = $year"

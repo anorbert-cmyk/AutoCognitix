@@ -597,10 +597,25 @@ class Neo4jSprint9Loader:
     # Indexes
     # ------------------------------------------------------------------
     async def create_indexes(self) -> None:
+        # All IF NOT EXISTS, so this step is safe to re-run on every load.
+        #
+        # Complaint.make backs VehicleService's common-issues aggregation, which
+        # filters `c.make IN $make_variants` on a BARE property precisely so this
+        # index can serve it as a seek. Without it that query is a full label
+        # scan over every Complaint node (~50K today, and the full-corpus DTC
+        # extraction below adds more on every run). The composite mirrors the
+        # (v.make, v.model) index above and serves the exact make+model lookups
+        # in create_vehicle_complaint_relationships.
+        #
+        # Index count is not what Aura Free meters (nodes and the 400K
+        # relationship cap are), and range indexes on two short string
+        # properties are cheap, so these two are effectively free.
         indexes = [
             "CREATE INDEX IF NOT EXISTS FOR (d:DTC) ON (d.code)",
             "CREATE INDEX IF NOT EXISTS FOR (v:Vehicle) ON (v.make, v.model)",
             "CREATE INDEX IF NOT EXISTS FOR (c:Complaint) ON (c.odi_id)",
+            "CREATE INDEX IF NOT EXISTS FOR (c:Complaint) ON (c.make)",
+            "CREATE INDEX IF NOT EXISTS FOR (c:Complaint) ON (c.make, c.model)",
             "CREATE INDEX IF NOT EXISTS FOR (e:Engine) ON (e.code)",
         ]
         for idx in indexes:
