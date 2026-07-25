@@ -328,7 +328,10 @@ class TestEmbeddingSingletonInitializationIsAtomic:
                 # they must see the RESOLVED value, not just "no AttributeError".
                 observed.append(service.backend_name)
                 observed.append(service._require_backend())
-            except BaseException as exc:
+            except Exception as exc:
+                # Exception, not BaseException: the bug this races for surfaces
+                # as AttributeError, and catching KeyboardInterrupt/SystemExit
+                # in a worker thread would only mask a cancelled test run.
                 errors.append(exc)
 
         with patch.object(
@@ -360,9 +363,9 @@ class TestEmbeddingSingletonInitializationIsAtomic:
         import inspect
         import textwrap
 
-        from app.services.embedding_service import HungarianEmbeddingService
+        import app.services.embedding_service as mod
 
-        tree = ast.parse(textwrap.dedent(inspect.getsource(HungarianEmbeddingService.__init__)))
+        tree = ast.parse(textwrap.dedent(inspect.getsource(mod.HungarianEmbeddingService.__init__)))
         assignments = sorted(
             (node.lineno, node.targets[0].attr)
             for node in ast.walk(tree)
@@ -380,9 +383,9 @@ class TestEmbeddingSingletonInitializationIsAtomic:
 
     def test_backend_name_has_a_class_level_default(self):
         """Even an unpublished instance must fail with the HANDLED error."""
-        from app.services.embedding_service import HungarianEmbeddingService
+        import app.services.embedding_service as mod
 
-        raw = object.__new__(HungarianEmbeddingService)
+        raw = object.__new__(mod.HungarianEmbeddingService)
         assert raw._backend_name is None
         with pytest.raises(EmbeddingUnavailableError):
             raw._require_backend()
@@ -431,11 +434,11 @@ class _PaddingTokenizer:
 
 class TestOnnxPoolingWithFoldedMaskInput:
     def _backend(self):
-        from app.services.embedding_service import _OnnxEmbeddingBackend
+        import app.services.embedding_service as mod
 
         # Distinct per-token values so an all-ones mask pools differently.
         hidden = np.arange(2 * 4 * 768, dtype=np.float32).reshape(2, 4, 768) * 0.001
-        backend = _OnnxEmbeddingBackend.__new__(_OnnxEmbeddingBackend)
+        backend = mod._OnnxEmbeddingBackend.__new__(mod._OnnxEmbeddingBackend)
         backend._input_names = {"input_ids"}
         backend._tokenizer = _PaddingTokenizer()
         backend._session = _FoldedGraphSession(hidden)
@@ -443,7 +446,7 @@ class TestOnnxPoolingWithFoldedMaskInput:
 
     def test_embed_succeeds_when_the_graph_declares_only_input_ids(self):
         """Used to raise ``KeyError: 'attention_mask'``."""
-        from app.services.embedding_service import _mean_pool_l2_numpy
+        import app.services.embedding_service as mod
 
         backend, hidden = self._backend()
 
@@ -453,7 +456,7 @@ class TestOnnxPoolingWithFoldedMaskInput:
         assert set(backend._session.last_feeds) == {"input_ids"}
 
         mask = np.array([[1, 1, 1, 1], [1, 1, 1, 0]], dtype=np.int64)
-        expected = _mean_pool_l2_numpy(hidden, mask)
+        expected = mod._mean_pool_l2_numpy(hidden, mask)
 
         assert len(vectors) == 2
         assert len(vectors[0]) == 768
@@ -464,7 +467,7 @@ class TestOnnxPoolingWithFoldedMaskInput:
         np.testing.assert_allclose(norms, np.ones(2), rtol=1e-5, atol=1e-5)
 
         # ...and genuinely mask-weighted: padding must not be pooled in.
-        all_ones = _mean_pool_l2_numpy(hidden, np.ones((2, 4), dtype=np.int64))
+        all_ones = mod._mean_pool_l2_numpy(hidden, np.ones((2, 4), dtype=np.int64))
         assert not np.allclose(np.array(vectors)[1], all_ones[1])
 
     def test_encode_still_returns_only_declared_graph_inputs(self):

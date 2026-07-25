@@ -35,8 +35,6 @@ from types import ModuleType
 import pytest
 
 from app.core.dtc_codes import (
-    DTC_CODE_PATTERN,
-    DTC_CODE_STRICT,
     contains_dtc_code,
     dtc_category,
     extract_dtc_codes,
@@ -514,12 +512,18 @@ def test_canonical_module_is_importable_without_settings():
         [
             sys.executable,
             "-c",
-            "import sys\n"
-            "from app.core.dtc_codes import is_valid_dtc_code, extract_dtc_codes\n"
-            "assert is_valid_dtc_code('P26B7')\n"
-            "assert extract_dtc_codes('VIN 1FADP3F25FL code P0301') == ['P0301']\n"
-            "assert 'app.core.config' not in sys.modules, 'settings were built on import'\n"
-            "print('OK')\n",
+            # One deliberate multi-line program, not a list of arguments: written
+            # as a single triple-quoted string so it cannot be misread (by a
+            # human or a linter) as list entries missing a comma.
+            """
+import sys
+from app.core.dtc_codes import is_valid_dtc_code, extract_dtc_codes
+
+assert is_valid_dtc_code('P26B7')
+assert extract_dtc_codes('VIN 1FADP3F25FL code P0301') == ['P0301']
+assert 'app.core.config' not in sys.modules, 'settings were built on import'
+print('OK')
+""",
         ],
         cwd=tempfile.gettempdir(),
         env=env,
