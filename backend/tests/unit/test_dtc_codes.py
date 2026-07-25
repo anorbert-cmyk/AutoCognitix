@@ -47,6 +47,26 @@ SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 BACKEND_DIR = PROJECT_ROOT / "backend"
 
 
+def _subprocess_env(**overrides: str) -> dict:
+    """Environment for a probe subprocess, with coverage tracing switched off.
+
+    pytest-cov activates itself in child processes through a .pth file driven by
+    these variables. A child that does not run from the repo root cannot find
+    pyproject.toml, so it records STATEMENT coverage while the parent records
+    BRANCH coverage (``branch = true``), and the run dies in teardown with
+    ``DataError: Can't combine statement coverage data with branch data`` -
+    after every test has passed. These probes assert behaviour, not coverage,
+    so they simply opt out.
+    """
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("COV_CORE_", "COVERAGE_"))
+    }
+    env.update(overrides)
+    return env
+
+
 def _load_script(relative_path: str) -> ModuleType:
     """Import a standalone script from scripts/ without installing it."""
     path = SCRIPTS_DIR / relative_path
@@ -504,7 +524,7 @@ def test_canonical_module_is_importable_without_settings():
     """
     env = {
         k: v
-        for k, v in os.environ.items()
+        for k, v in _subprocess_env().items()
         if k not in {"SECRET_KEY", "JWT_SECRET_KEY"} and not k.startswith("AUTOCOGNITIX_")
     }
     env["PYTHONPATH"] = str(BACKEND_DIR)
@@ -743,7 +763,7 @@ def test_endpoint_normalizer_uses_the_shared_dtc_rule():
         capture_output=True,
         text=True,
         cwd=backend_dir,
-        env=os.environ.copy(),
+        env=_subprocess_env(),
         check=False,
     )
     assert result.returncode == 0, result.stderr
