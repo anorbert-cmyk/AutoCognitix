@@ -90,18 +90,37 @@ POPULAR_MAKES = [
 DEFAULT_START_YEAR = 2015
 DEFAULT_END_YEAR = 2024
 
-# DTC code pattern (P0xxx, C0xxx, B0xxx, U0xxx)
+# DTC code pattern - SAE J2012 structure:
+#   char 1   : P | B | C | U
+#   char 2   : 0-3  (0/2 = SAE generic, 1/3 = manufacturer specific)
+#   char 3-5 : hex
+#
+# The previous pattern here was r'\b([PCBU][0-9A-Fa-f]{4})\b', which accepts
+# any hex-shaped token and is how "PEACE", "PACED", "P93AF", "UA80E" and
+# "UA80F" got written into data/dtc_codes/all_codes_complete.json as if they
+# were DTC codes. NHTSA narratives are also full of service campaign IDs
+# (P9324, PC861, PC214) and transmission designations (U760E) that the old
+# pattern matched. The second-character 0-3 rule rejects all of them while
+# keeping every one of the 6,809 genuine curated codes.
+#
+# KEEP IN SYNC with extract_dtc_codes() in scripts/sync_neo4j_sprint9.py -
+# backend/tests/unit/test_dtc_extraction.py asserts both agree.
 DTC_PATTERN = re.compile(
-    r'\b([PCBU][0-9A-Fa-f]{4})\b',
-    re.IGNORECASE
+    r'(?<![0-9A-Za-z])'          # left boundary: not inside a longer token
+    r'([PBCUpbcu])'              # system letter
+    r'[\s\-]?'                   # optional single separator ("P-0301")
+    r'([0-3][0-9A-Fa-f]{3})'     # 0-3 + 3 hex digits
+    r'(?![0-9A-Za-z])'           # right boundary
 )
 
-# Extended DTC patterns that might appear in text
+# Extended patterns for codes introduced by an explicit marker. Same structure,
+# but the marker allows a looser separator ("DTC: P 0301").
 EXTENDED_DTC_PATTERNS = [
-    re.compile(r'DTC\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'trouble\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
-    re.compile(r'error\s+code\s*[:\-]?\s*([PCBU][0-9A-Fa-f]{4})', re.IGNORECASE),
+    re.compile(
+        r'(?:DTC|trouble\s+code|error\s+code|code)\s*[:\-]?\s*'
+        r'([PBCUpbcu])[\s\-]?([0-3][0-9A-Fa-f]{3})(?![0-9A-Za-z])',
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -128,14 +147,14 @@ def extract_dtc_codes(text: str) -> Set[str]:
 
     codes = set()
 
-    # Primary pattern - standard DTC format
+    # Primary pattern - standard DTC format (group 1 = letter, group 2 = digits)
     for match in DTC_PATTERN.finditer(text):
-        codes.add(match.group(1).upper())
+        codes.add(f"{match.group(1)}{match.group(2)}".upper())
 
-    # Extended patterns
+    # Extended patterns (marker-introduced codes, same two groups)
     for pattern in EXTENDED_DTC_PATTERNS:
         for match in pattern.finditer(text):
-            codes.add(match.group(1).upper())
+            codes.add(f"{match.group(1)}{match.group(2)}".upper())
 
     return codes
 
@@ -877,13 +896,13 @@ async def main():
         print(f"Total recalls fetched: {len(all_recalls)}")
         print(f"Total complaints fetched: {len(all_complaints)}")
         print(f"Unique DTC codes extracted: {len(extracted_codes)}")
-        print(f"\nOutput files:")
+        print("\nOutput files:")
         print(f"  Recalls: {RECALLS_FILE}")
         print(f"  Complaints: {COMPLAINTS_FILE}")
         print(f"  Extracted DTC: {EXTRACTED_DTC_FILE}")
 
         if extracted_codes:
-            print(f"\nTop extracted DTC codes:")
+            print("\nTop extracted DTC codes:")
             # Sort by reference count
             sorted_codes = sorted(
                 extracted_codes.values(),
