@@ -30,6 +30,8 @@ from sqlalchemy import func, or_, select
 from app.core.sql_utils import escape_ilike as _escape_ilike
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.log_sanitizer import sanitize_exception
 from app.core.logging import get_logger
 from app.db.neo4j_models import get_diagnostic_path
 from app.db.postgres.models import DTCCode, KnownIssue
@@ -119,12 +121,22 @@ class RetrievalSource(str, Enum):
 
     QDRANT_DTC = "qdrant_dtc"
     QDRANT_SYMPTOM = "qdrant_symptom"
+    QDRANT_COMPLAINT = "qdrant_complaint"
     NEO4J_GRAPH = "neo4j_graph"
     POSTGRES_TEXT = "postgres_text"
     NHTSA = "nhtsa"
 
     def __str__(self) -> str:
         return str(self.value)
+
+
+# Payload ``type`` discriminator -> retrieval source label. Under the unified
+# collection every hit comes from the same collection, so the source label is
+# driven by the payload type instead of the collection name.
+_SOURCE_BY_PAYLOAD_TYPE: Dict[str, RetrievalSource] = {
+    "dtc": RetrievalSource.QDRANT_DTC,
+    "complaint": RetrievalSource.QDRANT_COMPLAINT,
+}
 
 
 @dataclass
@@ -464,33 +476,54 @@ class RAGService:
     async def retrieve_from_qdrant(
         self,
         query: str,
-        collection: str,
+        collection: Optional[str] = None,
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5,
         preprocess: bool = True,
+        type_: Optional[str] = None,
     ) -> List[RetrievedItem]:
         """
         Retrieve items from Qdrant vector store.
 
+        All huBERT vectors live in ONE type-discriminated collection
+        (``settings.QDRANT_UNIFIED_COLLECTION``); the per-type collections
+        (``dtc_embeddings_hu``, ``symptom_embeddings_hu``, ...) were never
+        populated. Passing ``type_`` therefore routes the search through
+        :meth:`QdrantService.search_unified`, which targets that collection and
+        injects the ``{"type": type_}`` discriminator. ``collection`` is only
+        honoured for an explicit legacy per-collection lookup.
+
         Args:
             query: Search query text.
-            collection: Qdrant collection name.
+            collection: Legacy Qdrant collection name. Required only when
+                ``type_`` is omitted.
             top_k: Number of results to return.
             filters: Optional filter conditions.
             score_threshold: Minimum similarity score.
             preprocess: Run Hungarian NLP preprocessing before embedding.
                 Set to False when the caller has already preprocessed the query
                 to avoid a redundant spaCy pass.
+            type_: Payload discriminator ("dtc", "complaint", ...) selecting the
+                unified-collection route.
 
         Returns:
             List of RetrievedItem from Qdrant.
+
+        Raises:
+            ValueError: If neither ``collection`` nor ``type_`` is provided.
         """
+        target_collection = settings.QDRANT_UNIFIED_COLLECTION if type_ else collection
+        if not target_collection:
+            raise ValueError("retrieve_from_qdrant requires either 'collection' or 'type_'")
+
         # Normalize Hungarian text to NFC form for consistent search
         query = unicodedata.normalize("NFC", query)
 
-        # Check cache
-        cached = self._cache.get("qdrant", collection, query, filters)
+        # Check cache. ``type_`` is part of the key: under the unified collection
+        # two retrieval legs can otherwise share collection+query+filters and
+        # serve each other's results.
+        cached = self._cache.get("qdrant", target_collection, type_, query, filters)
         if cached is not None:
             return cast("List[RetrievedItem]", cached)
 
@@ -498,29 +531,44 @@ class RAGService:
         try:
             query_embedding = await embed_text_async(query, preprocess=preprocess)
         except (RuntimeError, Exception) as e:
-            logger.warning(f"Embedding failed, falling back to keyword search: {e}")
+            logger.warning(
+                f"Embedding failed, falling back to keyword search: {sanitize_exception(e)}"
+            )
             query_embedding = None
 
         if query_embedding is None:
             return []
 
         try:
-            results = await self._qdrant.search(
-                collection_name=collection,
-                query_vector=query_embedding,
-                limit=top_k,
-                filter_conditions=filters,
-                score_threshold=score_threshold,
-            )
+            if type_:
+                # NOTE: no model_version - the unified collection's points carry
+                # no ``_embedding_model_version`` payload, so filtering on it
+                # would match nothing.
+                results = await self._qdrant.search_unified(
+                    query_vector=query_embedding,
+                    type_=type_,
+                    limit=top_k,
+                    extra_filters=filters,
+                    score_threshold=score_threshold,
+                )
+            else:
+                results = await self._qdrant.search(
+                    collection_name=target_collection,
+                    query_vector=query_embedding,
+                    limit=top_k,
+                    filter_conditions=filters,
+                    score_threshold=score_threshold,
+                )
+
+            if type_:
+                source = _SOURCE_BY_PAYLOAD_TYPE.get(type_, RetrievalSource.QDRANT_SYMPTOM)
+            elif target_collection == QdrantService.DTC_COLLECTION:
+                source = RetrievalSource.QDRANT_DTC
+            else:
+                source = RetrievalSource.QDRANT_SYMPTOM
 
             items = []
             for result in results:
-                source = (
-                    RetrievalSource.QDRANT_DTC
-                    if collection == QdrantService.DTC_COLLECTION
-                    else RetrievalSource.QDRANT_SYMPTOM
-                )
-
                 items.append(
                     RetrievedItem(
                         content=result.get("payload", {}),
@@ -530,12 +578,24 @@ class RAGService:
                     )
                 )
 
+            # Success-path telemetry: makes a silently empty retrieval
+            # (collection drift, empty index) diagnosable without a redeploy.
+            logger.info(
+                "rag qdrant retrieval: collection=%s type=%s hits=%d",
+                target_collection,
+                type_ or "-",
+                len(items),
+            )
+
             # Cache results
-            self._cache.set(items, "qdrant", collection, query, filters)
+            self._cache.set(items, "qdrant", target_collection, type_, query, filters)
             return items
 
         except Exception as e:
-            logger.warning(f"Qdrant search error for {collection}: {e}")
+            logger.warning(
+                f"Qdrant search error for {target_collection} "
+                f"(type={type_ or '-'}): {sanitize_exception(e)}"
+            )
             return []
 
     async def retrieve_from_neo4j(
@@ -788,19 +848,26 @@ class RAGService:
 
         # Parallel retrieval from all sources
         tasks = [
-            # Qdrant DTC search (query already preprocessed above)
+            # Qdrant DTC search over the unified collection (query already
+            # preprocessed above)
             self.retrieve_from_qdrant(
                 query=search_query,
-                collection=QdrantService.DTC_COLLECTION,
+                type_="dtc",
                 top_k=10,
                 preprocess=False,
             ),
-            # Qdrant symptom search (query already preprocessed above)
+            # Qdrant "similar case" search (query already preprocessed above).
+            # The unified collection holds no ``symptom`` payloads - the indexed
+            # owner-reported NHTSA complaint narratives ARE the symptom
+            # descriptions, so this leg retrieves ``type="complaint"``.
+            # Deliberately unfiltered by make: complaint payloads store NHTSA's
+            # upper-case make ("VOLKSWAGEN") while the request carries the
+            # user's spelling, and an exact-match filter would silently return
+            # nothing. Relevance comes from vector similarity instead.
             self.retrieve_from_qdrant(
                 query=preprocessed_symptoms or search_query,
-                collection=QdrantService.SYMPTOM_COLLECTION,
+                type_="complaint",
                 top_k=5,
-                filters={"vehicle_make": vehicle_info.make} if vehicle_info.make else None,
                 preprocess=False,
             ),
             # Neo4j graph retrieval
@@ -1309,11 +1376,18 @@ class RAGService:
         except Exception as e:
             results["details"]["postgresql"] = {"status": "error", "error": str(e)}
 
-        # 2. Count DTCs in Qdrant
+        # 2. Count vectors in Qdrant. Must report the collection the retrieval
+        # layer actually queries - reporting the empty legacy collection here
+        # yields a misleading "ok" with a zero count.
         try:
-            info = await self._qdrant.get_collection_info(QdrantService.DTC_COLLECTION)
+            qdrant_collection = settings.QDRANT_UNIFIED_COLLECTION
+            info = await self._qdrant.get_collection_info(qdrant_collection)
             qdrant_count = info.get("points_count", 0) if info else 0
-            results["details"]["qdrant"] = {"status": "ok", "count": qdrant_count}
+            results["details"]["qdrant"] = {
+                "status": "ok",
+                "collection": qdrant_collection,
+                "count": qdrant_count,
+            }
         except Exception as e:
             results["details"]["qdrant"] = {"status": "error", "error": str(e)}
             results["consistent"] = False
@@ -1426,7 +1500,7 @@ async def get_context(
     service = get_rag_service()
     items = await service.retrieve_from_qdrant(
         query=query,
-        collection=QdrantService.DTC_COLLECTION,
+        type_="dtc",
         top_k=top_k,
     )
     return [
