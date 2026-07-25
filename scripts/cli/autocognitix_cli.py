@@ -26,10 +26,10 @@ Author: AutoCognitix Team
 """
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -68,8 +68,18 @@ DTC_DATA_FILES = [
 
 TRANSLATION_CACHE_FILE = DTC_DATA_DIR / "translation_cache.json"
 
-# DTC code format validation
-DTC_PATTERN = re.compile(r"^[PBCU]\d{4}$", re.IGNORECASE)
+# DTC code format validation - canonical rules (SAE J2012) live in
+# backend/app/core/dtc_codes.py. Loaded by file path instead of
+# `from app.core.dtc_codes import ...` because importing the `app.core`
+# package executes app/core/__init__.py, which builds the FastAPI Settings
+# object and would make this CLI require SECRET_KEY / JWT_SECRET_KEY just to
+# validate a five-character string.
+_DTC_RULES_PATH = PROJECT_ROOT / "backend" / "app" / "core" / "dtc_codes.py"
+_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
+if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
+    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
+dtc_rules = importlib.util.module_from_spec(_dtc_spec)
+_dtc_spec.loader.exec_module(dtc_rules)
 
 # Category mappings
 CATEGORY_MAP = {
@@ -388,8 +398,8 @@ class APIClient:
 
 
 def validate_dtc_code(code: str) -> bool:
-    """Validate DTC code format."""
-    return bool(DTC_PATTERN.match(code.upper()))
+    """Validate DTC code format (see backend/app/core/dtc_codes.py)."""
+    return bool(dtc_rules.is_valid_dtc_code(code))
 
 
 def setup_logging(verbosity: int) -> None:

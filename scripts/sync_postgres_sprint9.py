@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -63,8 +64,18 @@ BATCH_EPA = 1000
 # Max complaints to load if no sampled file exists
 MAX_COMPLAINTS = 200_000
 
-# DTC extraction regex
-DTC_REGEX = re.compile(r"\b[PBCU][0-9]{4}\b")
+# DTC extraction - canonical rules (SAE J2012) live in
+# backend/app/core/dtc_codes.py. Loaded by file path instead of
+# `from app.core.dtc_codes import ...` because importing the `app.core`
+# package executes app/core/__init__.py, which builds the FastAPI Settings
+# object and would make this importer require SECRET_KEY / JWT_SECRET_KEY just
+# to run a regex.
+_DTC_RULES_PATH = PROJECT_DIR / "backend" / "app" / "core" / "dtc_codes.py"
+_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
+if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
+    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
+dtc_rules = importlib.util.module_from_spec(_dtc_spec)
+_dtc_spec.loader.exec_module(dtc_rules)
 
 # ---------------------------------------------------------------------------
 # Country mapping for common makes
@@ -163,10 +174,9 @@ def parse_date_str(date_str: Optional[str]) -> Optional[date]:
 
 
 def extract_dtc_codes(text: Optional[str]) -> List[str]:
-    """Extract DTC codes from a text string using regex."""
-    if not text:
-        return []
-    return sorted(set(DTC_REGEX.findall(text.upper())))
+    """Extract DTC codes from free text (see backend/app/core/dtc_codes.py)."""
+    codes: List[str] = dtc_rules.extract_dtc_codes(text)
+    return codes
 
 
 def get_country(make_name: str) -> Optional[str]:

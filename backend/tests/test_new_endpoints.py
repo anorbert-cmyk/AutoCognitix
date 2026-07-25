@@ -66,17 +66,26 @@ class TestInspectionRequest:
         )
         assert req.dtc_codes == ["P0A0F", "B0B0E", "C0C0D", "U0D0C"]
 
-    def test_lowercase_prefix_rejected(self):
-        """DTC codes with lowercase prefix (p/b/c/u) should be rejected."""
+    def test_lowercase_prefix_normalized(self):
+        """DTC codes with a lowercase prefix (p/b/c/u) are accepted and normalized.
+
+        Corrected assertion: this used to require a ValidationError, which was
+        wrong on three counts. The validator's contract is "validate and
+        normalize to uppercase"; the test directly above already requires
+        lowercase hex digits to be normalized ("P0a0f" -> "P0A0F"); and the
+        primary DiagnosisRequest schema has always accepted "p0300". Rejecting
+        only the first character was an inconsistency between two request
+        schemas of the same API, not intended behaviour.
+        """
         from app.api.v1.schemas.inspection import InspectionRequest
 
-        with pytest.raises(ValidationError):
-            InspectionRequest(
-                vehicle_make="Opel",
-                vehicle_model="Astra",
-                vehicle_year=2015,
-                dtc_codes=["p0300"],
-            )
+        req = InspectionRequest(
+            vehicle_make="Opel",
+            vehicle_model="Astra",
+            vehicle_year=2015,
+            dtc_codes=["p0300", "u0100"],
+        )
+        assert req.dtc_codes == ["P0300", "U0100"]
 
     def test_empty_dtc_codes_rejected(self):
         """Empty DTC codes list should be rejected."""

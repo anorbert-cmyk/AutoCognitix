@@ -26,10 +26,10 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import json
 import logging
 import random
-import re
 import sys
 import time
 from collections import defaultdict
@@ -53,7 +53,18 @@ SOURCE_FILES: List[str] = [
     "2025-2026.json",
 ]
 
-DTC_PATTERN = re.compile(r"\b[PBCU][0-9]{4}\b")
+# DTC detection - canonical rules (SAE J2012) live in
+# backend/app/core/dtc_codes.py. Loaded by file path instead of
+# `from app.core.dtc_codes import ...` because importing the `app.core`
+# package executes app/core/__init__.py, which builds the FastAPI Settings
+# object and would make this sampler require SECRET_KEY / JWT_SECRET_KEY just
+# to run a regex.
+_DTC_RULES_PATH = PROJECT_ROOT / "backend" / "app" / "core" / "dtc_codes.py"
+_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
+if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
+    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
+dtc_rules = importlib.util.module_from_spec(_dtc_spec)
+_dtc_spec.loader.exec_module(dtc_rules)
 
 TOP_30_MAKES: Set[str] = {
     "FORD",
@@ -278,7 +289,7 @@ def is_safety_critical(complaint: Dict[str, Any]) -> bool:
 def has_dtc_code(complaint: Dict[str, Any]) -> bool:
     """Returns True if the complaint summary contains a DTC code pattern."""
     summary = complaint.get("summary") or ""
-    return bool(DTC_PATTERN.search(summary))
+    return bool(dtc_rules.contains_dtc_code(summary))
 
 
 def get_year_sampling_rate(model_year: Optional[int]) -> float:

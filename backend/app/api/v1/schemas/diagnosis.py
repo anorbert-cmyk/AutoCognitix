@@ -2,7 +2,6 @@
 Diagnosis schemas - core diagnostic request/response models.
 """
 
-import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
@@ -10,13 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.dtc_codes import normalize_dtc_code
 from app.core.vehicle_makes import normalize_make
-
-# Standard OBD-II DTC code shape: one system letter (P/B/C/U) + 4 hex digits
-# (e.g. "P0300", "U0100"). Kept permissive on purpose - it only guarantees the
-# canonical 5-character shape so raw strings cannot flow unbounded into Neo4j
-# lookups, RAG cache keys and logs.
-_DTC_CODE_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$")
 
 
 def normalize_dtc_codes(codes: List[str]) -> List[str]:
@@ -26,14 +20,19 @@ def normalize_dtc_codes(codes: List[str]) -> List[str]:
     receives the same canonical uppercase form, so "p0300 " and "P0300" no
     longer cause cache misses or failed graph lookups. Malformed items are
     rejected here instead of silently reaching those code paths.
+
+    Structural rules live in ``app.core.dtc_codes`` (SAE J2012). Note that
+    real manufacturer/hex codes such as ``P26B7`` or ``P0A94`` are valid and
+    must not be rejected here.
     """
     normalized: List[str] = []
     for code in codes:
-        canonical = code.strip().upper()
-        if not _DTC_CODE_PATTERN.match(canonical):
+        canonical = normalize_dtc_code(code)
+        if canonical is None:
             raise ValueError(
                 f"Invalid DTC code format: {code!r} "
-                "(expected e.g. 'P0300', one of P/B/C/U followed by 4 hex digits)"
+                "(expected e.g. 'P0300', one of P/B/C/U, then 0-3, "
+                "then 3 hex digits)"
             )
         normalized.append(canonical)
     return normalized

@@ -44,6 +44,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from app.core.config import settings
+from app.core.dtc_codes import is_valid_dtc_code
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -162,7 +163,8 @@ class EndpointNormalizer:
     )
     NUMERIC_ID_PATTERN = re.compile(r"^\d+$")
     VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$", re.IGNORECASE)
-    DTC_PATTERN = re.compile(r"^[PBCU][0-9A-F]{4}$", re.IGNORECASE)
+    # DTC segments are recognised via app.core.dtc_codes.is_valid_dtc_code
+    # (SAE J2012), so this middleware cannot drift from the API validators.
 
     # Known static paths that should not be normalized
     STATIC_PATHS: Set[str] = {
@@ -207,7 +209,7 @@ class EndpointNormalizer:
                 normalized.append("{uuid}")
             elif cls.VIN_PATTERN.match(segment):
                 normalized.append("{vin}")
-            elif cls.DTC_PATTERN.match(segment):
+            elif is_valid_dtc_code(segment):
                 normalized.append("{dtc_code}")
             elif cls.NUMERIC_ID_PATTERN.match(segment):
                 normalized.append("{id}")

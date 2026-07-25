@@ -8,11 +8,12 @@ and provides risk assessment for passing/failing.
 Author: AutoCognitix Team
 """
 
-import re
 from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.dtc_codes import normalize_dtc_code
 
 
 # =============================================================================
@@ -108,15 +109,21 @@ class InspectionRequest(BaseModel):
 
         Raises:
             ValueError: If any code has invalid format.
+
+        Structural rules live in ``app.core.dtc_codes`` (SAE J2012): real
+        manufacturer/hex codes such as ``P26B7`` are accepted, while
+        hex-shaped English words such as ``PEACE`` are not.
         """
-        pattern = re.compile(r"^[PBCU][0-9A-Fa-f]{4}$")
+        normalized: List[str] = []
         for code in v:
-            if not pattern.match(code):
+            canonical = normalize_dtc_code(code)
+            if canonical is None:
                 raise ValueError(
                     f"Érvénytelen DTC formátum: {code}. "
-                    f"Elvárt: [P/B/C/U] + 4 hexadecimális számjegy"
+                    f"Elvárt: [P/B/C/U] + [0-3] + 3 hexadecimális számjegy"
                 )
-        return [c.upper() for c in v]
+            normalized.append(canonical)
+        return normalized
 
 
 # =============================================================================

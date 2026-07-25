@@ -4,6 +4,7 @@ DTC adatvalidációs script
 Ellenőrzi a DTC kódok minőségét és konzisztenciáját.
 """
 
+import importlib.util
 import json
 import re
 import sys
@@ -12,11 +13,23 @@ from datetime import datetime
 from collections import Counter
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Magyar karakterek a validációhoz
 HUNGARIAN_CHARS = set("áéíóöőúüűÁÉÍÓÖŐÚÜŰ")
 
-# DTC kód formátum regex
-DTC_PATTERN = re.compile(r'^[PBCU]\d{4}$')
+# DTC kód formátum - a kanonikus szabályok (SAE J2012) itt élnek:
+# backend/app/core/dtc_codes.py. Fájl útvonal alapján töltjük be, nem
+# `from app.core.dtc_codes import ...` formában, mert az `app.core` csomag
+# importja lefuttatja az app/core/__init__.py-t, ami felépíti a FastAPI
+# Settings objektumot - így a script SECRET_KEY / JWT_SECRET_KEY nélkül
+# elszállna egy ötkarakteres string ellenőrzésekor.
+_DTC_RULES_PATH = PROJECT_ROOT / "backend" / "app" / "core" / "dtc_codes.py"
+_dtc_spec = importlib.util.spec_from_file_location("autocognitix_dtc_codes", _DTC_RULES_PATH)
+if _dtc_spec is None or _dtc_spec.loader is None:  # pragma: no cover - layout guard
+    raise ImportError(f"Canonical DTC rules not found: {_DTC_RULES_PATH}")
+dtc_rules = importlib.util.module_from_spec(_dtc_spec)
+_dtc_spec.loader.exec_module(dtc_rules)
 
 # Gibberish detektáláshoz használt minták
 GIBBERISH_PATTERNS = [
@@ -129,19 +142,14 @@ class ValidationReport:
 
 
 def validate_dtc_format(code: str) -> bool:
-    """Ellenőrzi a DTC kód formátumát."""
-    return bool(DTC_PATTERN.match(code))
+    """Ellenőrzi a DTC kód formátumát (ld. backend/app/core/dtc_codes.py)."""
+    return bool(dtc_rules.is_valid_dtc_code(code))
 
 
 def get_category_from_code(code: str) -> str:
     """Visszaadja a várt kategóriát a kód alapján."""
-    prefix_map = {
-        'P': 'powertrain',
-        'B': 'body',
-        'C': 'chassis',
-        'U': 'network'
-    }
-    return prefix_map.get(code[0], 'unknown')
+    category: str = dtc_rules.dtc_category(code)
+    return category
 
 
 def is_gibberish_translation(text: str) -> tuple[bool, str]:
