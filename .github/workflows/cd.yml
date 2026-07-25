@@ -110,7 +110,14 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile.prod
-          platforms: linux/amd64,linux/arm64
+          # amd64 ONLY - deliberately not multi-arch. The `onnx-export` stage in
+          # Dockerfile.prod installs torch==2.2.0+cpu, and that local-version
+          # wheel is published for linux_x86_64/win_amd64 only. On aarch64 the
+          # index carries a plain 2.2.0 with no `+cpu` segment, which PEP 440
+          # `==2.2.0+cpu` does NOT match - so the arm64 leg would fail the build,
+          # taking run-migrations and deploy-railway (which need it) down with
+          # it. Railway runs amd64 and nothing else consumes this image.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

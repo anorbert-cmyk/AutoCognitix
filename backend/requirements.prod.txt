@@ -74,8 +74,15 @@ langchain-openai==0.0.5
 # int8/uint8 quantization is DISQUALIFIED, not merely "less accurate": top-5
 # ranking broke on 6/6 test queries AND the ORT int8 BERT kernels are
 # non-deterministic at default thread counts (29 distinct outputs in 30 runs).
+#
+# Both pins are EXACT and both are read by Dockerfile.prod's `onnx-export`
+# stage as well as by this runtime image. A range here would let the two stages
+# resolve different versions across a cached build, so the build-time "token IDs
+# are identical to AutoTokenizer" proof would describe a tokenizer production
+# does not actually run. The export stage greps the `tokenizers==` line below -
+# keep the `name==version` form on one line.
 onnxruntime==1.28.0
-tokenizers>=0.15,<0.16
+tokenizers==0.15.2
 
 # Data Processing (minimal)
 numpy==1.26.4

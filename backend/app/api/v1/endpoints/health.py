@@ -387,6 +387,48 @@ async def check_embedding_health() -> ServiceHealth:
     )
 
 
+# Own budget for the embedding probe, strictly below the shared 10 s in
+# detailed_health_check(). See _check_embedding_health_bounded().
+EMBEDDING_HEALTH_TIMEOUT_SECONDS = 5.0
+
+
+async def _check_embedding_health_bounded() -> ServiceHealth:
+    """Run the embedding probe under its OWN timeout.
+
+    The probe can cold-load the model (on the torch path that includes a ~440 MB
+    HuggingFace download). Inside the shared ``gather`` budget of
+    :func:`detailed_health_check`, one slow embedding load would trip the SHARED
+    timeout, whose handler marks postgres, neo4j, qdrant AND redis unhealthy -
+    reporting a total datastore outage when in fact only the embedding backend
+    is slow. A strictly smaller inner budget makes that impossible.
+
+    A timeout here is "degraded", not "unhealthy", for the same reason
+    :func:`check_embedding_health` maps ``unavailable`` to degraded: lexical and
+    graph diagnosis keep working.
+    """
+    try:
+        return await asyncio.wait_for(
+            check_embedding_health(), timeout=EMBEDDING_HEALTH_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Embedding health check timed out",
+            extra={
+                "event": "embedding_health_timeout",
+                "timeout_seconds": EMBEDDING_HEALTH_TIMEOUT_SECONDS,
+            },
+        )
+        return ServiceHealth(
+            name="Embedding",
+            status="degraded",
+            latency_ms=round(EMBEDDING_HEALTH_TIMEOUT_SECONDS * 1000, 2),
+            error=(
+                f"Embedding health check timed out after "
+                f"{EMBEDDING_HEALTH_TIMEOUT_SECONDS:.0f}s (cold model load?)"
+            ),
+        )
+
+
 async def check_redis_health() -> ServiceHealth:
     """Check Redis cache health."""
     import redis
@@ -555,7 +597,9 @@ async def detailed_health_check(
                 check_neo4j_health(),
                 check_qdrant_health(),
                 check_redis_health(),
-                check_embedding_health(),
+                # Bounded separately: a cold model load must not spend the
+                # shared budget and make every datastore look down.
+                _check_embedding_health_bounded(),
                 return_exceptions=True,
             ),
             timeout=10.0,  # 10 second timeout for all checks

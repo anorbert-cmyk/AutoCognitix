@@ -30,6 +30,7 @@ from app.api.v1.schemas.dtc import (
     DTCSearchResult,
 )
 from app.core.config import settings
+from app.core.exceptions import EmbeddingUnavailableError
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.api.v1.endpoints.auth import require_role
 from app.db.postgres.models import DTCCode as DTCCodeModel
@@ -519,9 +520,21 @@ async def search_dtc_codes(
                 len(semantic_dtcs),
             )
 
+        except EmbeddingUnavailableError as e:
+            # ERROR, not WARNING: Sentry only raises events from ERROR upwards
+            # (core/logging.py, event_level=logging.ERROR). Without this arm a
+            # dead embedding backend degrades every search to lexical while
+            # on-call sees nothing - the same silent failure that raising
+            # EmbeddingUnavailableError was introduced to eliminate.
+            logger.error(
+                f"Embedding backend unavailable - DTC search for "
+                f"'{sanitize_log(query)}' is LEXICAL ONLY: {sanitize_exception(e)}",
+                exc_info=True,
+            )
         except Exception as e:
             # Qdrant failure/empty must never 500 the endpoint: fall back to the
-            # lexical results already collected above (or an empty list).
+            # lexical results already collected above (or an empty list). Less
+            # severe than a dead backend, so it stays at WARNING.
             logger.warning(
                 f"Semantic search failed for query '{sanitize_log(query)}', "
                 f"falling back to lexical results: {sanitize_exception(e)}"

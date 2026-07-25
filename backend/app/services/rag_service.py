@@ -48,6 +48,7 @@ from app.prompts.diagnosis_hu import (
     generate_rule_based_diagnosis,
     parse_diagnosis_response,
 )
+from app.core.exceptions import EmbeddingUnavailableError
 from app.services.embedding_service import (
     embed_text_async,
     get_embedding_service,
@@ -530,9 +531,26 @@ class RAGService:
         # Generate embedding for query (async to avoid blocking event loop)
         try:
             query_embedding = await embed_text_async(query, preprocess=preprocess)
-        except (RuntimeError, Exception) as e:
+        except EmbeddingUnavailableError as e:
+            # ERROR, not WARNING: Sentry only raises events from ERROR upwards
+            # (core/logging.py, event_level=logging.ERROR). A dead embedding
+            # backend silently removes the entire semantic leg of retrieval, so
+            # logging it at WARNING would reproduce the exact operator
+            # experience - degraded quality, zero alerts - that raising
+            # EmbeddingUnavailableError exists to end.
+            logger.error(
+                f"Embedding backend unavailable - semantic retrieval from "
+                f"{target_collection} returns NOTHING (the caller's lexical and "
+                f"Neo4j paths are unaffected): {sanitize_exception(e)}",
+                exc_info=True,
+            )
+            query_embedding = None
+        except Exception as e:
+            # A transient per-query embedding failure is less severe than a dead
+            # backend; it stays at WARNING.
             logger.warning(
-                f"Embedding failed, falling back to keyword search: {sanitize_exception(e)}"
+                f"Embedding failed for {target_collection} - returning no "
+                f"semantic results: {sanitize_exception(e)}"
             )
             query_embedding = None
 

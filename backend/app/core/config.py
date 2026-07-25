@@ -194,9 +194,13 @@ class Settings(BaseSettings):
     # redeploy. Defaults match the Dockerfile.prod COPY target.
     HUBERT_ONNX_PATH: str = "/app/models/hubert_fp32.onnx"
     HUBERT_VOCAB_PATH: str = "/app/models/vocab.txt"
-    # ONNX Runtime intra-op threads. Explicit because ORT otherwise grabs every
-    # core, and 2 gunicorn workers would then oversubscribe the container.
-    EMBEDDING_ORT_THREADS: int = 2
+    # ONNX Runtime intra-op threads PER SESSION - and every gunicorn worker has
+    # its own session. Explicit because ORT otherwise grabs every core. The
+    # default is 1 because the total is a product, not a sum:
+    #   WEB_CONCURRENCY (2) x embedding pool slots (2, embedding_service.py)
+    #   x EMBEDDING_ORT_THREADS = 4 threads on a 2-vCPU Railway container.
+    # Raise it as a Railway variable on a plan with more cores.
+    EMBEDDING_ORT_THREADS: int = 1
 
     # Frontend URL (used for password reset links, etc.)
     FRONTEND_URL: str = "http://localhost:5173"

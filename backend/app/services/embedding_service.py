@@ -102,8 +102,19 @@ MAX_SEQUENCE_LENGTH = 512
 # broken. "v2" retires the poisoned zero vectors cached by the pre-ONNX build.
 EMBEDDING_CACHE_VERSION = "v2"
 
-# Thread pool for heavy CPU/GPU-bound model inference (HuBERT embeddings)
-_thread_pool = ThreadPoolExecutor(max_workers=4)
+# Thread pool for heavy CPU-bound model inference (HuBERT embeddings).
+#
+# Sizing is a whole-container budget, not a per-process one. Every gunicorn
+# worker gets its OWN copy of this pool and its own ORT session, so the worst
+# case multiplies out:
+#     WEB_CONCURRENCY (2) x pool slots (2) x EMBEDDING_ORT_THREADS (1) = 4
+# threads competing for a 2-vCPU Railway container. At the previous 4 slots and
+# 2 ORT threads that product was 16 - 8x the cores, which turns a burst of
+# embed calls into cache-thrashing and latency spikes rather than throughput.
+# Concurrency for a web server comes from the workers; intra-op parallelism on
+# top of it is double-counting. EMBEDDING_ORT_THREADS can still be raised as a
+# Railway variable on a bigger plan.
+_thread_pool = ThreadPoolExecutor(max_workers=2)
 
 # Separate small pool for lightweight NLP work (e.g. HuSpaCy preprocessing) so
 # fast preprocessing calls never queue behind multi-second model inference.
@@ -166,8 +177,10 @@ class _OnnxEmbeddingBackend:
             )
 
         session_options = ort.SessionOptions()
-        # Explicit thread caps: ORT otherwise claims every core, and the two
-        # gunicorn workers would oversubscribe the container.
+        # Explicit thread caps: ORT otherwise claims every core. Each gunicorn
+        # worker builds its own session, so this multiplies by WEB_CONCURRENCY
+        # and by the embedding thread pool size - see EMBEDDING_ORT_THREADS in
+        # core/config.py for the arithmetic behind the default of 1.
         session_options.intra_op_num_threads = max(1, threads)
         session_options.inter_op_num_threads = 1
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
