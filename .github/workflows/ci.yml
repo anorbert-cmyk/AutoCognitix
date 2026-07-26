@@ -359,7 +359,21 @@ jobs:
       - frontend-test
       - frontend-security
       - docker-build
-    if: always()
+    # `always()` also runs when the RUN ITSELF was cancelled, which is what made
+    # this gate post a red X every time `cancel-in-progress` superseded an
+    # in-flight run (see `concurrency:` at the top of this file): every required
+    # job reported `cancelled`, the shell check below saw `!= success`, and a
+    # commit nobody had a verdict on was marked failed.
+    #
+    # `!cancelled()` is run-scoped: it is false only when THIS WORKFLOW RUN was
+    # cancelled, so the gate is skipped there and makes no claim at all (a green
+    # check would be worse - an affirmative pass on code that was never built).
+    # It still contains a status-check function, so GitHub does NOT re-apply the
+    # implicit `success()` on `needs:` - the gate keeps running, and failing,
+    # when a required job fails. That is the whole point; do not "simplify" this
+    # back to a bare `if:` or the gate will silently skip on failure and branch
+    # protection will treat the skip as satisfied.
+    if: ${{ !cancelled() }}
     steps:
       - name: Generate CI Summary
         run: |
@@ -383,15 +397,46 @@ jobs:
           echo "| Frontend Security (npm audit) | ${{ needs.frontend-security.result }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Check required jobs
+        # Results come in as env vars rather than being interpolated into the
+        # script body: it keeps the shell logic a plain, runnable program that
+        # can be extracted and truth-tabled outside GitHub Actions (see
+        # backend/tests/unit/test_ci_success_gate.py, which parses THIS file and
+        # runs THIS script under /bin/sh), and it keeps workflow context out of
+        # the script text on principle.
+        env:
+          BACKEND_LINT: ${{ needs.backend-lint.result }}
+          BACKEND_TEST: ${{ needs.backend-test.result }}
+          FRONTEND_LINT: ${{ needs.frontend-lint.result }}
+          FRONTEND_BUILD: ${{ needs.frontend-build.result }}
+          FRONTEND_TEST: ${{ needs.frontend-test.result }}
+          DOCKER_BUILD: ${{ needs.docker-build.result }}
         run: |
           # Sprint 7: Quality checks are now blocking
           # Only MyPy, Bandit and npm audit remain informational
-          if [ "${{ needs.backend-lint.result }}" != "success" ] || \
-             [ "${{ needs.backend-test.result }}" != "success" ] || \
-             [ "${{ needs.frontend-lint.result }}" != "success" ] || \
-             [ "${{ needs.frontend-build.result }}" != "success" ] || \
-             [ "${{ needs.frontend-test.result }}" != "success" ] || \
-             [ "${{ needs.docker-build.result }}" != "success" ]; then
+          #
+          # Reaching this step means the workflow run was NOT cancelled (the
+          # job-level `if: !cancelled()` above). So a `cancelled` result HERE is
+          # not the concurrency-supersede case - it is a job that died for its
+          # own reasons while the rest of the run carried on, and the required
+          # work did not happen. Same for `skipped`, which is what a required
+          # job reports when one of its own `needs:` failed. Both stay failures:
+          # anything other than `success` means unverified code.
+          failed=""
+          check() {
+            if [ "$2" != "success" ]; then
+              echo "::error::Required check '$1' reported '$2' (expected 'success')"
+              failed="yes"
+            fi
+          }
+
+          check "Backend Lint (Ruff)"     "$BACKEND_LINT"
+          check "Backend Tests (pytest)"  "$BACKEND_TEST"
+          check "Frontend Lint (ESLint)"  "$FRONTEND_LINT"
+          check "Frontend Build"          "$FRONTEND_BUILD"
+          check "Frontend Tests (Vitest)" "$FRONTEND_TEST"
+          check "Docker Build"            "$DOCKER_BUILD"
+
+          if [ -n "$failed" ]; then
             echo "One or more required CI checks failed!"
             exit 1
           fi
