@@ -310,12 +310,90 @@ class TestEmbeddingContract:
         assert a != b
 
     def test_batch_matches_single(self, onnx_service):
-        texts = ["fek", "rangat a motor gyorsitaskor"]
+        """A text must embed IDENTICALLY alone and inside a batch.
+
+        This is the property the ONNX path can lose silently.
+        ``_OnnxEmbeddingBackend.__init__`` calls ``enable_padding()``, so batching
+        a short text with a long one pads the short row with [PAD] tokens up to
+        the long row's length, while ``embed_text`` runs that same short text
+        with no padding at all. The ONLY thing that keeps the two results equal
+        is mask-weighted mean pooling: ``_mean_pool_l2_numpy`` zeroes the padded
+        positions in the numerator AND excludes them from the token count.
+
+        Drop the mask - a plain ``.mean(axis=1)``, or letting ``attention_mask``
+        fall out of the tokenizer output (which is exactly why ``tokenize()``
+        returns it independently of ``graph_inputs()``) - and a vector starts
+        depending on which texts it happened to be batched with. It would still
+        be 768-dim, still unit-norm, still look completely healthy: a silent
+        embedding-quality regression of precisely the class this suite exists to
+        catch. The previous version of this test asserted only shape and norm and
+        never compared batch to single, so it would have passed straight through
+        that regression.
+        """
+        short = "fek"
+        long_text = "rangat a motor gyorsitaskor es kek fust jon a kipufogobol " * 4
+        texts = [short, long_text]
+
         batch = onnx_service.embed_batch(texts, use_cache=False)
         assert len(batch) == 2
-        for vector in batch:
-            assert len(vector) == 768
-            assert abs(float(np.linalg.norm(vector)) - 1.0) < 1e-5
+
+        # Guard against a VACUOUS assertion: the property only has teeth if this
+        # batch genuinely padded the short row. Two same-length texts would make
+        # the comparison below trivially true and prove nothing.
+        backend = onnx_service._load_onnx_backend()
+        batched_mask = backend.tokenize(texts)["attention_mask"][0].tolist()
+        alone_mask = backend.tokenize([short])["attention_mask"][0].tolist()
+        assert 0 in batched_mask, (
+            "the short text was NOT padded in this batch - this test would prove nothing"
+        )
+        assert 0 not in alone_mask, "the short text must be unpadded when embedded alone"
+
+        for text, batched in zip(texts, batch):
+            single = onnx_service.embed_text(text)
+            assert len(batched) == 768
+            assert abs(float(np.linalg.norm(batched)) - 1.0) < 1e-5
+            np.testing.assert_allclose(
+                np.asarray(batched, dtype=np.float64),
+                np.asarray(single, dtype=np.float64),
+                rtol=0,
+                atol=1e-6,
+                err_msg=(
+                    f"{text!r} embeds differently in a batch than alone - "
+                    "mask-weighted pooling is no longer neutralising [PAD] tokens."
+                ),
+            )
+
+    def test_batch_matches_single_would_fail_without_mask_weighted_pooling(self, onnx_service):
+        """Proves the test above actually BITES.
+
+        A regression test that cannot fail is not a test - that lesson cost this
+        project a ``skipif`` that skipped in every environment. Here the pooling
+        is swapped for a mask-ignoring mean and the batch/single equality MUST
+        break; if it does not, the assertion above is vacuous and the real guard
+        is gone.
+        """
+        import app.services.embedding_service as mod
+
+        def _mask_ignoring_pool(last_hidden, attention_mask):
+            pooled = last_hidden.astype(np.float32).mean(axis=1)
+            norms = np.clip(np.linalg.norm(pooled, ord=2, axis=1, keepdims=True), 1e-12, None)
+            return np.asarray(pooled / norms, dtype=np.float32)
+
+        short = "fek"
+        long_text = "rangat a motor gyorsitaskor es kek fust jon a kipufogobol " * 4
+
+        with patch.object(mod, "_mean_pool_l2_numpy", _mask_ignoring_pool):
+            batched_short = onnx_service.embed_batch([short, long_text], use_cache=False)[0]
+            single_short = onnx_service.embed_text(short)
+
+        assert not np.allclose(
+            np.asarray(batched_short, dtype=np.float64),
+            np.asarray(single_short, dtype=np.float64),
+            atol=1e-6,
+        ), (
+            "mask-ignoring pooling produced the SAME vector batched and alone - "
+            "test_batch_matches_single cannot detect a pooling regression."
+        )
 
     def test_empty_text_still_returns_zero_vector(self, onnx_service):
         """Empty input is defensible on the INDEXING side; the Qdrant norm
@@ -618,10 +696,7 @@ class TestQdrantQueryVectorGuard:
         service.client.search = AsyncMock()
 
         with pytest.raises(ValueError):
-            await service.search(
-                collection_name="autocognitix",
-                query_vector=[0.0] * 768,
-            )
+            await service.search(query_vector=[0.0] * 768)
         service.client.search.assert_not_called()
 
     @pytest.mark.asyncio
@@ -777,6 +852,121 @@ class TestEmbeddingCacheVersioning:
         onnx_key = onnx_service._cache_namespace("x")
         onnx_service._backend_name = "torch"
         assert onnx_service._cache_namespace("x") != onnx_key
+
+    def test_sync_embed_batch_has_no_dead_cache_scaffolding(self):
+        """REGRESSION: ``embed_batch``'s ``use_cache`` guarded nothing at all.
+
+        The block looked like a cache lookup - it seeded a ``cached_embeddings``
+        list, branched on whether an event loop was running, and had an
+        ``except ImportError`` fallback - but all four branches assigned the
+        identical "embed every text" list, ``cached_embeddings`` was never
+        written to, and the ``except ImportError`` was unreachable (the only
+        calls in the ``try`` were ``asyncio.get_running_loop()`` and a list
+        comprehension, and asyncio is imported at module scope). ``use_cache``
+        therefore had zero effect while the docstring advertised "Redis cache
+        integration for repeated texts".
+
+        This pins the shape of the fix: no resurrected placeholder cache in the
+        sync path.
+        """
+        import app.services.embedding_service as mod
+
+        source = textwrap.dedent(inspect.getsource(mod.HungarianEmbeddingService.embed_batch))
+        body = ast.parse(source).body[0]
+        assert isinstance(body, ast.FunctionDef)
+
+        assigned = {
+            target.id
+            for node in ast.walk(body)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        assert "cached_embeddings" not in assigned, (
+            "a cache placeholder that is never populated is back in embed_batch"
+        )
+        assert "texts_to_embed" not in assigned, (
+            "the four identical no-op branches are back in embed_batch"
+        )
+
+    def test_use_cache_true_is_announced_not_silently_ignored(self, onnx_service, caplog):
+        """An unkeepable promise must be audible.
+
+        The sync path cannot reach the async Redis client, so ``use_cache=True``
+        cannot be honoured. Accepting it and quietly doing nothing is the exact
+        silent-no-op pattern that hid the zero-vector outage; the caller has to
+        be told.
+        """
+        import logging
+
+        import app.services.embedding_service as mod
+
+        mod.HungarianEmbeddingService._warned_sync_cache = False
+        onnx_service.enable_cache()
+
+        with caplog.at_level(logging.WARNING, logger=mod.__name__):
+            onnx_service.embed_batch(["rangat a motor"], use_cache=True)
+
+        assert any("use_cache=True" in r.message for r in caplog.records), (
+            "embed_batch(use_cache=True) silently ignored the request"
+        )
+        assert any("embed_batch_async" in r.message for r in caplog.records), (
+            "the warning must name the API that DOES cache"
+        )
+
+    def test_the_sync_cache_warning_is_one_shot(self, onnx_service, caplog):
+        """A per-call warning inside a 50K-text indexing loop is its own outage."""
+        import logging
+
+        import app.services.embedding_service as mod
+
+        mod.HungarianEmbeddingService._warned_sync_cache = False
+        onnx_service.enable_cache()
+
+        with caplog.at_level(logging.WARNING, logger=mod.__name__):
+            for _ in range(5):
+                onnx_service.embed_batch(["rangat a motor"], use_cache=True)
+
+        assert sum("use_cache=True" in r.message for r in caplog.records) == 1
+
+    def test_use_cache_false_says_nothing(self, onnx_service, caplog):
+        import logging
+
+        import app.services.embedding_service as mod
+
+        mod.HungarianEmbeddingService._warned_sync_cache = False
+        onnx_service.enable_cache()
+
+        with caplog.at_level(logging.WARNING, logger=mod.__name__):
+            onnx_service.embed_batch(["rangat a motor"], use_cache=False)
+
+        assert not any("use_cache=True" in r.message for r in caplog.records)
+
+    def test_use_cache_does_not_change_the_vectors(self, onnx_service):
+        """Whatever the flag says, the embeddings must be identical."""
+        import app.services.embedding_service as mod
+
+        mod.HungarianEmbeddingService._warned_sync_cache = False
+        texts = ["rangat a motor", "kek fust"]
+        assert onnx_service.embed_batch(texts, use_cache=False) == onnx_service.embed_batch(
+            texts, use_cache=True
+        )
+
+    def test_sync_embed_batch_defaults_to_uncached(self):
+        """The signature must not claim a cache the sync path cannot provide.
+
+        The parameter itself is KEPT (not deleted) because ``scripts/
+        index_qdrant_hubert.py`` passes ``use_cache=False`` by keyword; removing
+        it would break that offline indexer with a TypeError.
+        """
+        import app.services.embedding_service as mod
+
+        default = (
+            inspect.signature(mod.HungarianEmbeddingService.embed_batch)
+            .parameters["use_cache"]
+            .default
+        )
+        assert default is False
 
     @pytest.mark.asyncio
     async def test_async_cache_lookup_uses_the_versioned_key(self, onnx_service):

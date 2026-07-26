@@ -155,10 +155,59 @@ def load_curated_dtc_codes() -> Set[str]:
     }
 
 
+# Width of the normalized sort key produced by _date_rank ("YYYYMMDD").
+_DATE_KEY_WIDTH = 8
+
+
 def _date_rank(date_received: Any) -> str:
-    """Sort key for complaint dates. Unknown dates sort last (empty string)."""
+    """
+    Normalize a complaint date into a sortable ``YYYYMMDD`` key.
+
+    THE TWO SHAPES THAT ACTUALLY REACH THIS FUNCTION:
+      - ``"YYYY-MM-DD"`` - what ``import_flat_complaints.parse_date()`` writes
+        into every record of the flat-file corpus, and therefore also what
+        ``Complaint.date_received`` holds in Neo4j (the in-graph fallback scan
+        reads it straight back out). This is the format on disk TODAY.
+      - ``"YYYYMMDD"``   - the raw NHTSA ``FLAT_CMPL`` field, i.e. the input to
+        ``parse_date()``. Accepted so an unparsed record still ranks correctly.
+
+    The previous implementation was ``value if value.isdigit() else ""``, which
+    returns ``""`` for EVERY hyphenated date - that is, for every real complaint.
+    Every record then collapsed into the single "unknown" bucket, silently
+    disabling the "newest first" half of :func:`prioritize_dtc_pairs` while the
+    docstring and the capping log message kept claiming it was active.
+
+    Args:
+        date_received: Raw date value of a complaint (any type; ``None`` ok).
+
+    Returns:
+        str: ``"YYYYMMDD"`` for a parseable in-range date, or ``""`` for a
+        missing/malformed one. ``""`` is NOT "sorts like everything else": it is
+        its own bucket that :func:`_invert_date` places strictly after every
+        real date, so unknown-dated mentions are the first to be dropped by the
+        cap and never displace a dated one.
+    """
     value = str(date_received or "").strip()
-    return value if value.isdigit() else ""
+    if not value:
+        return ""
+
+    if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        # "YYYY-MM-DD", optionally with a time suffix ("...T00:00:00").
+        digits = value[:4] + value[5:7] + value[8:10]
+    elif len(value) == _DATE_KEY_WIDTH:
+        digits = value
+    else:
+        return ""
+
+    if not digits.isdigit():
+        return ""
+
+    year, month, day = int(digits[:4]), int(digits[4:6]), int(digits[6:8])
+    # Same range discipline as import_flat_complaints.parse_date(): a structurally
+    # digit-shaped but nonsensical date must not out-rank a real one.
+    if not (1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31):
+        return ""
+    return digits
 
 
 def prioritize_dtc_pairs(
@@ -176,6 +225,18 @@ def prioritize_dtc_pairs(
     """
     if limit <= 0:
         return []
+
+    # Self-check for the exact bug this function shipped with: if NOTHING has a
+    # parseable date, the recency tier is inert and the cap silently degrades to
+    # odi_id order. Say so instead of printing "newest complaints first" over a
+    # ranking that is nothing of the sort.
+    if pairs and not any(_date_rank(p.get("date_received")) for p in pairs):
+        print(
+            f"  [WARN] None of the {len(pairs):,} mentions carry a parseable "
+            "date_received (expected YYYY-MM-DD or YYYYMMDD). The 'newest first' "
+            "ranking is INACTIVE - the cap falls back to odi_id order."
+        )
+
     ranked = sorted(
         pairs,
         key=lambda p: (
@@ -189,9 +250,15 @@ def prioritize_dtc_pairs(
 
 
 def _invert_date(value: str) -> str:
-    """Map a digit date string to a key that sorts newest-first ascending."""
+    """
+    Map a ``YYYYMMDD`` key from :func:`_date_rank` to a newest-first sort key.
+
+    Unknown dates return all-nines, which is strictly greater than any inverted
+    real date (a year >= 1900 inverts to a leading digit <= 8), so they always
+    sort last - deterministically, never interleaved with dated records.
+    """
     if not value:
-        return "9" * 12  # unknown / unparseable dates sort last
+        return "9" * _DATE_KEY_WIDTH  # unknown / unparseable dates sort last
     return "".join(str(9 - int(ch)) for ch in value)
 
 
@@ -384,6 +451,51 @@ class CheckpointManager:
             "last_updated": None,
         }
 
+    def is_complete(self, key: str) -> bool:
+        """
+        True only when `key` records a run that ACTUALLY did its work.
+
+        ALWAYS read step completion through this method - never through the raw
+        truthiness of ``state[key]``. A degraded record (see
+        :meth:`mark_degraded`) is a non-empty dict, so ``if state[key]:`` would
+        read it as "complete" and re-introduce the very bug it exists to stop.
+
+        A bare truthy value is the legacy shape written before degraded records
+        existed; it is honoured as complete, because that is what it claims and
+        we cannot retroactively know better.
+        """
+        value = self.state.get(key)
+        if isinstance(value, dict):
+            return bool(value.get("complete"))
+        return bool(value)
+
+    def mark_degraded(self, key: str, reason: str, **details: Any) -> None:
+        """
+        Record that a step RAN but could not do the work it exists to do.
+
+        "There was nothing to do" and "we could not do it" used to be written
+        identically - as ``True``. So a run on a machine that was missing the
+        corpus (or pointed at an empty graph) permanently recorded the step as
+        finished, and every later, properly provisioned run printed
+        ``[SKIP] ... already created`` and did nothing. The zero-result run
+        masqueraded as success, and the skip message made it look intentional.
+
+        The record IS persisted - an operator can read WHY the step is pending -
+        but :meth:`is_complete` returns False, so the work is retried.
+
+        Args:
+            key: Checkpoint step key.
+            reason: Short machine-readable cause, e.g. "corpus_missing".
+            **details: Extra context stored alongside (counts, source, ...).
+        """
+        self.state[key] = {
+            "complete": False,
+            "reason": reason,
+            "at": datetime.now().isoformat(),
+            **details,
+        }
+        self.save()
+
     def clear(self, key: str) -> None:
         """Un-mark a completed step so it re-runs (MERGE keeps it idempotent)."""
         self.state[key] = self._defaults().get(key, False)
@@ -574,7 +686,7 @@ class Neo4jSprint9Loader:
     # 1. DTC Codes
     # ------------------------------------------------------------------
     async def load_dtc_codes(self) -> None:
-        if self.checkpoint.state["dtc_loaded"]:
+        if self.checkpoint.is_complete("dtc_loaded"):
             print("[SKIP] DTC codes already loaded")
             return
 
@@ -647,7 +759,7 @@ class Neo4jSprint9Loader:
     # 2. Vehicles
     # ------------------------------------------------------------------
     async def load_vehicles(self) -> None:
-        if self.checkpoint.state["vehicles_loaded"]:
+        if self.checkpoint.is_complete("vehicles_loaded"):
             print("[SKIP] Vehicles already loaded")
             return
 
@@ -719,7 +831,7 @@ class Neo4jSprint9Loader:
     # 3. Engines (EPA)
     # ------------------------------------------------------------------
     async def load_engines(self) -> None:
-        if self.checkpoint.state["engines_loaded"]:
+        if self.checkpoint.is_complete("engines_loaded"):
             print("[SKIP] Engines already loaded")
             return
 
@@ -885,14 +997,22 @@ class Neo4jSprint9Loader:
         return unique
 
     async def load_complaints(self) -> None:
-        if self.checkpoint.state["complaints_loaded"]:
+        if self.checkpoint.is_complete("complaints_loaded"):
             print("[SKIP] Complaints already loaded")
             return
 
         complaints = self._collect_complaints_sorted()
         if not complaints:
-            print("[WARN] No complaints to load")
-            self.checkpoint.mark_complete("complaints_loaded")
+            # No complaint data on this machine is a PROVISIONING problem, not a
+            # finished import. Marking it complete (as this used to) makes every
+            # later run on a properly provisioned machine print "[SKIP] already
+            # loaded" over an empty graph.
+            print("[WARN] No complaints to load - step NOT marked complete (data missing)")
+            self.checkpoint.mark_degraded(
+                "complaints_loaded",
+                reason="no_complaint_data",
+                source=str(DATA_DIR / "nhtsa" / "complaints_flat"),
+            )
             return
 
         print(f"Loading {len(complaints):,} complaints into Neo4j ...")
@@ -1013,7 +1133,7 @@ class Neo4jSprint9Loader:
         common-issues query filters on the Complaint's own make/model/year
         properties, so those edges would cost budget without adding reach.
         """
-        if self.checkpoint.state.get("dtc_complaint_rels"):
+        if self.checkpoint.is_complete("dtc_complaint_rels"):
             print("[SKIP] DTC-Complaint relationships already created")
             print("       (use --redo-dtc-rels to re-run the improved extraction)")
             return
@@ -1022,7 +1142,15 @@ class Neo4jSprint9Loader:
 
         complaints_dir = DATA_DIR / "nhtsa" / "complaints_flat"
         available = [f for f in COMPLAINT_FILES if (complaints_dir / f).exists()]
-        if available:
+        # THE completion predicate for this step. The whole point of the step is
+        # to extract from the FULL ~1.66M-record corpus; the in-graph fallback
+        # can never see more than the COMPLAINT_LIMIT safety-ranked sample, which
+        # is precisely the limitation this step exists to escape (that sample is
+        # what produced the ~107 MENTIONS_DTC edges the live graph has). A run
+        # without the corpus therefore did NOT do this step's work, however many
+        # edges it happened to write, and must not close it for later runs.
+        corpus_present = bool(available)
+        if corpus_present:
             scan = scan_corpus_for_dtc_mentions(complaints_dir, available)
             scan.stats["source"] = "flat-files"
         else:
@@ -1036,8 +1164,26 @@ class Neo4jSprint9Loader:
         print_scan_report(scan)
 
         if not scan.pairs:
-            print("  No DTC codes found in complaint narratives")
-            self.checkpoint.mark_complete("dtc_complaint_rels")
+            if corpus_present:
+                # The real corpus really does contain no DTC mention. The step
+                # ran over everything it was supposed to; an empty answer here is
+                # a RESULT, not a failure.
+                print("  No DTC codes found in complaint narratives (full corpus scanned)")
+                self.checkpoint.mark_complete("dtc_complaint_rels")
+            else:
+                print(
+                    "  [WARN] No DTC codes found AND no corpus was available - "
+                    "this run proved nothing. Step NOT marked complete; re-run "
+                    "it where the flat-file corpus is present."
+                )
+                self.checkpoint.mark_degraded(
+                    "dtc_complaint_rels",
+                    reason="corpus_missing",
+                    source=scan.stats.get("source", "unknown"),
+                    complaints_scanned=scan.stats.get("complaints_scanned", 0),
+                    mentions=0,
+                    created=0,
+                )
             return
 
         # --- Budget --------------------------------------------------------
@@ -1139,7 +1285,24 @@ class Neo4jSprint9Loader:
         self.stats["dtc_complaint_rels"] = created_rels
         self.stats["dtc_complaint_nodes_created"] = created_nodes
         self.checkpoint.state["dtc_complaint_rels_created"] = created_rels
-        self.checkpoint.mark_complete("dtc_complaint_rels")
+        if corpus_present:
+            self.checkpoint.mark_complete("dtc_complaint_rels")
+        else:
+            # Edges WERE written, but only from the safety-ranked in-graph
+            # sample. Closing the step here would let a partial result block the
+            # full extraction on the next properly provisioned run.
+            print(
+                "  [WARN] These edges came from the in-graph sample, not the "
+                "full corpus - step left OPEN so a corpus-equipped run redoes it."
+            )
+            self.checkpoint.mark_degraded(
+                "dtc_complaint_rels",
+                reason="corpus_missing",
+                source=scan.stats.get("source", "unknown"),
+                complaints_scanned=scan.stats.get("complaints_scanned", 0),
+                mentions=len(scan.pairs),
+                created=created_rels,
+            )
         print(
             f"[OK] {created_rels:,} new MENTIONS_DTC relationships "
             f"({len(batch_rows):,} mentions processed, the rest already existed), "
@@ -1148,7 +1311,7 @@ class Neo4jSprint9Loader:
 
     async def create_vehicle_complaint_relationships(self) -> None:
         """Link complaints to vehicles by make+model (batched)."""
-        if self.checkpoint.state["vehicle_complaint_rels"]:
+        if self.checkpoint.is_complete("vehicle_complaint_rels"):
             print("[SKIP] Vehicle-Complaint relationships already created")
             return
 
@@ -1225,14 +1388,21 @@ class Neo4jSprint9Loader:
 
     async def create_vehicle_engine_relationships(self) -> None:
         """Link vehicles to engines via EPA engine_specs data."""
-        if self.checkpoint.state["vehicle_engine_rels"]:
+        if self.checkpoint.is_complete("vehicle_engine_rels"):
             print("[SKIP] Vehicle-Engine relationships already created")
             return
 
         engine_file = DATA_DIR / "epa" / "engine_specs.json"
         if not engine_file.exists():
-            print("[WARN] Engine specs file not found, skipping Vehicle-Engine rels")
-            self.checkpoint.mark_complete("vehicle_engine_rels")
+            print(
+                "[WARN] Engine specs file not found - Vehicle-Engine rels NOT "
+                "marked complete (data missing, not done)"
+            )
+            self.checkpoint.mark_degraded(
+                "vehicle_engine_rels",
+                reason="engine_specs_missing",
+                source=str(engine_file),
+            )
             return
 
         print("Creating Vehicle <-> Engine relationships ...")

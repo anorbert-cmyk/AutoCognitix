@@ -301,6 +301,10 @@ class HungarianEmbeddingService:
     _model: Any = None
     _nlp: Any = None
     _onnx_backend: Optional["_OnnxEmbeddingBackend"] = None
+    # One-shot latch for the sync-path cache warning (see
+    # _warn_sync_cache_unavailable). Class-level so a per-call warning inside a
+    # long indexing loop degenerates into exactly one log line per process.
+    _warned_sync_cache: bool = False
     # Guards lazy model loading so concurrent thread-pool workers never observe
     # a half-initialized model (assigned but not yet .to()/.eval()). Class-level
     # so it exists before any instance is constructed - the singleton has exactly
@@ -771,22 +775,44 @@ class HungarianEmbeddingService:
         texts: List[str],
         preprocess: bool = False,
         batch_size: Optional[int] = None,
-        use_cache: bool = True,
+        use_cache: bool = False,
     ) -> List[List[float]]:
         """
         Generate embeddings for multiple texts with optimized batch processing.
 
         Performance features:
         - Automatic batch size optimization
-        - Redis cache integration for repeated texts
         - GPU memory management
         - FP16 inference on CUDA
+
+        CACHING IS NOT AVAILABLE ON THIS SYNCHRONOUS PATH, and the signature now
+        says so (``use_cache`` defaults to False). The embedding cache is Redis,
+        reached through the ``redis.asyncio`` client owned by
+        :func:`app.db.redis_cache.get_cache_service`; its connection pool is
+        bound to the event loop that created it. This method runs either in a
+        plain sync script or in a ``run_in_executor`` worker thread - neither can
+        await that client, and driving it from a second loop is the classic
+        "attached to a different loop" corruption of the shared singleton.
+
+        Caching IS wired, in the only layer that can safely reach it:
+        :meth:`embed_text_async` and :meth:`embed_batch_async` do the lookup and
+        the write-back under the versioned key namespace, then call this method
+        with ``use_cache=False`` for the genuinely uncached remainder.
+
+        This parameter previously guarded a block that looked like a cache
+        lookup, took four branches, and assigned the identical "embed
+        everything" list in all four - so ``use_cache`` changed nothing at all
+        while the docstring advertised "Redis cache integration for repeated
+        texts". The scaffolding is gone; an explicit ``use_cache=True`` now logs
+        a warning instead of quietly doing nothing.
 
         Args:
             texts: List of input texts to embed.
             preprocess: Whether to apply Hungarian preprocessing first.
             batch_size: Number of texts per batch (auto-determined if None).
-            use_cache: Whether to use Redis cache for embeddings.
+            use_cache: Accepted for call-site compatibility only. True is
+                honoured with a warning, not with caching - use
+                :meth:`embed_batch_async` if you want the Redis cache.
 
         Returns:
             List[List[float]]: One 768-dimensional vector per input text, in
@@ -814,28 +840,8 @@ class HungarianEmbeddingService:
         if preprocess:
             texts = [self.preprocess_hungarian(text) for text in texts]
 
-        # Try to get cached embeddings first
-        cached_embeddings: List[Optional[List[float]]] = [None] * len(texts)
-        texts_to_embed: List[Tuple[int, str]] = []
-
         if use_cache and self._cache_enabled:
-            try:
-                # asyncio already imported at module level
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-
-                if loop is None:
-                    # We're in sync context, skip cache
-                    texts_to_embed = [(i, t) for i, t in enumerate(texts)]
-                else:
-                    # Get cache service - this should be done in async context
-                    texts_to_embed = [(i, t) for i, t in enumerate(texts)]
-            except ImportError:
-                texts_to_embed = [(i, t) for i, t in enumerate(texts)]
-        else:
-            texts_to_embed = [(i, t) for i, t in enumerate(texts)]
+            self._warn_sync_cache_unavailable()
 
         # Slots start EMPTY, not zero-filled. A zero vector is a result (empty
         # input has no semantic content), never a placeholder: seeding with zeros
@@ -844,24 +850,37 @@ class HungarianEmbeddingService:
         # returned and cached as if it were a real embedding.
         pending: List[Optional[List[float]]] = [None] * len(texts)
 
-        # Fill in cached results
-        for i, emb in enumerate(cached_embeddings):
-            if emb is not None:
-                pending[i] = emb
-
-        # Process uncached texts in batches
-        if texts_to_embed:
-            self._embed_batch_internal(
-                texts_to_embed,
-                pending,
-                batch_size,
-            )
+        self._embed_batch_internal(
+            [(i, t) for i, t in enumerate(texts)],
+            pending,
+            batch_size,
+        )
 
         # Cleanup GPU memory after large batches (torch backend only)
         if self._device is not None and len(texts) > batch_size * 4:
             self._cleanup_gpu_memory()
 
         return self._finalize_batch(texts, pending)
+
+    @classmethod
+    def _warn_sync_cache_unavailable(cls) -> None:
+        """
+        Tell a caller ONCE that the sync path cannot honour ``use_cache=True``.
+
+        An unkeepable promise must be audible. The alternative - accepting the
+        flag and quietly ignoring it - is the same silent-no-op pattern that hid
+        the zero-vector outage for months. Logged once per process (a warning
+        inside a 50K-text indexing loop would be its own outage).
+        """
+        if cls._warned_sync_cache:
+            return
+        cls._warned_sync_cache = True
+        logger.warning(
+            "embed_batch(use_cache=True) was requested, but the synchronous "
+            "path has no safe access to the async Redis cache - the texts will "
+            "be embedded uncached. Use embed_batch_async() for cached batch "
+            "embedding. (Logged once per process.)"
+        )
 
     def _finalize_batch(
         self,
