@@ -802,7 +802,8 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             else:
                 # DTC labelling (valid code -> {dtc_code}; anything else sitting
                 # in the /dtc/{code} slot -> {invalid_dtc}) lives in
-                # app.core.metrics_paths, shared with app/middleware/metrics.py.
+                # app.core.metrics_paths, kept metric-free so a test can import
+                # it without dragging in the Prometheus registry.
                 # Recognition is the SAE J2012 rule from app.core.dtc_codes, so
                 # a make like "CHEVROLET" is not folded into {dtc_code}; the
                 # positional catch-all is what stops the ~164k DTC-shaped junk

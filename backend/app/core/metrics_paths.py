@@ -2,12 +2,19 @@
 
 Why this is its own module
 --------------------------
-Two path normalizers exist - ``app.core.metrics.MetricsMiddleware._normalize_endpoint``
-(the one ``app.main`` actually installs) and ``app.middleware.metrics.EndpointNormalizer``
-(a dead duplicate). They declare colliding Prometheus ``Info`` metrics, so they
-can never be imported into the same interpreter and neither can import the
-other. A third, metric-free module is the only place a rule can live exactly
-once - which is the whole point after this project spent a release removing ten
+Two path normalizers used to exist - ``app.core.metrics.MetricsMiddleware``
+``._normalize_endpoint`` (the one ``app.main`` installs) and a dead duplicate in
+``app/middleware/metrics.py``. They declared colliding Prometheus ``Info``
+metrics, so they could never be imported into the same interpreter and neither
+could import the other; a third, metric-free module was the only place the rule
+could live exactly once.
+
+The duplicate has since been deleted (guarded by
+``tests/unit/test_dtc_codes.py::test_the_dead_metrics_duplicate_stays_deleted``),
+so the collision is gone - but this module stays split out. Importing the rule
+from ``app.core.metrics`` would drag the whole Prometheus registry into every
+consumer, and keeping it metric-free is what lets a test import it next to
+anything else. That matters after this project spent a release removing ten
 divergent copies of the DTC pattern.
 
 The cardinality problem this solves

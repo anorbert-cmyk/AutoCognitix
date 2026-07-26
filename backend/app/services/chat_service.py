@@ -292,11 +292,15 @@ class ChatService:
     async def _fetch_rag_context(self, dtc_codes: List[str]) -> Optional[str]:
         """Fetch DTC context from RAG service for the given codes.
 
-        Uses ``type_="dtc"``, NOT ``collection=QdrantService.DTC_COLLECTION``:
-        the huBERT vectors live in the unified ``settings.QDRANT_UNIFIED_COLLECTION``
-        with a ``{"type": "dtc"}`` payload discriminator, while the legacy
-        ``dtc_embeddings_hu`` collection was never populated and would silently
-        return nothing.
+        Selects by ``type_="dtc"``. The huBERT vectors live in the unified
+        ``settings.QDRANT_UNIFIED_COLLECTION`` with a ``{"type": "dtc"}`` payload
+        discriminator; the legacy ``dtc_embeddings_hu`` collection this once
+        pointed at holds only a partial stale copy, and querying it returned an
+        empty list rather than an error - which is how the drift stayed silent.
+
+        Naming a collection here is no longer possible: ``retrieve_from_qdrant``
+        takes no ``collection`` argument and ``type_`` is required, so the wrong
+        target is unexpressible rather than merely discouraged.
         """
         try:
             from app.services.rag_service import get_rag_service

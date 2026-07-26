@@ -175,9 +175,17 @@ python scripts/init_qdrant.py --include-legacy
 
 ### Qdrant Collections
 
-**All huBERT vectors live in ONE collection.** `init_qdrant.py` creates the
-per-type `*_hu` collections, but nothing writes to them and nothing reads from
-them - they exist and are empty. Do not treat them as the data.
+**All huBERT vectors the application reads live in ONE collection**, the unified
+`autocognitix`. The per-type `*_hu` collections are not read by anything at
+runtime — but do NOT read that as "they are empty".
+
+`dtc_embeddings_hu` holds ~2,323 points and `symptom_embeddings_hu` ~117,
+written by the indexer scripts. They are a partial, stale copy: unused, but
+real, and their deletion is not reversible. This file previously stated they
+"exist and are empty", which is the belief that would send an operator into
+`init_qdrant.py --recreate --force` without a second thought. Destructive
+operations there now refuse a collection that still holds points, and print the
+count — trust that number over this table.
 
 | Collection                  | Vector Size | Holds vectors? | Description                                      |
 |-----------------------------|-------------|----------------|--------------------------------------------------|
