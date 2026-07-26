@@ -409,6 +409,40 @@ class QdrantConnectionException(QdrantException):
         self.code = ErrorCode.QDRANT_CONNECTION
 
 
+class QdrantQueryRejectedException(QdrantException):
+    """Qdrant refused the query itself - a configuration defect, not an outage.
+
+    Distinct from :class:`QdrantConnectionException` because the operational
+    response is completely different. A connection error is transient and
+    retrying may work; a rejected query will be rejected identically forever
+    until someone changes the collection.
+
+    The case this was written for: Qdrant answers 400 ``Index required but not
+    found for "type" of one of the following types: [keyword]`` for ANY filtered
+    search when the payload key has no index. Every semantic read in this
+    application filters on ``type``, so a missing index disables all of them -
+    and because the caller's fallback turns the failure into an empty list, the
+    product looks like a search engine that finds nothing rather than one that
+    is misconfigured. Production ran that way with 62,898 correctly-tagged
+    points sitting in a healthy collection.
+
+    Callers should log this at ERROR (Sentry raises events from ERROR up), not
+    at the WARNING level appropriate to a transient miss.
+    """
+
+    def __init__(
+        self,
+        message: str = "A Qdrant elutasitotta a lekerdezest (konfiguracios hiba).",
+        details: Optional[Dict[str, Any]] = None,
+        original_error: Optional[Exception] = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+            original_error=original_error,
+        )
+
+
 class RedisException(DatabaseException):
     """Exception for Redis errors."""
 
