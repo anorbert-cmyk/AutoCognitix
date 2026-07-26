@@ -279,8 +279,11 @@ class TestDTCSearch:
         assert p0101["relevance_score"] == pytest.approx(0.82)
 
         # The mocked seam confirms we hit the unified collection with type=dtc.
+        # There is no collection_name kwarg any more: QdrantService.search
+        # resolves settings.QDRANT_UNIFIED_COLLECTION itself, so a caller cannot
+        # aim this at a legacy collection.
         _, kwargs = qdrant.search.call_args
-        assert kwargs["collection_name"] == "autocognitix"
+        assert "collection_name" not in kwargs
         assert kwargs["filter_conditions"]["type"] == "dtc"
 
     @pytest.mark.asyncio
@@ -444,6 +447,181 @@ class TestDTCSearchCodeVsFreeTextRouting:
     ):
         """Free text in capitals is not a code and must keep semantic search."""
         embedding = await self._search(async_client, query)
+        embedding.embed_text_async.assert_called_once()
+
+
+class TestDTCSearchHasNoScoreThreshold:
+    """The semantic leg of ``/dtc/search`` filters by NOTHING but rank.
+
+    This pins a fact that is easy to assume away: ``search_dtc`` never passes a
+    ``score_threshold``, so ``QdrantService.search`` never sets the key and
+    Qdrant applies no score cutoff at all. The only threshold in the codebase
+    (``rag_service.retrieve_from_qdrant``, default 0.5) belongs to
+    ``/diagnosis/analyze`` and is not on this path.
+
+    Why pin it: when Hungarian symptom queries come back empty, "the similarity
+    threshold is too strict" is the intuitive diagnosis and the wrong one -
+    there is no threshold to loosen, so loosening one cannot add a single
+    result. If a threshold is ever introduced here, these tests fail and force
+    that decision to be argued explicitly with measured precision numbers
+    rather than slipped in as a fix for empty results.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_score_threshold_is_sent_to_qdrant(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """The whole call chain leaves ``score_threshold`` unset."""
+        qdrant = _qdrant_with_mocked_search([])
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "motor rángatás", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        _, kwargs = qdrant.search.call_args
+        assert kwargs.get("score_threshold") is None, (
+            "a score cutoff appeared on the DTC search path; empty Hungarian "
+            "results are not caused by scoring, so this needs its own justification"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_near_zero_scoring_hit_still_reaches_the_client(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """Even a 0.02-similarity hit is served, so recall is not score-limited.
+
+        ``motor rángatás`` matches nothing lexically, so every row in the
+        response had to come from the semantic leg.
+        """
+        hits = [
+            {
+                "id": 1,
+                "score": 0.02,  # far below any plausible cutoff
+                "payload": {"type": "dtc", "code": "P0101", "category": "powertrain"},
+            }
+        ]
+        qdrant = _qdrant_with_mocked_search(hits)
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "motor rángatás", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [d["code"] for d in data] == ["P0101"]
+        assert data[0]["relevance_score"] == pytest.approx(0.02)
+
+    @pytest.mark.asyncio
+    async def test_hungarian_substring_hits_are_lexical_not_semantic(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """The 0.7 score users see is a hardcoded ILIKE constant, not a cosine.
+
+        Production returns ``gyújtáskimaradás`` at exactly 0.7 because the term
+        appears verbatim inside ``description_hu``; ``_compute_text_relevance``
+        stamps that constant on every ``description_hu`` substring match. It
+        looks like working semantic search and is not: with Qdrant returning
+        nothing at all, the identical rows and identical scores come back.
+        """
+        qdrant = _qdrant_with_mocked_search([])  # semantic leg contributes nothing
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", qdrant),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=_embedding_service_stub(),
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "Levegotomeg", "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        by_code = {d["code"]: d for d in data}
+        assert "P0101" in by_code
+        assert by_code["P0101"]["relevance_score"] == pytest.approx(0.7)
+
+
+class TestDTCSearchSemanticIsGatedByLimit:
+    """``len(results) < limit`` decides whether semantic search runs at all.
+
+    A CHARACTERIZATION test: it documents current behaviour rather than
+    endorsing it. The consequence is real - a page already filled by lexical
+    substring matches never gets a semantic hit, no matter how much better that
+    hit would rank. Because lexical scores cap at 0.7 while a good cosine hit
+    scores higher, the sort at the end of the handler cannot repair it: the
+    better rows were never fetched. It bites hardest at the small limits an
+    autocomplete uses, which is why one constant cannot serve both a one-word
+    query and a five-word symptom sentence.
+
+    Left unchanged deliberately: with the semantic leg returning nothing in
+    production, opening this gate buys no measurable recall today and costs an
+    embedding round-trip on every free-text search. Revisit once the DTC
+    vectors are retrievable again.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_full_page_of_lexical_hits_suppresses_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """limit=1 filled lexically -> the embedding backend is never touched."""
+        embedding = _embedding_service_stub()
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", _qdrant_with_mocked_search([])),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=embedding,
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "Mass Air Flow", "limit": 1, "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+        embedding.embed_text_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_same_query_with_room_left_does_run_semantic_search(
+        self, async_client: AsyncClient, sample_dtc_codes
+    ):
+        """Same query, larger limit -> the gate opens. Only ``limit`` changed."""
+        embedding = _embedding_service_stub()
+
+        with (
+            patch("app.api.v1.endpoints.dtc_codes.qdrant_client", _qdrant_with_mocked_search([])),
+            patch(
+                "app.api.v1.endpoints.dtc_codes.get_embedding_service",
+                return_value=embedding,
+            ),
+        ):
+            response = await async_client.get(
+                "/api/v1/dtc/search",
+                params={"q": "Mass Air Flow", "limit": 20, "skip_cache": "true"},
+            )
+
+        assert response.status_code == 200
         embedding.embed_text_async.assert_called_once()
 
 
@@ -689,7 +867,7 @@ class TestDTCCreate:
         response = await async_client.post(
             "/api/v1/dtc/",
             json={
-                "code": "p8888",  # lowercase
+                "code": "p3888",  # lowercase
                 "description_en": "Test code",
                 "category": "powertrain",
                 "severity": "medium",
@@ -699,7 +877,7 @@ class TestDTCCreate:
 
         assert response.status_code == 201
         data = response.json()
-        assert data["code"] == "P8888"
+        assert data["code"] == "P3888"
 
     @pytest.mark.asyncio
     async def test_create_duplicate_dtc_returns_400(
@@ -747,13 +925,13 @@ class TestDTCBulkImport:
             json={
                 "codes": [
                     {
-                        "code": "P7777",
+                        "code": "P3777",
                         "description_en": "Bulk test 1",
                         "category": "powertrain",
                         "severity": "low",
                     },
                     {
-                        "code": "P7778",
+                        "code": "P3778",
                         "description_en": "Bulk test 2",
                         "category": "powertrain",
                         "severity": "medium",
@@ -782,13 +960,13 @@ class TestDTCBulkImport:
             json={
                 "codes": [
                     {
-                        "code": "P6666",
+                        "code": "P3666",
                         "description_en": "New code 1",
                         "category": "powertrain",
                         "severity": "low",
                     },
                     {
-                        "code": "P6667",
+                        "code": "P3667",
                         "description_en": "New code 2",
                         "category": "powertrain",
                         "severity": "low",
@@ -1103,3 +1281,97 @@ class TestDTCApiSelfConsistency:
         """Agreement runs both ways: a real hex code must not be rejected."""
         related = await async_client.get(f"/api/v1/dtc/{code}/related")
         assert related.status_code != 400
+
+
+class TestDTCWriteReadSymmetry:
+    """The WRITE path must not accept what the READ path refuses.
+
+    The read side was fixed first, which left the asymmetry that produced the
+    seeded junk in the first place: `DTCCreate.code` only checked
+    `5 <= len(code) <= 10`, so `POST /api/v1/dtc/` happily inserted `PEACE`,
+    and `GET /api/v1/dtc/PEACE` then answered 400. A row you can create and
+    cannot open.
+    """
+
+    @pytest.mark.parametrize("junk", SEEDED_JUNK_CODES)
+    @pytest.mark.asyncio
+    async def test_create_refuses_every_code_the_detail_endpoint_refuses(
+        self, async_client: AsyncClient, admin_auth_headers: dict, junk: str
+    ):
+        response = await async_client.post(
+            "/api/v1/dtc/",
+            json={
+                "code": junk,
+                "description_en": "Junk row the old length-only check let through",
+                "category": "powertrain",
+                "severity": "medium",
+            },
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 422, f"{junk} was accepted by the write path"
+
+        # ...and nothing landed: the code is still unknown, not merely invalid.
+        detail = await async_client.get(f"/api/v1/dtc/{junk}", params={"skip_cache": "true"})
+        assert detail.status_code == 400
+
+    @pytest.mark.parametrize("code", ["P26B7", "p0a94", "B00A0", "U0100", " P0300 "])
+    @pytest.mark.asyncio
+    async def test_create_still_accepts_real_codes_and_they_open(
+        self, async_client: AsyncClient, admin_auth_headers: dict, code: str
+    ):
+        """Not over-strict: hex codes, lower case and padding all round-trip.
+
+        A rule that rejected P26B7 would be the previous bug in reverse - the
+        strict `[PBCU][0-9]{4}` pattern this project already removed once.
+        """
+        response = await async_client.post(
+            "/api/v1/dtc/",
+            json={
+                "code": code,
+                "description_en": "Real code with a hex tail",
+                "category": "powertrain",
+                "severity": "medium",
+            },
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 201, response.text
+
+        canonical = code.strip().upper()
+        assert response.json()["code"] == canonical
+        assert response.headers["Location"] == f"/api/v1/dtc/{canonical}"
+
+        detail = await async_client.get(f"/api/v1/dtc/{canonical}", params={"skip_cache": "true"})
+        assert detail.status_code == 200
+        assert detail.json()["code"] == canonical
+
+    @pytest.mark.asyncio
+    async def test_bulk_import_cannot_seed_junk_either(
+        self, async_client: AsyncClient, admin_auth_headers: dict
+    ):
+        """The bulk route shares DTCCreate, so it inherits the same gate.
+
+        `POST /dtc/bulk` is the plausible way a corpus dump gets re-imported;
+        leaving it lenient would have closed the door and left the window open.
+        """
+        response = await async_client.post(
+            "/api/v1/dtc/bulk",
+            json={
+                "codes": [
+                    {
+                        "code": "P0101",
+                        "description_en": "A perfectly good code",
+                        "category": "powertrain",
+                        "severity": "medium",
+                    },
+                    {
+                        "code": "PEACE",
+                        "description_en": "A hex-shaped English word",
+                        "category": "powertrain",
+                        "severity": "medium",
+                    },
+                ],
+                "overwrite_existing": True,
+            },
+            headers=admin_auth_headers,
+        )
+        assert response.status_code == 422
