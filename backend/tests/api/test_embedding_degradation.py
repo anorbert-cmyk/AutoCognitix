@@ -182,7 +182,7 @@ class TestDegradationIsVisibleToOnCall:
             ),
         ):
             items = await service.retrieve_from_qdrant(
-                "nincs elerheto embedding backend", collection="dtc_embeddings_hu"
+                "nincs elerheto embedding backend", type_="dtc"
             )
 
         assert items == []

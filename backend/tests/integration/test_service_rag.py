@@ -15,13 +15,22 @@ backend_path = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(backend_path))
 
 
+_LEGACY_COLLECTION_NAMES = (
+    "dtc_embeddings_hu",
+    "symptom_embeddings_hu",
+    "component_embeddings_hu",
+    "repair_embeddings_hu",
+    "known_issue_embeddings_hu",
+)
+
+
 class TestRAGContextRetrieval:
     """Test RAG context retrieval from Qdrant."""
 
     @pytest.mark.asyncio
     async def test_retrieve_from_qdrant_returns_list(self, mock_qdrant_client):
         """Test that retrieve_from_qdrant returns a list of RetrievedItem."""
-        mock_qdrant_client.search = AsyncMock(
+        mock_qdrant_client.search_unified = AsyncMock(
             return_value=[
                 {"id": "1", "score": 0.9, "payload": {"code": "P0101"}},
             ]
@@ -36,16 +45,15 @@ class TestRAGContextRetrieval:
             service._qdrant = mock_qdrant_client
             service._cache.clear()
 
-            results = await service.retrieve_from_qdrant(
-                "Motor problem", collection="dtc_codes", top_k=5
-            )
+            results = await service.retrieve_from_qdrant("Motor problem", type_="dtc", top_k=5)
 
             assert isinstance(results, list)
+            assert results[0].content == {"code": "P0101"}
 
     @pytest.mark.asyncio
     async def test_retrieve_from_qdrant_respects_top_k(self, mock_qdrant_client):
         """Test that retrieve_from_qdrant passes top_k to Qdrant."""
-        mock_qdrant_client.search = AsyncMock(
+        mock_qdrant_client.search_unified = AsyncMock(
             return_value=[
                 {"id": "1", "score": 0.9, "payload": {}},
                 {"id": "2", "score": 0.8, "payload": {}},
@@ -61,14 +69,15 @@ class TestRAGContextRetrieval:
             service._qdrant = mock_qdrant_client
             service._cache.clear()
 
-            results = await service.retrieve_from_qdrant("Query", collection="dtc_codes", top_k=2)
+            results = await service.retrieve_from_qdrant("Query", type_="dtc", top_k=2)
 
             assert len(results) <= 2
+            assert mock_qdrant_client.search_unified.await_args.kwargs["limit"] == 2
 
     @pytest.mark.asyncio
     async def test_retrieve_from_qdrant_handles_error(self, mock_qdrant_client):
         """Test that retrieve_from_qdrant handles errors gracefully."""
-        mock_qdrant_client.search = AsyncMock(side_effect=Exception("Connection error"))
+        mock_qdrant_client.search_unified = AsyncMock(side_effect=Exception("Connection error"))
 
         with patch("app.services.rag_service.embed_text_async") as mock_embed:
             mock_embed.return_value = [0.0] * 768
@@ -79,7 +88,7 @@ class TestRAGContextRetrieval:
             service._qdrant = mock_qdrant_client
             service._cache.clear()
 
-            results = await service.retrieve_from_qdrant("Query", collection="dtc_codes", top_k=5)
+            results = await service.retrieve_from_qdrant("Query", type_="dtc", top_k=5)
 
             assert isinstance(results, list)
             assert len(results) == 0
@@ -363,7 +372,7 @@ class TestRAGErrorHandling:
     @pytest.mark.asyncio
     async def test_handles_qdrant_error(self, mock_qdrant_client):
         """Test handling of Qdrant errors."""
-        mock_qdrant_client.search = AsyncMock(side_effect=Exception("Qdrant unavailable"))
+        mock_qdrant_client.search_unified = AsyncMock(side_effect=Exception("Qdrant unavailable"))
 
         with patch("app.services.rag_service.embed_text_async") as mock_embed:
             mock_embed.return_value = [0.0] * 768
@@ -375,7 +384,7 @@ class TestRAGErrorHandling:
             service._cache.clear()
 
             # Should handle error gracefully
-            results = await service.retrieve_from_qdrant("Query", collection="dtc_codes", top_k=5)
+            results = await service.retrieve_from_qdrant("Query", type_="dtc", top_k=5)
 
             # Should return empty list on error
             assert isinstance(results, list)
@@ -531,8 +540,11 @@ class TestRAGUnifiedCollectionRouting:
             )
 
         _, kwargs = rag_service._qdrant.search.call_args
-        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
         assert kwargs["filter_conditions"]["type"] == "dtc"
+        # The collection is not observable here BECAUSE it is no longer a
+        # parameter: QdrantService.search resolves it from settings itself.
+        assert "collection_name" not in kwargs
+        assert settings.QDRANT_UNIFIED_COLLECTION == "autocognitix"
 
         assert len(items) == 1
         assert items[0].content["code"] == "P0301"
@@ -564,13 +576,16 @@ class TestRAGUnifiedCollectionRouting:
                 symptoms="egyenetlen jaratas",
             )
 
-        collections = [
-            call.kwargs["collection_name"] for call in rag_service._qdrant.search.call_args_list
-        ]
-        assert collections, "assemble_context issued no Qdrant search at all"
-        assert set(collections) == {settings.QDRANT_UNIFIED_COLLECTION}
-        assert QdrantService.DTC_COLLECTION not in collections
-        assert QdrantService.SYMPTOM_COLLECTION not in collections
+        calls = rag_service._qdrant.search.call_args_list
+        assert calls, "assemble_context issued no Qdrant search at all"
+        # No call may name a collection at all - the parameter is gone, so a
+        # retrieval leg cannot be pointed anywhere but settings.QDRANT_UNIFIED_COLLECTION.
+        assert all("collection_name" not in call.kwargs for call in calls)
+        assert not any(arg in _LEGACY_COLLECTION_NAMES for call in calls for arg in call.args)
+        assert {call.kwargs["filter_conditions"]["type"] for call in calls} == {
+            "dtc",
+            "complaint",
+        }
 
         # ...and the retrieved payloads really reach the prompt context.
         assert "P0301" in context.dtc_context
@@ -601,9 +616,7 @@ class TestRAGUnifiedCollectionRouting:
 
         calls = rag_service._qdrant.search.call_args_list
         assert calls, "chat RAG context issued no Qdrant search at all"
-        collections = [call.kwargs["collection_name"] for call in calls]
-        assert set(collections) == {settings.QDRANT_UNIFIED_COLLECTION}
-        assert QdrantService.DTC_COLLECTION not in collections
+        assert all("collection_name" not in call.kwargs for call in calls)
         assert all(call.kwargs["filter_conditions"]["type"] == "dtc" for call in calls)
 
         # ...and the hit really reaches the chat prompt.
@@ -732,7 +745,7 @@ class TestRAGUnifiedCollectionRouting:
 
         mock_qdrant.get_collection_info.assert_awaited_once_with(settings.QDRANT_UNIFIED_COLLECTION)
         assert report["details"]["qdrant"]["collection"] == settings.QDRANT_UNIFIED_COLLECTION
-        assert report["details"]["qdrant"]["collection"] != QdrantService.DTC_COLLECTION
+        assert report["details"]["qdrant"]["collection"] not in _LEGACY_COLLECTION_NAMES
         assert report["details"]["qdrant"]["count"] == 54652
 
     @pytest.mark.asyncio
@@ -750,35 +763,41 @@ class TestRAGUnifiedCollectionRouting:
             results = await get_context("egyenetlen jaratas", top_k=5)
 
         _, kwargs = rag_service._qdrant.search.call_args
-        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
         assert kwargs["filter_conditions"]["type"] == "dtc"
         assert results[0]["content"]["code"] == "P0301"
         assert results[0]["source"] == "qdrant_dtc"
 
     @pytest.mark.asyncio
-    async def test_explicit_collection_route_still_supported(self, rag_service):
-        """Backwards compatibility: an explicit collection name still targets
-        that collection through the plain search API.
+    async def test_the_free_text_collection_route_is_gone(self, rag_service):
+        """REVERT-GUARD: the ``collection=`` argument WAS the drift's carrier.
+
+        While it existed, any caller could aim a retrieval leg at an
+        all-but-empty collection and receive ``[]`` - a legitimate search
+        result - so the failure was invisible. It is now a TypeError at the
+        call site instead of a silent empty answer at runtime.
         """
         rag_service._qdrant = _unified_qdrant_mock()
 
-        with patch(
-            "app.services.rag_service.embed_text_async",
-            new=AsyncMock(return_value=[0.1] * 768),
-        ):
-            items = await rag_service.retrieve_from_qdrant(
-                query="teszt", collection="custom_collection", top_k=3
+        with pytest.raises(TypeError):
+            await rag_service.retrieve_from_qdrant(
+                query="teszt", collection="dtc_embeddings_hu", top_k=3
             )
-
-        _, kwargs = rag_service._qdrant.search.call_args
-        assert kwargs["collection_name"] == "custom_collection"
-        assert kwargs["filter_conditions"] is None
-        assert items == []
+        rag_service._qdrant.search.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_retrieve_requires_collection_or_type(self, rag_service):
-        """Neither route selected is a programming error, not a silent no-op."""
-        with pytest.raises(ValueError):
+    async def test_an_unindexed_payload_type_raises_instead_of_returning_empty(self, rag_service):
+        """``symptom`` is the real example: the RAG asked for a type the
+        collection has none of, and got a plausible empty result."""
+        rag_service._qdrant = _unified_qdrant_mock()
+
+        with pytest.raises(ValueError, match="Unknown retrieval type"):
+            await rag_service.retrieve_from_qdrant(query="teszt", type_="symptom")
+        rag_service._qdrant.search.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retrieve_requires_a_payload_type(self, rag_service):
+        """No route selected is a programming error, not a silent no-op."""
+        with pytest.raises(TypeError):
             await rag_service.retrieve_from_qdrant(query="teszt")
 
 

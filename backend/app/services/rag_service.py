@@ -131,9 +131,17 @@ class RetrievalSource(str, Enum):
         return str(self.value)
 
 
-# Payload ``type`` discriminator -> retrieval source label. Under the unified
-# collection every hit comes from the same collection, so the source label is
-# driven by the payload type instead of the collection name.
+# Payload ``type`` discriminator -> retrieval source label. Every hit comes
+# from the same collection, so the source label is driven by the payload type
+# instead of the collection name.
+#
+# This mapping is also the CLOSED SET of retrieval legs this service supports:
+# ``retrieve_from_qdrant`` rejects anything that is not a key here. Adding a leg
+# therefore requires adding its source label in the same edit - a leg cannot
+# exist without a truthful label, and an unsupported type cannot degrade into a
+# silently empty result. The vector store also holds ``type="recall"`` points
+# (see ``qdrant_client.UNIFIED_PAYLOAD_TYPES``); recalls reach the diagnosis via
+# the NHTSA service instead, so there is deliberately no recall leg here.
 _SOURCE_BY_PAYLOAD_TYPE: Dict[str, RetrievalSource] = {
     "dtc": RetrievalSource.QDRANT_DTC,
     "complaint": RetrievalSource.QDRANT_COMPLAINT,
@@ -512,64 +520,67 @@ class RAGService:
     async def retrieve_from_qdrant(
         self,
         query: str,
-        collection: Optional[str] = None,
+        type_: str,
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         score_threshold: float = 0.5,
         preprocess: bool = True,
-        type_: Optional[str] = None,
     ) -> List[RetrievedItem]:
         """
-        Retrieve items from Qdrant vector store.
+        Retrieve items of one payload type from the vector store.
 
-        All huBERT vectors live in ONE type-discriminated collection
-        (``settings.QDRANT_UNIFIED_COLLECTION``); the per-type collections
-        (``dtc_embeddings_hu``, ``symptom_embeddings_hu``, ...) were never
-        populated. Passing ``type_`` therefore routes the search through
-        :meth:`QdrantService.search_unified`, which targets that collection and
-        injects the ``{"type": type_}`` discriminator. ``collection`` is only
-        honoured for an explicit legacy per-collection lookup.
+        There is no ``collection`` parameter. Every huBERT vector lives in the
+        single ``settings.QDRANT_UNIFIED_COLLECTION`` and entities are told
+        apart by their payload ``type``; the retrieval target is therefore not
+        a caller decision. The removed free-text ``collection`` argument is what
+        let this method be pointed at the all-but-empty ``dtc_embeddings_hu``
+        for months - it returned ``[]``, which is a legitimate search result, so
+        nothing ever raised.
 
         Args:
             query: Search query text.
-            collection: Legacy Qdrant collection name. Required only when
-                ``type_`` is omitted.
+            type_: Payload discriminator selecting the retrieval leg. Must be a
+                key of :data:`_SOURCE_BY_PAYLOAD_TYPE`.
             top_k: Number of results to return.
-            filters: Optional filter conditions.
+            filters: Optional exact-match payload filters.
             score_threshold: Minimum similarity score.
             preprocess: Run Hungarian NLP preprocessing before embedding.
                 Set to False when the caller has already preprocessed the query
                 to avoid a redundant spaCy pass.
-            type_: Payload discriminator ("dtc", "complaint", ...) selecting the
-                unified-collection route.
 
         Returns:
             List of RetrievedItem from Qdrant.
 
         Raises:
-            ValueError: If neither ``collection`` nor ``type_`` is provided.
+            ValueError: If ``type_`` is not a retrieval leg this service knows
+                how to label. Silently searching for a non-existent type would
+                return ``[]`` and be indistinguishable from "no matches".
         """
-        target_collection = settings.QDRANT_UNIFIED_COLLECTION if type_ else collection
-        if not target_collection:
-            raise ValueError("retrieve_from_qdrant requires either 'collection' or 'type_'")
+        if type_ not in _SOURCE_BY_PAYLOAD_TYPE:
+            raise ValueError(
+                f"Unknown retrieval type {type_!r}; supported: "
+                f"{sorted(_SOURCE_BY_PAYLOAD_TYPE)}. An unknown type matches no "
+                "payload and would silently look like an empty result set."
+            )
+        target_collection = settings.QDRANT_UNIFIED_COLLECTION
 
         # Normalize Hungarian text to NFC form for consistent search
         query = unicodedata.normalize("NFC", query)
 
         # Cache key = EVERY argument that changes the result set. ``type_`` is in
-        # it because under the unified collection two retrieval legs otherwise
-        # share collection+query+filters and serve each other's results; ``top_k``
-        # and ``score_threshold`` are in it because they change the size and the
-        # cut-off of that set (chat_service asks for top_k=3 on a bare DTC code,
-        # assemble_context asks for top_k=10 on the same reduced query, and the
-        # second caller used to be served the first one's 3 items). ``preprocess``
-        # is in it because it changes the vector the query is embedded into.
+        # it because every leg now shares one collection, so without it two legs
+        # with the same query+filters would serve each other's results;
+        # ``top_k`` and ``score_threshold`` are in it because they change the
+        # size and the cut-off of that set (chat_service asks for top_k=3 on a
+        # bare DTC code, assemble_context asks for top_k=10 on the same reduced
+        # query, and the second caller used to be served the first one's 3
+        # items). ``preprocess`` is in it because it changes the vector the
+        # query is embedded into. The collection is NOT in it - it is a constant.
         # No slicing of a wider cached result: Qdrant's HNSW search depends on
         # ``limit``, so a top_k=10 result is not guaranteed to contain the same
         # first 3 hits a top_k=3 search would return.
         cache_key = (
             "qdrant",
-            target_collection,
             type_,
             query,
             filters,
@@ -611,32 +622,18 @@ class RAGService:
             return []
 
         try:
-            if type_:
-                # NOTE: no model_version - the unified collection's points carry
-                # no ``_embedding_model_version`` payload, so filtering on it
-                # would match nothing.
-                results = await self._qdrant.search_unified(
-                    query_vector=query_embedding,
-                    type_=type_,
-                    limit=top_k,
-                    extra_filters=filters,
-                    score_threshold=score_threshold,
-                )
-            else:
-                results = await self._qdrant.search(
-                    collection_name=target_collection,
-                    query_vector=query_embedding,
-                    limit=top_k,
-                    filter_conditions=filters,
-                    score_threshold=score_threshold,
-                )
+            # NOTE: no model_version - the unified collection's points carry
+            # no ``_embedding_model_version`` payload, so filtering on it
+            # would match nothing.
+            results = await self._qdrant.search_unified(
+                query_vector=query_embedding,
+                type_=type_,
+                limit=top_k,
+                extra_filters=filters,
+                score_threshold=score_threshold,
+            )
 
-            if type_:
-                source = _SOURCE_BY_PAYLOAD_TYPE.get(type_, RetrievalSource.QDRANT_SYMPTOM)
-            elif target_collection == QdrantService.DTC_COLLECTION:
-                source = RetrievalSource.QDRANT_DTC
-            else:
-                source = RetrievalSource.QDRANT_SYMPTOM
+            source = _SOURCE_BY_PAYLOAD_TYPE[type_]
 
             items = []
             for result in results:
@@ -654,7 +651,7 @@ class RAGService:
             logger.info(
                 "rag qdrant retrieval: collection=%s type=%s hits=%d",
                 target_collection,
-                type_ or "-",
+                type_,
                 len(items),
             )
 
@@ -665,7 +662,7 @@ class RAGService:
         except Exception as e:
             logger.warning(
                 f"Qdrant search error for {target_collection} "
-                f"(type={type_ or '-'}): {sanitize_exception(e)}"
+                f"(type={type_}): {sanitize_exception(e)}"
             )
             return []
 
