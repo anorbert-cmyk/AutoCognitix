@@ -7,10 +7,12 @@ supporting both local and cloud deployments with Hungarian error messages.
 
 import math
 import threading
+from http import HTTPStatus
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qdrant_models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -201,6 +203,23 @@ class QdrantService:
                 logger.info(f"Created collection: {collection_name}")
             else:
                 logger.info(f"Collection already exists: {collection_name}")
+
+        except UnexpectedResponse as e:
+            # gunicorn runs WEB_CONCURRENCY workers (2 by default) and EVERY one
+            # runs the lifespan, so on a fresh cluster all of them can see the
+            # collection missing and race to create it. Qdrant answers 409 to the
+            # losers. That is success - the collection exists and was created with
+            # these exact parameters - but the generic handler below would turn it
+            # into a QdrantException, and main.py's boot handler swallows that as
+            # "Qdrant initialization skipped", which reads exactly like a real
+            # outage on the one deploy where you are watching for one. It also
+            # aborts the loser before it reports surviving legacy collections.
+            if e.status_code != HTTPStatus.CONFLICT:
+                raise
+            logger.info(
+                f"Collection {collection_name} was created concurrently by another "
+                "worker; continuing"
+            )
 
         except ConnectionError as e:
             logger.error(

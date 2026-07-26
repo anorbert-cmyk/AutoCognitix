@@ -1375,3 +1375,53 @@ class TestDTCWriteReadSymmetry:
             headers=admin_auth_headers,
         )
         assert response.status_code == 422
+
+
+@pytest.mark.unit
+class TestDetailRelatedCodesAreServable:
+    """`related_codes` was the one surface that skipped the servability gate.
+
+    Search filters through `_servable_dtcs`; `GET /dtc/{code}/related` filters
+    through it; `GET /dtc/{code}` did not - it returned `dtc.related_codes`
+    verbatim. The frontend renders that array as `<Link to="/dtc/{code}">`
+    whenever the /related endpoint comes back empty, so the *correct* filter over
+    there is exactly what caused the unfiltered value here to reach the page.
+    Clicking it raises ApiError 400 before the request is even sent.
+    """
+
+    @staticmethod
+    def _model(related):
+        from unittest.mock import MagicMock
+
+        m = MagicMock()
+        m.code = "P0300"
+        m.description_en = "Random misfire detected"
+        m.description_hu = "Veletlenszeru gyujtaskimaradas"
+        m.category = "powertrain"
+        m.is_generic = True
+        m.severity = "high"
+        m.system = None
+        m.symptoms = []
+        m.possible_causes = []
+        m.diagnostic_steps = []
+        m.related_codes = related
+        m.manufacturer_code = None
+        return m
+
+    def test_unservable_related_codes_are_dropped(self):
+        from app.api.v1.endpoints.dtc_codes import _dtc_model_to_detail
+
+        detail = _dtc_model_to_detail(self._model(["P0301", "PEACE", "UA80E", "P0302", "P93AF"]))
+        assert detail.related_codes == ["P0301", "P0302"]
+
+    def test_servable_related_codes_are_untouched(self):
+        from app.api.v1.endpoints.dtc_codes import _dtc_model_to_detail
+
+        codes = ["P0301", "P0302", "B00A0", "U0100"]
+        assert _dtc_model_to_detail(self._model(codes)).related_codes == codes
+
+    def test_none_and_empty_are_handled(self):
+        from app.api.v1.endpoints.dtc_codes import _dtc_model_to_detail
+
+        assert _dtc_model_to_detail(self._model(None)).related_codes == []
+        assert _dtc_model_to_detail(self._model([])).related_codes == []

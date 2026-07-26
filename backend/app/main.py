@@ -16,8 +16,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
+from app.core.dtc_codes import normalize_dtc_code
 from app.core.error_handlers import setup_all_exception_handlers
 from app.core.etag import CacheControlMiddleware, ETagMiddleware
+from app.core.log_sanitizer import sanitize_log
 from app.core.logging import RequestLoggingMiddleware, get_logger, setup_logging
 from app.core.metrics import MetricsMiddleware
 from app.core.rate_limiter import RateLimitMiddleware
@@ -63,7 +65,39 @@ async def _seed_dtc_codes() -> None:
             logger.warning("No DTC codes found in seed file")
             return
 
-        logger.info(f"Seeding {len(codes)} DTC codes...")
+        # This is the ONE write path that bypasses `DTCCreate`: raw SQL, so nothing
+        # else stops a row the rest of the API refuses to serve. Migration 021 purges
+        # the five such rows that shipped historically - but a migration runs once.
+        # On a database that is still EMPTY when it runs (a new Railway environment,
+        # a staging rebuild, a restore) it purges nothing, stamps itself applied
+        # forever, and then this function re-inserts them from the seed file. Without
+        # this filter the purge does not stick anywhere except the one database that
+        # happened to be populated on the day it ran.
+        #
+        # The gate is the shared rule, not a list of the five known-bad codes, so a
+        # future seed file cannot reintroduce the class - only this specific instance
+        # of it. Codes are stored canonicalised for the same reason `DTCCreate` does
+        # it: the detail endpoint looks them up by the canonical spelling.
+        servable = []
+        rejected = []
+        for c in codes:
+            canonical = normalize_dtc_code(c.get("code", ""))
+            if canonical is None:
+                rejected.append(sanitize_log(c.get("code", "")))
+                continue
+            servable.append((canonical, c))
+
+        if rejected:
+            logger.warning(
+                "Skipping %d seed row(s) rejected by the SAE J2012 rule: %s",
+                len(rejected),
+                rejected[:25],
+            )
+        if not servable:
+            logger.warning("No servable DTC codes in seed file")
+            return
+
+        logger.info(f"Seeding {len(servable)} DTC codes...")
         start = time.time()
 
         # Batch insert using executemany for performance
@@ -78,7 +112,7 @@ async def _seed_dtc_codes() -> None:
 
         params = [
             {
-                "code": c.get("code", ""),
+                "code": canonical,
                 "description_en": c.get("description_en", ""),
                 "description_hu": c.get("description_hu"),
                 "category": c.get("category", "powertrain"),
@@ -91,7 +125,7 @@ async def _seed_dtc_codes() -> None:
                 "related_codes": c.get("related_codes", []),
                 "sources": c.get("sources", []),
             }
-            for c in codes
+            for canonical, c in servable
         ]
 
         # Insert in batches of 500 for memory efficiency
@@ -118,7 +152,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
         await qdrant_client.initialize_collections()
         logger.info("Qdrant collections initialized successfully")
     except Exception as e:
-        logger.warning(f"Qdrant initialization skipped: {e}")
+        # ERROR, not WARNING, and deliberately so. This used to create five
+        # collections nothing read, so a failure here was cosmetic. It now creates
+        # the ONE collection every search, every RAG retrieval and the GDPR erasure
+        # sweep depend on - and Sentry's LoggingIntegration raises events at ERROR
+        # while WARNING is only a breadcrumb, so at the old level a failed bootstrap
+        # of the entire vector store paged nobody. Startup still continues: the API
+        # serves its lexical paths without Qdrant, and refusing to boot would turn a
+        # degraded search into a total outage.
+        logger.error(
+            f"Qdrant collection initialization FAILED - semantic search and RAG "
+            f"will be degraded: {e}",
+            exc_info=True,
+        )
 
     # Qdrant health check - verify connectivity and report collection count
     try:

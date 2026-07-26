@@ -488,6 +488,12 @@ class CheckpointManager:
             reason: Short machine-readable cause, e.g. "corpus_missing".
             **details: Extra context stored alongside (counts, source, ...).
         """
+        # `complete` is stripped from details rather than being splatted over: the
+        # whole point of this record is that it is NOT complete, and with `**details`
+        # last a caller passing `complete=True` as context would silently flip it
+        # back to done. That is one careless kwarg away from restoring the exact bug
+        # this method exists to prevent, so make it unexpressible.
+        details.pop("complete", None)
         self.state[key] = {
             "complete": False,
             "reason": reason,

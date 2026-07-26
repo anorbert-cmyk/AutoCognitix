@@ -22,8 +22,27 @@ against it, so the door is shut - these rows are the mess already inside.
 They are unreachable through the API: `/dtc/search` filters results through
 `_servable_dtcs`, and `/dtc/{code}` answers 400 for them. So this is a cleanup,
 not a bug fix, and there is no urgency to run it. What it does buy: any direct
-DB consumer, export, count or future re-index stops seeing five fake codes, and
-`related_codes` arrays stop pointing at rows that cannot be opened.
+DB consumer, export, count or future re-index stops seeing five fake codes.
+
+Scope of the `related_codes` scrub - read this before trusting it
+----------------------------------------------------------------
+Step 2 scrubs `dtc_codes.related_codes` and NOTHING ELSE. Six other columns also
+carry DTC code strings and are deliberately left untouched:
+
+    known_issues.related_dtc_codes        vehicle_tsb.related_dtc_codes
+    vehicle_recalls.extracted_dtc_codes   vehicle_complaints.extracted_dtc_codes
+    diagnosis_sessions.dtc_codes          diagnosis_archive.dtc_codes
+
+That is a deliberate scope call, not an oversight. The `diagnosis_*` columns are
+a record of what a user actually typed and must not be rewritten. The other four
+are re-derived from source data by `scripts/sync_nhtsa.py`, which extracts codes
+through the canonical `app.core.dtc_codes.extract_dtc_codes` - so a re-sync will
+not regenerate these five, and cannot hit the FK.
+
+None of those rows were servable before this migration either: `/dtc/{code}`
+already answered 400 and `_servable_dtcs` already filtered them out. So the
+purge creates no NEW dangling reference - it just does not fix the pre-existing
+ones outside `dtc_codes`.
 
 Why the dependent tables are handled first
 ------------------------------------------
