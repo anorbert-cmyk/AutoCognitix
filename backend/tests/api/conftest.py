@@ -796,7 +796,7 @@ def diagnosis_request_data() -> dict:
 def dtc_create_data() -> dict:
     """Sample DTC creation data."""
     return {
-        "code": "P9999",
+        "code": "P3999",
         "description_en": "Test DTC Code for Testing",
         "description_hu": "Teszt DTC kod teszteleshez",
         "category": "powertrain",

@@ -637,7 +637,7 @@ class TestDTCCreateEndpoint:
         headers = admin_client["headers"]
 
         incomplete_dtc = {
-            "code": "P5555",
+            "code": "P3555",
             "category": "powertrain",
             "severity": "medium",
         }
@@ -892,7 +892,7 @@ class TestDTCUpdateEndpoint:
 
         # First create a DTC
         dtc = {
-            "code": "P6001",
+            "code": "P3601",
             "description_en": "Original Description",
             "description_hu": "Eredeti leiras",
             "category": "powertrain",
@@ -906,7 +906,7 @@ class TestDTCUpdateEndpoint:
         update_data = {
             "codes": [
                 {
-                    "code": "P6001",
+                    "code": "P3601",
                     "description_en": "Updated Description",
                     "description_hu": "Frissitett leiras",
                     "category": "powertrain",
@@ -981,7 +981,7 @@ class TestDTCHungarianContent:
         headers = admin_client["headers"]
 
         dtc = {
-            "code": "P6100",
+            "code": "P3610",
             "description_en": "Test Code",
             "description_hu": "Teszt hibakod magyar leirassal es specialis karakterekkel",
             "category": "powertrain",
@@ -1063,14 +1063,21 @@ class TestDTCBulkOperations:
 
     @pytest.mark.asyncio
     async def test_bulk_import_with_invalid_codes(self, admin_client, seeded_db):
-        """Test bulk import with some invalid codes."""
+        """One malformed code rejects the WHOLE batch, before the handler runs.
+
+        DTCCreate validates `code` against the shared SAE J2012 rule, so a bad
+        element fails request validation and never reaches the per-item
+        `errors` array. Deliberate: half-importing a corpus is how the junk
+        codes (PEACE, PACED, P93AF, UA80E, UA80F) got in. The 422 body names
+        the offending element so the admin can fix it.
+        """
         client = admin_client["client"]
         headers = admin_client["headers"]
 
         bulk_data = {
             "codes": [
                 {
-                    "code": "P7001",
+                    "code": "P3701",
                     "description_en": "Valid Code",
                     "category": "powertrain",
                     "severity": "medium",
@@ -1087,8 +1094,12 @@ class TestDTCBulkOperations:
 
         response = await client.post("/api/v1/dtc/bulk", json=bulk_data, headers=headers)
 
-        # Should either reject all or create valid ones and report errors
-        assert response.status_code in [200, 201, 422]
+        assert response.status_code == 422
+        # The error must point at the bad element, not just "invalid body".
+        # Envelope shape comes from app.core.error_handlers.build_error_response.
+        errors = response.json()["error"]["details"]["validation_errors"]
+        fields = [err["field"] for err in errors]
+        assert any("codes -> 1 -> code" in field for field in fields), fields
 
     @pytest.mark.asyncio
     async def test_bulk_import_large_batch(self, admin_client, seeded_db):
@@ -1098,7 +1109,7 @@ class TestDTCBulkOperations:
 
         codes = [
             {
-                "code": f"P7{i:03d}",
+                "code": f"P3{i:03d}",
                 "description_en": f"Test Code {i}",
                 "category": "powertrain",
                 "severity": "medium",
@@ -1245,7 +1256,7 @@ class TestDTCDiagnosticSteps:
         headers = admin_client["headers"]
 
         dtc = {
-            "code": "P6200",
+            "code": "P3620",
             "description_en": "Test Code with Steps",
             "category": "powertrain",
             "severity": "medium",

@@ -35,6 +35,7 @@ import {
   useVehicleRecalls,
 } from '../services/hooks/useGarage'
 import { useVehicleComplaints } from '../services/hooks/useVehicle'
+import { segmentedItemClass } from '../lib/styles'
 import CommonIssuesPanel from '../components/features/garage/CommonIssuesPanel'
 import {
   formatHealthScore,
@@ -62,17 +63,14 @@ const EMPTY_REMINDER: Omit<MaintenanceReminderCreate, 'vehicle_id'> = {
   notes: '',
 }
 
-// A SettingsPage kanonikus fül-változatával azonos fókuszgyűrű.
-const focusRing =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-
-// Az öt fül közös osztálylistája (SettingsPage kanonikus változat: h-9 px-5
-// font-semibold). Korábban a "Visszahívások" és a "Panaszok" px-4 py-2
-// font-medium volt — ettől a fülsáv vizuálisan egyenetlen volt.
+// Az öt fül közös osztálylistája. A pirula-stílus a megosztott
+// `segmentedItemClass`-ból jön (ugyanaz, amit a SettingsPage fülsávja használ);
+// a `flex items-center gap-2` viszont ITT marad, mert csak ezeknek a füleknek
+// van vezető ikonja és záró darabszám-badge-e.
+// Korábban a "Visszahívások" és a "Panaszok" px-4 py-2 font-medium volt —
+// ettől a fülsáv vizuálisan egyenetlen volt.
 const tabClass = (isActive: boolean): string =>
-  `flex items-center gap-2 h-9 px-5 rounded-lg text-sm font-semibold transition-colors ${focusRing} ${
-    isActive ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-  }`
+  `flex items-center gap-2 ${segmentedItemClass(isActive)}`
 
 // =============================================================================
 // VehicleDetailPage

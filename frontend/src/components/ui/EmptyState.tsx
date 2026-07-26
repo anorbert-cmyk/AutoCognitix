@@ -9,6 +9,7 @@
  * <button> when given an `onClick`.
  */
 import { Link } from 'react-router-dom'
+import { focusRing } from '../../lib/styles'
 
 type Action = { label: string; to: string } | { label: string; onClick: () => void }
 
@@ -23,7 +24,7 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action, className = '' }: EmptyStateProps) {
   const cls =
     'inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white ' +
-    'transition-colors hover:bg-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+    `transition-colors hover:bg-primary-700 ${focusRing}`
 
   return (
     <div className={`flex flex-col items-center gap-3 py-10 text-center ${className}`}>

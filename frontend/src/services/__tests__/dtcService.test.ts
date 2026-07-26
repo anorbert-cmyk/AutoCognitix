@@ -315,6 +315,100 @@ describe('dtcService', () => {
       expect(formatDTCCode('X0300')).toBe('X0300');
     });
   });
+
+  // ===========================================================================
+  // Severity rendering — single source of truth for four render sites
+  //
+  // `DTCDetailPage`, `DTCAutocomplete` and `CommonIssuesPanel` all render DTC
+  // severity. Each used to carry its own copy: three different palettes and two
+  // different spellings of "Közepes". These tests pin the unified contract so a
+  // future copy cannot silently diverge again.
+  // ===========================================================================
+
+  describe('severity rendering', () => {
+    it('labels every severity in ACCENTED Hungarian', async () => {
+      const { getSeverityLabelHu } = await import('../dtcService');
+
+      expect(getSeverityLabelHu('low')).toBe('Alacsony');
+      expect(getSeverityLabelHu('high')).toBe('Magas');
+      expect(getSeverityLabelHu('critical')).toBe('Kritikus');
+
+      // Regression guard: this used to be the ASCII-folded 'Kozepes', which is
+      // how the same value rendered two different ways in one app. Every
+      // recently written screen spells it with accents (ResultPage,
+      // DemoResultPage, PasswordStrengthMeter).
+      expect(getSeverityLabelHu('medium')).toBe('Közepes');
+    });
+
+    it('uses only WCAG AA compliant chip colours', async () => {
+      const { getSeverityColorClass } = await import('../dtcService');
+
+      // MEASURED contrast of the -800 text on its -100 background (WCAG 2.1,
+      // sRGB relative luminance). These chips render at 10-14px, i.e. "normal
+      // text", so the threshold is 4.5:1 — the 3:1 large-text allowance does
+      // not apply:
+      //   green-800  #166534 on #dcfce7 = 6.49:1
+      //   yellow-800 #854d0e on #fef9c3 = 6.38:1
+      //   orange-800 #9a3412 on #ffedd5 = 6.38:1
+      //   red-800    #991b1b on #fee2e2 = 6.80:1
+      // The previous -600 shades failed at every level (red 3.95:1, orange
+      // 3.11:1, green 3.00:1, yellow 2.74:1 — below even the 3:1 floor).
+      expect(getSeverityColorClass('low')).toBe('bg-green-100 text-green-800');
+      expect(getSeverityColorClass('medium')).toBe('bg-yellow-100 text-yellow-800');
+      expect(getSeverityColorClass('high')).toBe('bg-orange-100 text-orange-800');
+      expect(getSeverityColorClass('critical')).toBe('bg-red-100 text-red-800');
+    });
+
+    it('never emits a -600 text shade for a severity chip', async () => {
+      const { getSeverityColorClass } = await import('../dtcService');
+
+      for (const severity of ['low', 'medium', 'high', 'critical', 'nonsense']) {
+        expect(getSeverityColorClass(severity)).not.toMatch(
+          /text-(green|yellow|orange|red)-600/
+        );
+      }
+    });
+
+    it('falls back to a quiet, AA compliant grey for an unknown severity', async () => {
+      const { getSeverityColorClass, getSeverityLabelHu } = await import('../dtcService');
+
+      // gray-600 #4b5563 on gray-100 #f3f4f6 = 6.87:1 — passes AA, and reads
+      // quieter than a real severity rather than heavier.
+      expect(getSeverityColorClass('made-up')).toBe('bg-gray-100 text-gray-600');
+      expect(getSeverityLabelHu('made-up')).toBe('Ismeretlen');
+    });
+
+    it('getSeverityChip is PARTIAL so callers can render nothing', async () => {
+      const { getSeverityChip } = await import('../dtcService');
+
+      expect(getSeverityChip('medium')).toEqual({
+        label: 'Közepes',
+        className: 'bg-yellow-100 text-yellow-800',
+      });
+
+      // CommonIssuesPanel draws no chip at all for these rather than inventing
+      // a placeholder severity — `VehicleCommonIssue.severity` is `string|null`.
+      expect(getSeverityChip(null)).toBeUndefined();
+      expect(getSeverityChip(undefined)).toBeUndefined();
+      expect(getSeverityChip('')).toBeUndefined();
+      expect(getSeverityChip('unrecognised')).toBeUndefined();
+    });
+
+    it('agrees with itself across the label and colour views', async () => {
+      const { getSeverityChip, getSeverityColorClass, getSeverityLabelHu } = await import(
+        '../dtcService'
+      );
+
+      // The three exported functions are views over ONE record. If a future
+      // edit reintroduces a second table, this drifts and fails.
+      for (const severity of ['low', 'medium', 'high', 'critical']) {
+        const chip = getSeverityChip(severity);
+        expect(chip).toBeDefined();
+        expect(getSeverityLabelHu(severity)).toBe(chip?.label);
+        expect(getSeverityColorClass(severity)).toBe(chip?.className);
+      }
+    });
+  });
 });
 
 // =============================================================================

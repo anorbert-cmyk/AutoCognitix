@@ -23,6 +23,7 @@ No database, no network: the scripts are loaded by path with importlib.
 import ast
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -711,56 +712,153 @@ def test_inspection_request_still_rejects_junk(code):
         )
 
 
-# ---------------------------------------------------------------------------
-# The metrics endpoint normalizer shares the same rule
-# ---------------------------------------------------------------------------
-# `app.middleware.metrics` declares Info("autocognitix_app_info"), which
-# collides on the default Prometheus registry with Info("autocognitix_app") in
-# `app.core.metrics`. That pre-existing clash means the two modules can never
-# be imported into the same interpreter, so this case runs in a fresh one.
-_NORMALIZER_PROBE = """
-import sys
-sys.path.insert(0, {backend!r})
-from app.middleware.metrics import EndpointNormalizer as N
+# The WRITE schema is on the same rule. It was the last validator that was not:
+# `DTCCreate.code` only checked 5 <= len <= 10, which is precisely how PEACE,
+# PACED, P93AF, UA80E and UA80F entered the corpus through POST /api/v1/dtc/.
+@pytest.mark.unit
+@pytest.mark.parametrize("code", ["P0101", "p0300", "P26B7", "B00A0", " U0100 ", "P3AFF"])
+def test_dtc_create_accepts_and_canonicalises_real_codes(code):
+    from app.api.v1.schemas.dtc import DTCCreate
 
-for code in ["P0300", "P26B7", "p0a94", "B00A0", "P0301"]:
-    got = N.normalize("/api/v1/dtc/" + code)
-    assert got == "/api/v1/dtc/{{dtc_code}}", (code, got)
-
-# Junk is still NOT a code - but in the {{code}} position it collapses to a
-# single {{invalid_dtc}} series instead of one series per sprayed value. See
-# app/core/metrics_paths.py and tests/unit/test_metrics.py.
-for junk in ["PEACE", "UA80E", "P93AF", "P9324"]:
-    got = N.normalize("/api/v1/dtc/" + junk)
-    assert got == "/api/v1/dtc/{{invalid_dtc}}", (junk, got)
-
-# ... while the literal sibling routes under /dtc keep their own labels.
-for literal in ["search", "categories", "bulk"]:
-    got = N.normalize("/api/v1/dtc/" + literal)
-    assert got == "/api/v1/dtc/" + literal, (literal, got)
-
-# A non-code segment OUTSIDE the {{code}} position is untouched: the SAE
-# tightening exists so a make named "PACED" keeps its own label.
-assert N.normalize("/api/v1/vehicles/PEACE/models") == "/api/v1/vehicles/PEACE/models"
-
-# other segment kinds must keep working
-assert N.normalize("/api/v1/vehicles/1HGBH41JXMN109186") == "/api/v1/vehicles/{{vin}}"
-assert N.normalize("/api/v1/items/12345") == "/api/v1/items/{{id}}"
-assert N.normalize("/health") == "/health"
-print("OK")
-"""
+    created = DTCCreate(code=code, description_en="Real code", category="powertrain")
+    assert created.code == code.strip().upper()
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "code",
+    ["PEACE", "PACED", "P93AF", "UA80E", "UA80F", "P9324", "U760E", "P8888", "X0300", "P030"],
+)
+def test_dtc_create_rejects_the_junk_that_seeded_the_corpus(code):
+    from pydantic import ValidationError
+
+    from app.api.v1.schemas.dtc import DTCCreate
+
+    with pytest.raises(ValidationError):
+        DTCCreate(code=code, description_en="Junk row", category="powertrain")
+
+
+@pytest.mark.unit
+def test_dtc_create_uses_the_shared_primitive_not_a_regex_of_its_own():
+    """Guard against an eleventh copy of the DTC pattern.
+
+    Ten divergent regexes were consolidated into `app.core.dtc_codes`; the
+    schema module must import it, never restate it.
+    """
+    source = (BACKEND_DIR / "app" / "api" / "v1" / "schemas" / "dtc.py").read_text(encoding="utf-8")
+    assert "from app.core.dtc_codes import" in source
+    assert "[PBCU]" not in source, "a DTC regex was restated in the schema module"
+    assert "re.compile" not in source
+
+
+# ---------------------------------------------------------------------------
+# The metrics endpoint normalizer shares the same rule
+# ---------------------------------------------------------------------------
+# This used to run in a subprocess: there were TWO metrics modules declaring
+# colliding Prometheus Info metrics ("autocognitix_app_info"), so importing both
+# into one interpreter raised `Duplicated timeseries in CollectorRegistry`, and
+# the normalizer under test could not be imported next to `app.core.metrics`.
+# The duplicate (`app/middleware/metrics.py`, never installed by `app.main` and
+# therefore unimportable in any process that runs the app) has been deleted, so
+# the surviving normalizer is just imported here.
+@pytest.mark.unit
 def test_endpoint_normalizer_uses_the_shared_dtc_rule():
-    backend_dir = str(Path(__file__).resolve().parents[2])
-    result = subprocess.run(
-        [sys.executable, "-c", _NORMALIZER_PROBE.format(backend=backend_dir)],
-        capture_output=True,
-        text=True,
-        cwd=backend_dir,
-        env=_subprocess_env(),
-        check=False,
+    from unittest.mock import MagicMock
+
+    from app.core.metrics import MetricsMiddleware
+
+    normalize = MetricsMiddleware(app=MagicMock())._normalize_endpoint
+
+    for code in ["P0300", "P26B7", "p0a94", "B00A0", "P0301"]:
+        assert normalize(f"/api/v1/dtc/{code}") == "/api/v1/dtc/{dtc_code}", code
+
+    # Junk is still NOT a code - but in the {code} position it collapses to a
+    # single {invalid_dtc} series instead of one series per sprayed value. See
+    # app/core/metrics_paths.py and tests/unit/test_metrics.py.
+    for junk in ["PEACE", "UA80E", "P93AF", "P9324"]:
+        assert normalize(f"/api/v1/dtc/{junk}") == "/api/v1/dtc/{invalid_dtc}", junk
+
+    # ... while the literal sibling routes under /dtc keep their own labels.
+    for literal in ["search", "categories", "bulk"]:
+        assert normalize(f"/api/v1/dtc/{literal}") == f"/api/v1/dtc/{literal}", literal
+
+    # A non-code segment OUTSIDE the {code} position is untouched: the SAE
+    # tightening exists so a make named "PACED" keeps its own label.
+    assert normalize("/api/v1/vehicles/PEACE/models") == "/api/v1/vehicles/PEACE/models"
+
+    # other segment kinds must keep working
+    assert normalize("/api/v1/vehicles/1HGBH41JXMN109186") == "/api/v1/vehicles/{vin}"
+    assert normalize("/api/v1/items/12345") == "/api/v1/items/{id}"
+    assert normalize("/health") == "/health"
+
+
+@pytest.mark.unit
+def test_the_dead_metrics_duplicate_stays_deleted():
+    """Regression guard for the module removed alongside the test above.
+
+    `app/middleware/metrics.py` was a second, never-installed copy of the
+    metrics middleware. It declared the same Prometheus metric names as
+    `app.core.metrics`, so it could not even be imported into a process that
+    had imported the live module - it was unusable, not merely unused. If it
+    comes back, the DTC path rule has two homes again and this file's premise
+    (one rule, one definition) is false.
+    """
+    assert not (BACKEND_DIR / "app" / "middleware").exists(), (
+        "app/middleware/ is back; it duplicated app/core/metrics.py and "
+        "collided with it on the default Prometheus registry"
     )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().endswith("OK")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.middleware.metrics")
+
+
+# ---------------------------------------------------------------------------
+# The seed file is a write path, and it bypasses DTCCreate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_the_shipped_seed_file_contains_no_unservable_code():
+    """The seed file must not carry a code the rest of the API refuses to serve.
+
+    `_seed_dtc_codes` inserts this file with raw SQL, so `DTCCreate`'s validator
+    never sees it - this file IS the write path's contract. It historically
+    shipped five rows (PEACE, PACED, P93AF, UA80E, UA80F) that `GET /dtc/{code}`
+    answers 400 for.
+
+    Migration 021 purges them, but a migration runs once. On a database that is
+    still empty when it runs - a new environment, a staging rebuild, a restore -
+    it purges nothing, stamps itself applied forever, and then seeding puts them
+    straight back. Keeping the file itself clean is what makes the purge stick
+    on environments that did not exist when it ran.
+    """
+    seed_file = BACKEND_DIR / "data" / "dtc_codes_seed.json"
+    assert seed_file.exists(), f"seed file missing: {seed_file}"
+
+    payload = json.loads(seed_file.read_text(encoding="utf-8"))
+    rows = payload.get("codes", payload) if isinstance(payload, dict) else payload
+
+    unservable = sorted(
+        str(row.get("code", "")) for row in rows if not is_valid_dtc_code(str(row.get("code", "")))
+    )
+    assert not unservable, (
+        f"{len(unservable)} seed row(s) fail the SAE J2012 rule and would be "
+        f"re-inserted on any empty-database boot: {unservable[:25]}"
+    )
+
+
+@pytest.mark.unit
+def test_seed_related_codes_never_point_at_an_unservable_code():
+    """A suggestion the user cannot open is a dead link, seeded or not."""
+    seed_file = BACKEND_DIR / "data" / "dtc_codes_seed.json"
+    payload = json.loads(seed_file.read_text(encoding="utf-8"))
+    rows = payload.get("codes", payload) if isinstance(payload, dict) else payload
+
+    dangling = sorted(
+        {
+            related
+            for row in rows
+            for related in (row.get("related_codes") or [])
+            if not is_valid_dtc_code(str(related))
+        }
+    )
+    assert not dangling, f"seed related_codes reference unservable codes: {dangling[:25]}"

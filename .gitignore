@@ -12,8 +12,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Root-anchored: these are Python build artifacts at the repo root. Unanchored,
+# `lib/` also matches frontend/src/lib/, so `git add -A` silently skipped new
+# files there and the build broke for everyone who did not force-add them.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

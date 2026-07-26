@@ -9,6 +9,7 @@ import api, {
   DTCCategoryInfo,
   DTCCodeDetail,
   DTCSearchResult,
+  DTCSeverity,
 } from './api'
 
 // =============================================================================
@@ -211,23 +212,91 @@ export function getCategoryNameHu(category: DTCCategory): string {
 }
 
 /**
+ * A severity level rendered for the user: Hungarian label + chip colours.
+ */
+export interface SeverityChip {
+  label: string
+  className: string
+}
+
+/**
+ * SINGLE SOURCE OF TRUTH for rendering a `DTCSeverity`.
+ *
+ * This mapping previously existed FOUR times — here, in `DTCDetailPage`
+ * (`getSeverityColor`, a verbatim copy of the old `getSeverityColorClass`
+ * body), in `CommonIssuesPanel` (`SEVERITY_CHIPS`) and inline in
+ * `DTCAutocomplete` — with three different palettes and two different spellings
+ * of the same word. All four now read from here.
+ *
+ * LABELS are accented Hungarian. `Kozepes` was an ASCII-folding artifact of this
+ * file's older era (cf. its `Hajtaslanc` / `Karosszeria` neighbours); every
+ * recently written screen spells it `Közepes` (`ResultPage.tsx`,
+ * `DemoResultPage.tsx`, `PasswordStrengthMeter.tsx`), and
+ * `ResultPage.test.tsx` asserts that spelling.
+ *
+ * COLOURS are the `-800` text shades on `-100` backgrounds, MEASURED against
+ * WCAG 2.1 AA for normal text (>= 4.5:1) — these chips render at 10-14px, so the
+ * 3:1 large-text allowance never applies to them:
+ *
+ *   green-800  #166534 on green-100  #dcfce7 =  6.49:1  PASS
+ *   yellow-800 #854d0e on yellow-100 #fef9c3 =  6.38:1  PASS
+ *   orange-800 #9a3412 on orange-100 #ffedd5 =  6.38:1  PASS
+ *   red-800    #991b1b on red-100    #fee2e2 =  6.80:1  PASS
+ *
+ * The `-600` shades this file used to return FAILED at every level — red 3.95:1,
+ * orange 3.11:1, green 3.00:1, and yellow 2.74:1, which misses even the 3:1
+ * non-text floor. `CommonIssuesPanel` had already worked around that by defining
+ * the AA-safe values locally; promoting ITS values (rather than inventing new
+ * ones) is what makes deduplication and the accessibility fix the same edit, and
+ * leaves that panel's pixels untouched.
+ */
+const SEVERITY_CHIPS: Record<DTCSeverity, SeverityChip> = {
+  low: { label: 'Alacsony', className: 'bg-green-100 text-green-800' },
+  medium: { label: 'Közepes', className: 'bg-yellow-100 text-yellow-800' },
+  high: { label: 'Magas', className: 'bg-orange-100 text-orange-800' },
+  critical: { label: 'Kritikus', className: 'bg-red-100 text-red-800' },
+}
+
+/**
+ * Fallback for a severity value outside the `DTCSeverity` union.
+ *
+ * Kept at `gray-600` rather than following the `-800` family: it already
+ * measures 6.87:1 on `gray-100` (AA PASS), and "unknown" must read QUIETER than
+ * a real severity, not heavier. Unchanged from the previous behaviour.
+ */
+const UNKNOWN_SEVERITY_CHIP: SeverityChip = {
+  label: 'Ismeretlen',
+  className: 'bg-gray-100 text-gray-600',
+}
+
+/**
+ * Look up the chip for a severity, or `undefined` if the value is missing or
+ * unrecognised.
+ *
+ * PARTIAL on purpose. `VehicleCommonIssue.severity` is `string | null`, and
+ * `CommonIssuesPanel` renders NO chip rather than a placeholder one when the
+ * backend omits it — the same "never render a fabricated value" rule that file
+ * applies to its frequency labels. Callers holding a required `DTCSeverity`
+ * should use `getSeverityLabelHu` / `getSeverityColorClass`, which are total.
+ *
+ * @param severity The severity level
+ * @returns The chip, or undefined for an unknown/absent severity
+ */
+export function getSeverityChip(severity: string | null | undefined): SeverityChip | undefined {
+  if (!severity) {
+    return undefined
+  }
+
+  return SEVERITY_CHIPS[severity as DTCSeverity]
+}
+
+/**
  * Get severity label in Hungarian
  * @param severity The severity level
  * @returns Hungarian label
  */
 export function getSeverityLabelHu(severity: string): string {
-  switch (severity) {
-    case 'low':
-      return 'Alacsony'
-    case 'medium':
-      return 'Kozepes'
-    case 'high':
-      return 'Magas'
-    case 'critical':
-      return 'Kritikus'
-    default:
-      return 'Ismeretlen'
-  }
+  return (getSeverityChip(severity) ?? UNKNOWN_SEVERITY_CHIP).label
 }
 
 /**
@@ -236,18 +305,7 @@ export function getSeverityLabelHu(severity: string): string {
  * @returns Tailwind color class
  */
 export function getSeverityColorClass(severity: string): string {
-  switch (severity) {
-    case 'low':
-      return 'text-green-600 bg-green-100'
-    case 'medium':
-      return 'text-yellow-600 bg-yellow-100'
-    case 'high':
-      return 'text-orange-600 bg-orange-100'
-    case 'critical':
-      return 'text-red-600 bg-red-100'
-    default:
-      return 'text-gray-600 bg-gray-100'
-  }
+  return (getSeverityChip(severity) ?? UNKNOWN_SEVERITY_CHIP).className
 }
 
 /**
@@ -277,6 +335,7 @@ export const dtcService = {
   isValidFormat: isValidDTCFormat,
   getCategoryFromCode,
   getCategoryNameHu,
+  getSeverityChip,
   getSeverityLabelHu,
   getSeverityColorClass,
   formatCode: formatDTCCode,

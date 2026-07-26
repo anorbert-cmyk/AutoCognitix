@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Search, X, AlertCircle } from 'lucide-react'
 import { useDTCSearch } from '../../services/hooks'
-import { isValidDTCFormat, getCategoryNameHu, getCategoryFromCode } from '../../services/dtcService'
+import {
+  isValidDTCFormat,
+  getCategoryNameHu,
+  getCategoryFromCode,
+  getSeverityColorClass,
+  getSeverityLabelHu,
+} from '../../services/dtcService'
 import LoadingSpinner from './LoadingSpinner'
 
 interface DTCAutocompleteProps {
@@ -215,24 +221,17 @@ export default function DTCAutocomplete({
                     <span className="font-mono font-medium text-primary-700">
                       {result.code}
                     </span>
+                    {/* A súlyosság-chip a megosztott dtcService forrásból jön.
+                        A korábbi inline ternár-lánc SAJÁT palettát és
+                        ékezet nélküli "Kozepes" címkét használt, és minden
+                        ismeretlen értéket zölden "Alacsony"-nak mutatott —
+                        a megosztott helper "Ismeretlen"-t ad, nem találgat. */}
                     <span
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        result.severity === 'critical'
-                          ? 'bg-red-100 text-red-700'
-                          : result.severity === 'high'
-                          ? 'bg-orange-100 text-orange-700'
-                          : result.severity === 'medium'
-                          ? 'bg-yellow-100 text-yellow-700'
-                          : 'bg-green-100 text-green-700'
-                      }`}
+                      className={`text-xs px-2 py-0.5 rounded ${getSeverityColorClass(
+                        result.severity
+                      )}`}
                     >
-                      {result.severity === 'critical'
-                        ? 'Kritikus'
-                        : result.severity === 'high'
-                        ? 'Magas'
-                        : result.severity === 'medium'
-                        ? 'Kozepes'
-                        : 'Alacsony'}
+                      {getSeverityLabelHu(result.severity)}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 mt-1">

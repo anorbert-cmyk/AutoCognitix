@@ -160,12 +160,17 @@ class ConsistencyService:
             )
 
         dtc_only = Filter(must=[FieldCondition(key="type", match=MatchValue(value="dtc"))])
-        result = await asyncio.to_thread(
-            partial(
-                client.count,
-                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
-                count_filter=dtc_only,
-                exact=True,
+        try:
+            result = await asyncio.to_thread(
+                partial(
+                    client.count,
+                    collection_name=settings.QDRANT_UNIFIED_COLLECTION,
+                    count_filter=dtc_only,
+                    exact=True,
+                )
             )
-        )
+        finally:
+            # This client is created per call; without an explicit close each
+            # admin consistency check leaks an HTTP connection pool.
+            client.close()
         return int(result.count or 0)

@@ -7,10 +7,12 @@ supporting both local and cloud deployments with Hungarian error messages.
 
 import math
 import threading
-from typing import Any, Dict, List, Optional
+from http import HTTPStatus
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qdrant_models
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.core.config import settings
 from app.core.exceptions import (
@@ -20,6 +22,38 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# The payload ``type`` discriminators that physically exist in the unified
+# collection. Every vector lives in ONE collection and is told apart by this
+# key, so the discriminator is now the only thing a caller can get wrong - and
+# getting it wrong has the same signature as the collection-drift bug did: a
+# type-correct query that matches nothing and returns [] with no error. It is
+# therefore a CLOSED set, validated at the gate. Notably ``"symptom"`` is NOT
+# in it: no vector was ever indexed with that type, and the retrieval leg that
+# asked for it silently returned nothing.
+UNIFIED_PAYLOAD_TYPES: FrozenSet[str] = frozenset({"dtc", "complaint", "recall"})
+
+# Pre-unification per-type collections. THE ONLY PLACE THESE NAMES MAY APPEAR.
+#
+# Nothing reads or writes them: every search targets
+# ``settings.QDRANT_UNIFIED_COLLECTION``. They are listed here for exactly two
+# purposes - the GDPR erasure sweep (an instance seeded before the unification
+# can still hold user-tagged points) and storage visibility, so an operator can
+# see that they are still on the cluster.
+#
+# They are NOT empty on the production cluster: ``dtc_embeddings_hu`` holds
+# ~2,323 points and ``symptom_embeddings_hu`` ~117, written by historical
+# importer runs. That is a partial, stale copy of a 6,814-code corpus, which is
+# worse than an empty one: querying it returns plausible-looking but incomplete
+# results. Dropping the collections is a DATA decision reserved for a human -
+# this module must never delete them, only stop creating and stop querying them.
+_LEGACY_COLLECTIONS: Tuple[str, ...] = (
+    "dtc_embeddings_hu",
+    "symptom_embeddings_hu",
+    "component_embeddings_hu",
+    "repair_embeddings_hu",
+    "known_issue_embeddings_hu",
+)
 
 # Minimum L2 norm a query vector must have to be worth searching with.
 # Cosine distance normalizes the query vector, so a (near-)zero-norm vector
@@ -88,20 +122,15 @@ class QdrantService:
     # Expected vector dimension for validation
     EXPECTED_DIMENSION = 768
 
-    # Collection names - Hungarian versions with huBERT embeddings (768-dim)
-    DTC_COLLECTION = "dtc_embeddings_hu"
-    SYMPTOM_COLLECTION = "symptom_embeddings_hu"
-    COMPONENT_COLLECTION = "component_embeddings_hu"
-    REPAIR_COLLECTION = "repair_embeddings_hu"
-    ISSUE_COLLECTION = "known_issue_embeddings_hu"
-
     # Storage alert threshold (vectors per collection)
     STORAGE_WARN_THRESHOLD = 50000
 
-    # Legacy collection names (English, for backwards compatibility)
-    DTC_COLLECTION_LEGACY = "dtc_embeddings"
-    SYMPTOM_COLLECTION_LEGACY = "symptom_embeddings"
-    ISSUE_COLLECTION_LEGACY = "known_issue_embeddings"
+    # NOTE: there are deliberately NO per-collection name constants on this
+    # class. Every read and write goes to ``settings.QDRANT_UNIFIED_COLLECTION``
+    # and no public method takes a collection name, so a caller cannot address
+    # the wrong collection. Exporting ``DTC_COLLECTION = "dtc_embeddings_hu"``
+    # is what let three separate call sites point at an all-but-empty store and
+    # get an empty result instead of an error.
 
     def __init__(self):
         """Initialize Qdrant async client."""
@@ -124,20 +153,37 @@ class QdrantService:
         self.vector_size = settings.EMBEDDING_DIMENSION
 
     async def initialize_collections(self) -> None:
-        """Initialize all required collections."""
-        collections = [
-            (self.DTC_COLLECTION, "DTC code embeddings (Hungarian huBERT, 768-dim)"),
-            (self.SYMPTOM_COLLECTION, "Symptom text embeddings (Hungarian huBERT, 768-dim)"),
-            (self.COMPONENT_COLLECTION, "Vehicle component embeddings (Hungarian huBERT, 768-dim)"),
-            (self.REPAIR_COLLECTION, "Repair procedure embeddings (Hungarian huBERT, 768-dim)"),
-            (self.ISSUE_COLLECTION, "Known issue embeddings (Hungarian huBERT, 768-dim)"),
-        ]
+        """Ensure the ONE collection the application uses exists.
 
-        for collection_name, description in collections:
-            await self._create_collection_if_not_exists(collection_name)
-            logger.debug(f"  - {collection_name}: {description}")
+        Previously this created the five per-type ``*_hu`` collections on every
+        boot and did NOT create the unified one - it initialised everything
+        except the store that actually holds the vectors.
 
-        logger.info(f"Qdrant collections initialized ({len(collections)} collections)")
+        That was not merely useless, it manufactured the trap that hid the
+        drift bug: a search against a collection that does not exist is a loud
+        404 from Qdrant, while a search against an existing-but-(near-)empty
+        one returns ``[]``, which is a legitimate answer for a search engine.
+        By pre-creating those collections on every boot, the application
+        guaranteed that a mis-addressed search would fail silently.
+
+        Existing legacy collections are only reported, never created and never
+        deleted - see :data:`_LEGACY_COLLECTIONS`.
+        """
+        await self._create_collection_if_not_exists(settings.QDRANT_UNIFIED_COLLECTION)
+
+        surviving = await self._legacy_collections_present()
+        if surviving:
+            logger.warning(
+                "Legacy Qdrant collections still present on the cluster: %s. Nothing "
+                "reads or writes them; dropping them is a human data decision.",
+                ", ".join(surviving),
+            )
+
+        logger.info(
+            "Qdrant initialized: unified collection '%s' ready (768-dim huBERT, "
+            "type-discriminated payloads)",
+            settings.QDRANT_UNIFIED_COLLECTION,
+        )
 
     async def _create_collection_if_not_exists(self, collection_name: str) -> None:
         """Create a collection if it doesn't exist."""
@@ -157,6 +203,23 @@ class QdrantService:
                 logger.info(f"Created collection: {collection_name}")
             else:
                 logger.info(f"Collection already exists: {collection_name}")
+
+        except UnexpectedResponse as e:
+            # gunicorn runs WEB_CONCURRENCY workers (2 by default) and EVERY one
+            # runs the lifespan, so on a fresh cluster all of them can see the
+            # collection missing and race to create it. Qdrant answers 409 to the
+            # losers. That is success - the collection exists and was created with
+            # these exact parameters - but the generic handler below would turn it
+            # into a QdrantException, and main.py's boot handler swallows that as
+            # "Qdrant initialization skipped", which reads exactly like a real
+            # outage on the one deploy where you are watching for one. It also
+            # aborts the loser before it reports surviving legacy collections.
+            if e.status_code != HTTPStatus.CONFLICT:
+                raise
+            logger.info(
+                f"Collection {collection_name} was created concurrently by another "
+                "worker; continuing"
+            )
 
         except ConnectionError as e:
             logger.error(
@@ -180,19 +243,24 @@ class QdrantService:
 
     async def upsert_vectors(
         self,
-        collection_name: str,
         ids: List[str],
         vectors: List[List[float]],
         payloads: Optional[List[dict]] = None,
     ) -> None:
         """
-        Upsert vectors into a collection.
+        Upsert vectors into the unified collection.
+
+        Takes no collection name for the same reason :meth:`search` does not:
+        a hand-typed destination on the write side is how the stale partial
+        copies in ``dtc_embeddings_hu`` / ``symptom_embeddings_hu`` came to
+        exist in the first place.
 
         Args:
-            collection_name: Name of the collection
             ids: List of point IDs
             vectors: List of embedding vectors
-            payloads: Optional list of metadata payloads
+            payloads: Optional list of metadata payloads. Each should carry a
+                ``type`` key from :data:`UNIFIED_PAYLOAD_TYPES` so the point is
+                discoverable by :meth:`search_unified`.
         """
         # Validate vector dimensions
         for i, vec in enumerate(vectors):
@@ -217,13 +285,12 @@ class QdrantService:
         ]
 
         await self.client.upsert(
-            collection_name=collection_name,
+            collection_name=settings.QDRANT_UNIFIED_COLLECTION,
             points=points,
         )
 
     async def search(
         self,
-        collection_name: str,
         query_vector: List[float],
         limit: int = 10,
         filter_conditions: Optional[dict] = None,
@@ -231,15 +298,23 @@ class QdrantService:
         model_version: Optional[str] = None,
     ) -> List[dict]:
         """
-        Search for similar vectors.
+        Run a filtered similarity search against the one vector collection.
+
+        There is intentionally no ``collection_name`` parameter. Every huBERT
+        vector lives in ``settings.QDRANT_UNIFIED_COLLECTION`` and entities are
+        told apart by a payload ``type`` discriminator, so a collection name is
+        not a decision any caller gets to make. Making it an argument is what
+        allowed three independent call sites to address an all-but-empty
+        collection: each got ``[]``, which is a valid search result, so the
+        flagship Hungarian semantic search was dead for months without a single
+        error. Prefer :meth:`search_unified`, which also injects the type filter.
 
         Args:
-            collection_name: Name of the collection
             query_vector: Query embedding vector
             limit: Maximum number of results
-            filter_conditions: Optional Qdrant filter conditions
+            filter_conditions: Optional exact-match payload filters
             score_threshold: Minimum similarity score
-            model_version: Filter by embedding model version (defaults to current version)
+            model_version: Filter by embedding model version (None = no filter)
 
         Returns:
             List of search results with scores and payloads
@@ -249,6 +324,7 @@ class QdrantService:
                 the last line of defence against a degenerate vector reaching a
                 similarity search - see :data:`MIN_QUERY_VECTOR_NORM`.
         """
+        collection_name = settings.QDRANT_UNIFIED_COLLECTION
         _validate_query_vector(query_vector, collection_name)
 
         # Build the must filter list
@@ -273,7 +349,7 @@ class QdrantService:
                     )
                 )
 
-        search_params = {
+        search_params: Dict[str, Any] = {
             "collection_name": collection_name,
             "query_vector": query_vector,
             "limit": limit,
@@ -329,13 +405,14 @@ class QdrantService:
 
         All huBERT vectors (DTC/complaint/recall) are indexed into a single
         collection (``settings.QDRANT_UNIFIED_COLLECTION``, default
-        ``autocognitix``) with a type-discriminated payload. This method targets
-        that collection and always constrains results to the requested ``type_``
-        (e.g. ``"dtc"``), so callers only ever get the entity kind they asked for.
+        ``autocognitix``) with a type-discriminated payload. This is the front
+        door for every semantic search in the application: the collection is not
+        a parameter, and the type discriminator is validated against a closed
+        set, so neither half of the target can be silently wrong.
 
         Args:
             query_vector: Query embedding vector
-            type_: Payload discriminator to match (e.g. "dtc", "complaint", "recall")
+            type_: Payload discriminator, one of :data:`UNIFIED_PAYLOAD_TYPES`
             limit: Maximum number of results
             extra_filters: Optional additional exact-match payload filters
             score_threshold: Minimum similarity score
@@ -343,7 +420,21 @@ class QdrantService:
 
         Returns:
             List of matching hits (id/score/payload) for the requested type.
+
+        Raises:
+            ValueError: If ``type_`` is not a discriminator that exists in the
+                collection. An unknown type would match zero points and return
+                ``[]`` - the exact silent-empty failure this module exists to
+                make impossible.
         """
+        if type_ not in UNIFIED_PAYLOAD_TYPES:
+            raise ValueError(
+                f"Unknown payload type {type_!r} for collection "
+                f"'{settings.QDRANT_UNIFIED_COLLECTION}'; known types: "
+                f"{sorted(UNIFIED_PAYLOAD_TYPES)}. An unknown type matches nothing "
+                "and would look like an empty result set."
+            )
+
         # Build the optional payload filters first, then set the ``type``
         # discriminator LAST so a caller-supplied ``type`` in ``extra_filters`` can
         # never clobber it. NOTE: the unified ``autocognitix`` collection carries no
@@ -352,7 +443,6 @@ class QdrantService:
         filter_conditions["type"] = type_
 
         return await self.search(
-            collection_name=settings.QDRANT_UNIFIED_COLLECTION,
             query_vector=query_vector,
             limit=limit,
             filter_conditions=filter_conditions,
@@ -371,11 +461,9 @@ class QdrantService:
         """
         Search for similar DTC codes.
 
-        The huBERT DTC vectors live in the unified ``autocognitix`` collection
-        with a ``{"type": "dtc", "code", ...}`` payload — NOT in the (empty)
-        ``dtc_embeddings_hu`` collection — so this delegates to
-        :meth:`search_unified` with ``type_="dtc"``. Hits carry ``code`` in their
-        payload; callers enrich them to full records from PostgreSQL.
+        Thin convenience wrapper over :meth:`search_unified` with
+        ``type_="dtc"``. Hits carry ``code`` in their payload; callers enrich
+        them to full records from PostgreSQL.
 
         Args:
             query_vector: Query embedding vector
@@ -401,98 +489,14 @@ class QdrantService:
             model_version=model_version,
         )
 
-    async def search_similar_symptoms(
-        self,
-        query_vector: List[float],
-        limit: int = 10,
-        vehicle_make: Optional[str] = None,
-        model_version: Optional[str] = None,
-    ) -> List[dict]:
-        """
-        Search for similar symptom descriptions.
-
-        Args:
-            query_vector: Query embedding vector
-            limit: Maximum number of results
-            vehicle_make: Filter by vehicle make
-            model_version: Filter by embedding model version (defaults to current version)
-
-        Returns:
-            List of similar symptoms with scores
-        """
-        filter_conditions = {}
-        if vehicle_make:
-            filter_conditions["vehicle_make"] = vehicle_make
-
-        return await self.search(
-            collection_name=self.SYMPTOM_COLLECTION,
-            query_vector=query_vector,
-            limit=limit,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            model_version=model_version,
-        )
-
-    async def search_components(
-        self,
-        query_vector: List[float],
-        limit: int = 10,
-        system: Optional[str] = None,
-        model_version: Optional[str] = None,
-    ) -> List[dict]:
-        """
-        Search for similar vehicle components.
-
-        Args:
-            query_vector: Query embedding vector
-            limit: Maximum number of results
-            system: Filter by vehicle system (engine, transmission, etc.)
-            model_version: Filter by embedding model version (defaults to current version)
-
-        Returns:
-            List of similar components with scores
-        """
-        filter_conditions = {}
-        if system:
-            filter_conditions["system"] = system
-
-        return await self.search(
-            collection_name=self.COMPONENT_COLLECTION,
-            query_vector=query_vector,
-            limit=limit,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            model_version=model_version,
-        )
-
-    async def search_repairs(
-        self,
-        query_vector: List[float],
-        limit: int = 10,
-        difficulty: Optional[str] = None,
-        model_version: Optional[str] = None,
-    ) -> List[dict]:
-        """
-        Search for similar repair procedures.
-
-        Args:
-            query_vector: Query embedding vector
-            limit: Maximum number of results
-            difficulty: Filter by difficulty level (beginner, intermediate, advanced, professional)
-            model_version: Filter by embedding model version (defaults to current version)
-
-        Returns:
-            List of similar repairs with scores
-        """
-        filter_conditions = {}
-        if difficulty:
-            filter_conditions["difficulty"] = difficulty
-
-        return await self.search(
-            collection_name=self.REPAIR_COLLECTION,
-            query_vector=query_vector,
-            limit=limit,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            model_version=model_version,
-        )
+    # NOTE: ``search_similar_symptoms`` / ``search_components`` /
+    # ``search_repairs`` were removed. Each targeted one of the per-type
+    # collections in :data:`_LEGACY_COLLECTIONS` and had no production caller -
+    # only their own unit tests and a few pre-configured mock attributes. They
+    # could not have worked: ``component_embeddings_hu`` and
+    # ``repair_embeddings_hu`` hold no points at all, and
+    # ``symptom_embeddings_hu`` holds ~117 stale ones. Their replacement is
+    # ``search_unified(type_=...)``.
 
     async def check_storage_alerts(self) -> List[dict]:
         """Check if any collection is approaching storage limits.
@@ -523,32 +527,27 @@ class QdrantService:
     async def _legacy_collections_present(self) -> List[str]:
         """Which of the pre-unification per-type collections actually exist.
 
-        On a current deployment none of them do - every write path was migrated
-        to ``settings.QDRANT_UNIFIED_COLLECTION`` - and deleting from a missing
-        collection is a 404 from Qdrant, not a real erasure failure. Probing
-        first is what lets :meth:`delete_by_user` treat every remaining failure
-        as fatal instead of having to swallow the benign case.
+        On the production cluster several of them still do, holding stale
+        partial data (see :data:`_LEGACY_COLLECTIONS`). Nothing queries them,
+        but the GDPR sweep must still visit the ones that are there, and
+        deleting from a MISSING collection is a 404 from Qdrant rather than a
+        real erasure failure. Probing first is what lets :meth:`delete_by_user`
+        treat every remaining failure as fatal instead of having to swallow the
+        benign case.
 
         A probe failure is logged and treated as "none present": the unified
         delete right after it is the one that decides the outcome, and it will
         surface the same outage far less ambiguously.
         """
-        legacy = [
-            self.DTC_COLLECTION,
-            self.SYMPTOM_COLLECTION,
-            self.COMPONENT_COLLECTION,
-            self.REPAIR_COLLECTION,
-            self.ISSUE_COLLECTION,
-        ]
         try:
             existing = {c.name for c in (await self.client.get_collections()).collections}
         except Exception as e:
             logger.warning(
-                "Could not enumerate collections for the GDPR legacy sweep",
+                "Could not enumerate Qdrant collections",
                 extra={"error_type": type(e).__name__},
             )
             return []
-        return [name for name in legacy if name in existing]
+        return [name for name in _LEGACY_COLLECTIONS if name in existing]
 
     async def delete_by_user(self, user_id: str) -> int:
         """
@@ -564,7 +563,9 @@ class QdrantService:
         The legacy sweep is kept, but only for collections that are actually
         present: an instance seeded before the unification can still hold
         user-tagged points in them, and dropping the sweep would strand those
-        forever with no way to notice.
+        forever with no way to notice. This is the ONLY code path that still
+        addresses those collections, and it deletes points BY USER ID - it
+        never drops a collection.
 
         Failures are NOT swallowed. A ``logger.warning`` inside the loop used to
         leave ``cleanup_errors`` empty in ``DELETE /api/v1/auth/me``, so a failed
@@ -623,13 +624,20 @@ class QdrantService:
 
         return collections_processed
 
-    async def delete_collection(self, collection_name: str) -> None:
-        """Delete a collection."""
-        await self.client.delete_collection(collection_name=collection_name)
-        logger.info(f"Deleted collection: {collection_name}")
+    # NOTE: ``delete_collection(name)`` was removed. It had no production
+    # caller, and it was the only code path by which the application could drop
+    # a Qdrant collection wholesale - including the legacy ones that turned out
+    # to hold thousands of real points. Dropping a collection is a data
+    # decision for a human at the Qdrant console, not an API this service
+    # should expose. ``delete_by_user`` remains: it deletes POINTS by user id.
 
     async def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
-        """Get information about a collection."""
+        """Get read-only information about a collection.
+
+        This one does take a name: it is introspection, not retrieval. Naming
+        the wrong collection here surfaces as an error or an obviously wrong
+        count, never as a silently empty search result.
+        """
         info = await self.client.get_collection(collection_name=collection_name)
         return {
             "name": collection_name,
@@ -641,13 +649,23 @@ class QdrantService:
         }
 
     async def get_storage_stats(self) -> Dict[str, Any]:
-        """Get storage statistics for all collections."""
-        all_collections = [
-            self.DTC_COLLECTION,
-            self.SYMPTOM_COLLECTION,
-            self.COMPONENT_COLLECTION,
-            self.REPAIR_COLLECTION,
-            self.ISSUE_COLLECTION,
+        """Get storage statistics for the vector store.
+
+        Always reports ``settings.QDRANT_UNIFIED_COLLECTION`` FIRST - it is the
+        only collection the application reads or writes, and until now it was
+        the one collection these stats did not cover. Enumerating just the five
+        legacy names meant the real store (~60k vectors, above
+        :data:`STORAGE_WARN_THRESHOLD`) was completely unmonitored while the
+        alerting looked healthy.
+
+        Legacy collections are included only when they physically exist, so an
+        operator can see the stale points that are still on the cluster and
+        decide whether to drop them. Their absence from this dict is the signal
+        that the cleanup is done.
+        """
+        all_collections = [settings.QDRANT_UNIFIED_COLLECTION]
+        all_collections += [
+            name for name in await self._legacy_collections_present() if name not in all_collections
         ]
         stats: Dict[str, Any] = {}
         for collection in all_collections:

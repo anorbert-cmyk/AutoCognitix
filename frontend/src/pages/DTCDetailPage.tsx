@@ -11,22 +11,12 @@ import {
 import { useDTCDetail, useRelatedDTCCodes } from '../services/hooks'
 import { ErrorMessage, LoadingSpinner } from '../components/ui'
 import {
+  getSeverityColorClass,
   getSeverityLabelHu,
   getCategoryNameHu,
   getCategoryFromCode,
 } from '../services/dtcService'
 import { DTCCodeDetail } from '../services/api'
-
-// Helper to get severity badge color
-function getSeverityColor(severity: string): string {
-  const colors: Record<string, string> = {
-    low: 'text-green-600 bg-green-100',
-    medium: 'text-yellow-600 bg-yellow-100',
-    high: 'text-orange-600 bg-orange-100',
-    critical: 'text-red-600 bg-red-100',
-  }
-  return colors[severity] || 'text-gray-600 bg-gray-100'
-}
 
 // Component to display DTC details content
 function DTCContent({ dtc, code }: { dtc: DTCCodeDetail; code: string }) {
@@ -44,7 +34,7 @@ function DTCContent({ dtc, code }: { dtc: DTCCodeDetail; code: string }) {
                 {code}
               </span>
               <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${getSeverityColor(
+                className={`px-3 py-1 rounded-full text-sm font-medium ${getSeverityColorClass(
                   dtc.severity
                 )}`}
               >

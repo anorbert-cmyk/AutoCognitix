@@ -75,73 +75,11 @@ class TestQdrantDTCSearch:
             assert results[i]["score"] >= results[i + 1]["score"]
 
 
-class TestQdrantSymptomSearch:
-    """Test Qdrant symptom similarity search."""
-
-    @pytest.mark.asyncio
-    async def test_search_similar_symptoms_returns_results(self, mock_qdrant_client):
-        """Test that symptom search returns results."""
-        results = await mock_qdrant_client.search_similar_symptoms(
-            query_vector=[0.0] * 768,
-            limit=5,
-        )
-
-        assert len(results) >= 1
-        assert "score" in results[0]
-        assert "payload" in results[0]
-
-    @pytest.mark.asyncio
-    async def test_search_symptoms_returns_description(self, mock_qdrant_client):
-        """Test that symptom results include description."""
-        results = await mock_qdrant_client.search_similar_symptoms(
-            query_vector=[0.0] * 768,
-            limit=5,
-        )
-
-        if results:
-            payload = results[0]["payload"]
-            assert "description" in payload
-
-    @pytest.mark.asyncio
-    async def test_search_symptoms_returns_related_dtc(self, mock_qdrant_client):
-        """Test that symptom results include related DTC codes."""
-        results = await mock_qdrant_client.search_similar_symptoms(
-            query_vector=[0.0] * 768,
-            limit=5,
-        )
-
-        if results:
-            payload = results[0]["payload"]
-            assert "related_dtc" in payload
-            assert isinstance(payload["related_dtc"], list)
-
-    @pytest.mark.asyncio
-    async def test_search_symptoms_with_vehicle_filter(self, mock_qdrant_client):
-        """Test symptom search with vehicle make filter."""
-        mock_qdrant_client.search_similar_symptoms.return_value = [
-            {
-                "id": "1",
-                "score": 0.9,
-                "payload": {
-                    "description": "Motor nehezen indul",
-                    "vehicle_make": "Volkswagen",
-                    "related_dtc": ["P0101"],
-                },
-            }
-        ]
-
-        results = await mock_qdrant_client.search_similar_symptoms(
-            query_vector=[0.0] * 768,
-            limit=5,
-            vehicle_make="Volkswagen",
-        )
-
-        # Should filter by vehicle make
-        for result in results:
-            if "vehicle_make" in result["payload"]:
-                assert result["payload"]["vehicle_make"] == "Volkswagen"
-
-
+# NOTE: TestQdrantSymptomSearch was removed together with
+# QdrantService.search_similar_symptoms. It targeted "symptom_embeddings_hu"
+# (~117 stale points, no production caller) and, because the fixture is a bare
+# AsyncMock, it kept passing after the method was deleted - it only ever
+# asserted on the mock it had just configured.
 class TestQdrantGeneralSearch:
     """Test Qdrant general vector search."""
 

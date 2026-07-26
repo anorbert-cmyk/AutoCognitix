@@ -373,7 +373,12 @@ def _dtc_model_to_detail(
         symptoms=dtc.symptoms or [],
         possible_causes=dtc.possible_causes or [],
         diagnostic_steps=dtc.diagnostic_steps or [],
-        related_codes=dtc.related_codes or [],
+        # Same gate as search and /related: a suggestion the user cannot open is a
+        # dead link. This array is the one surface that used to skip it, and the
+        # frontend renders it verbatim as <Link to="/dtc/{code}"> whenever the
+        # /related endpoint comes back empty - so the filter succeeding over there
+        # was precisely what made the unfiltered value here reach the page.
+        related_codes=[c for c in (dtc.related_codes or []) if is_valid_dtc_code(c)],
         common_vehicles=[],  # Not stored in PostgreSQL
         manufacturer_code=dtc.manufacturer_code,
         freeze_frame_data=None,

@@ -1,5 +1,8 @@
 """Unit tests for app.db.qdrant_client module."""
 
+import ast
+import inspect
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -99,50 +102,87 @@ class TestInit:
             )
             assert svc.vector_size == 768
 
-    def test_collection_constants(self, service):
-        assert service.DTC_COLLECTION == "dtc_embeddings_hu"
-        assert service.SYMPTOM_COLLECTION == "symptom_embeddings_hu"
-        assert service.COMPONENT_COLLECTION == "component_embeddings_hu"
-        assert service.REPAIR_COLLECTION == "repair_embeddings_hu"
-        assert service.ISSUE_COLLECTION == "known_issue_embeddings_hu"
-
     def test_expected_dimension(self, service):
         assert service.EXPECTED_DIMENSION == 768
 
 
 # ---------------------------------------------------------------------------
 # initialize_collections
+#
+# It used to create the five legacy per-type collections on every boot and NOT
+# the unified one - it initialised everything except the store that holds the
+# vectors. Worse, pre-creating them guaranteed that a mis-addressed search hit
+# an existing-but-empty collection and got `[]` (a legitimate search answer)
+# instead of a loud 404.
 # ---------------------------------------------------------------------------
 
 
 class TestInitializeCollections:
     @pytest.mark.asyncio
-    async def test_creates_missing_collections(self, service):
-        # No collections exist yet
-        collections_resp = SimpleNamespace(collections=[])
-        service.client.get_collections = AsyncMock(return_value=collections_resp)
+    async def test_creates_the_unified_collection_when_missing(self, service):
+        service.client.get_collections = AsyncMock(return_value=SimpleNamespace(collections=[]))
         service.client.create_collection = AsyncMock()
 
         await service.initialize_collections()
 
-        assert service.client.create_collection.call_count == 5
+        service.client.create_collection.assert_called_once()
+        assert (
+            service.client.create_collection.call_args.kwargs["collection_name"]
+            == settings.QDRANT_UNIFIED_COLLECTION
+        )
 
     @pytest.mark.asyncio
-    async def test_skips_existing_collections(self, service):
-        existing = [
-            SimpleNamespace(name="dtc_embeddings_hu"),
-            SimpleNamespace(name="symptom_embeddings_hu"),
-            SimpleNamespace(name="component_embeddings_hu"),
-            SimpleNamespace(name="repair_embeddings_hu"),
-            SimpleNamespace(name="known_issue_embeddings_hu"),
+    async def test_never_creates_a_legacy_collection(self, service):
+        """REVERT-GUARD: booting must not manufacture the empty collections that
+        turned a mis-addressed search into a silent empty result."""
+        from app.db.qdrant_client import _LEGACY_COLLECTIONS
+
+        service.client.get_collections = AsyncMock(return_value=SimpleNamespace(collections=[]))
+        service.client.create_collection = AsyncMock()
+
+        await service.initialize_collections()
+
+        created = [
+            call.kwargs["collection_name"]
+            for call in service.client.create_collection.call_args_list
         ]
-        collections_resp = SimpleNamespace(collections=existing)
-        service.client.get_collections = AsyncMock(return_value=collections_resp)
+        assert created == [settings.QDRANT_UNIFIED_COLLECTION]
+        assert not set(created) & set(_LEGACY_COLLECTIONS)
+
+    @pytest.mark.asyncio
+    async def test_is_a_noop_when_the_unified_collection_exists(self, service):
+        service.client.get_collections = AsyncMock(
+            return_value=SimpleNamespace(
+                collections=[SimpleNamespace(name=settings.QDRANT_UNIFIED_COLLECTION)]
+            )
+        )
         service.client.create_collection = AsyncMock()
 
         await service.initialize_collections()
 
         service.client.create_collection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reports_but_never_touches_surviving_legacy_collections(self, service, caplog):
+        """Production still holds ~2,323 points in dtc_embeddings_hu. Dropping
+        them is a human decision, so boot may only surface them."""
+        service.client.get_collections = AsyncMock(
+            return_value=SimpleNamespace(
+                collections=[
+                    SimpleNamespace(name=settings.QDRANT_UNIFIED_COLLECTION),
+                    SimpleNamespace(name="dtc_embeddings_hu"),
+                ]
+            )
+        )
+        service.client.create_collection = AsyncMock()
+        service.client.delete_collection = AsyncMock()
+
+        with caplog.at_level("WARNING"):
+            await service.initialize_collections()
+
+        service.client.create_collection.assert_not_called()
+        service.client.delete_collection.assert_not_called()
+        assert any("dtc_embeddings_hu" in r.getMessage() for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_create_collection_connection_error(self, service):
@@ -172,7 +212,7 @@ class TestUpsertVectors:
         vectors = [[0.1] * 768, [0.2] * 768]
         payloads = [{"code": "P0300"}, {"code": "P0301"}]
 
-        await service.upsert_vectors("dtc_embeddings_hu", ids, vectors, payloads)
+        await service.upsert_vectors(ids, vectors, payloads)
 
         service.client.upsert.assert_called_once()
         call_kwargs = service.client.upsert.call_args
@@ -189,7 +229,7 @@ class TestUpsertVectors:
         vectors = [[0.5] * 768]
         payloads = [{"code": "P0300"}]
 
-        await service.upsert_vectors("dtc_embeddings_hu", ids, vectors, payloads)
+        await service.upsert_vectors(ids, vectors, payloads)
 
         # The payload should now include the model version
         assert payloads[0]["_embedding_model_version"] == "hubert-base-cc-v1"
@@ -200,7 +240,7 @@ class TestUpsertVectors:
         ids = ["id1"]
         vectors = [[0.1] * 768]
 
-        await service.upsert_vectors("dtc_embeddings_hu", ids, vectors, payloads=None)
+        await service.upsert_vectors(ids, vectors, payloads=None)
 
         service.client.upsert.assert_called_once()
 
@@ -210,7 +250,7 @@ class TestUpsertVectors:
         vectors = [[0.1] * 100]  # wrong dimension
 
         with pytest.raises(ValueError, match="Vector dimension mismatch"):
-            await service.upsert_vectors("dtc_embeddings_hu", ids, vectors)
+            await service.upsert_vectors(ids, vectors)
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +269,6 @@ class TestSearch:
         )
 
         results = await service.search(
-            collection_name="dtc_embeddings_hu",
             query_vector=[0.1] * 768,
             limit=5,
         )
@@ -245,7 +284,6 @@ class TestSearch:
         service.client.search = AsyncMock(return_value=[])
 
         results = await service.search(
-            collection_name="dtc_embeddings_hu",
             query_vector=[0.1] * 768,
         )
 
@@ -256,7 +294,6 @@ class TestSearch:
         service.client.search = AsyncMock(return_value=[])
 
         await service.search(
-            collection_name="dtc_embeddings_hu",
             query_vector=[0.1] * 768,
             filter_conditions={"category": "powertrain"},
         )
@@ -269,7 +306,6 @@ class TestSearch:
         service.client.search = AsyncMock(return_value=[])
 
         await service.search(
-            collection_name="dtc_embeddings_hu",
             query_vector=[0.1] * 768,
             score_threshold=0.5,
         )
@@ -281,7 +317,6 @@ class TestSearch:
         service.client.search = AsyncMock(return_value=[])
 
         await service.search(
-            collection_name="dtc_embeddings_hu",
             query_vector=[0.1] * 768,
             model_version="hubert-base-cc-v1",
         )
@@ -294,7 +329,6 @@ class TestSearch:
 
         with pytest.raises(QdrantConnectionException):
             await service.search(
-                collection_name="dtc_embeddings_hu",
                 query_vector=[0.1] * 768,
             )
 
@@ -304,7 +338,6 @@ class TestSearch:
 
         with pytest.raises(QdrantException):
             await service.search(
-                collection_name="dtc_embeddings_hu",
                 query_vector=[0.1] * 768,
             )
 
@@ -323,7 +356,6 @@ class TestSearchDTC:
             results = await service.search_dtc([0.1] * 768, limit=5)
             assert results == []
             mock_search.assert_awaited_once_with(
-                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
                 query_vector=[0.1] * 768,
                 limit=5,
                 filter_conditions={"type": "dtc"},
@@ -341,7 +373,6 @@ class TestSearchDTC:
                 severity="high",
             )
             mock_search.assert_awaited_once_with(
-                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
                 query_vector=[0.1] * 768,
                 limit=3,
                 filter_conditions={"type": "dtc", "category": "powertrain", "severity": "high"},
@@ -363,7 +394,6 @@ class TestSearchUnified:
         with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
             await service.search_unified([0.1] * 768, type_="dtc", limit=7)
             mock_search.assert_awaited_once_with(
-                collection_name=settings.QDRANT_UNIFIED_COLLECTION,
                 query_vector=[0.1] * 768,
                 limit=7,
                 filter_conditions={"type": "dtc"},
@@ -372,110 +402,206 @@ class TestSearchUnified:
             )
 
     @pytest.mark.asyncio
-    async def test_search_dtc_uses_unified_collection_not_legacy(self, service):
-        """REVERT-GUARD: this FAILS if search_dtc is reverted to the empty
-        legacy `dtc_embeddings_hu` collection or loses the {"type": "dtc"} filter.
+    async def test_unknown_payload_type_raises_instead_of_returning_empty(self, service):
+        """The type discriminator is the collection name's twin trap.
+
+        A search for a type nobody ever indexed (``"symptom"`` is the real
+        example - the RAG asked for it and the collection has none) matches zero
+        points and returns ``[]``, which is a legitimate answer for a search
+        engine. Closed set, validated at the gate.
         """
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_dtc([0.1] * 768, limit=5)
-
-        _, kwargs = mock_search.call_args
-        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
-        assert kwargs["collection_name"] == "autocognitix"
-        # Must NOT regress to the empty legacy collection.
-        assert kwargs["collection_name"] != service.DTC_COLLECTION
-        assert kwargs["filter_conditions"]["type"] == "dtc"
-
-
-class TestSearchSimilarSymptoms:
-    @pytest.mark.asyncio
-    async def test_search_symptoms_no_filters(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_similar_symptoms([0.2] * 768, limit=10)
-            mock_search.assert_awaited_once_with(
-                collection_name="symptom_embeddings_hu",
-                query_vector=[0.2] * 768,
-                limit=10,
-                filter_conditions=None,
-                model_version=None,
-            )
-
-    @pytest.mark.asyncio
-    async def test_search_symptoms_with_make(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_similar_symptoms([0.2] * 768, limit=5, vehicle_make="VW")
-            mock_search.assert_awaited_once_with(
-                collection_name="symptom_embeddings_hu",
-                query_vector=[0.2] * 768,
-                limit=5,
-                filter_conditions={"vehicle_make": "VW"},
-                model_version=None,
-            )
-
-
-class TestSearchComponents:
-    @pytest.mark.asyncio
-    async def test_search_components_no_filters(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_components([0.3] * 768, limit=5)
-            mock_search.assert_awaited_once_with(
-                collection_name="component_embeddings_hu",
-                query_vector=[0.3] * 768,
-                limit=5,
-                filter_conditions=None,
-                model_version=None,
-            )
-
-    @pytest.mark.asyncio
-    async def test_search_components_with_system(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_components([0.3] * 768, system="engine")
-            mock_search.assert_awaited_once_with(
-                collection_name="component_embeddings_hu",
-                query_vector=[0.3] * 768,
-                limit=10,
-                filter_conditions={"system": "engine"},
-                model_version=None,
-            )
-
-
-class TestSearchRepairs:
-    @pytest.mark.asyncio
-    async def test_search_repairs_no_filters(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_repairs([0.4] * 768, limit=3)
-            mock_search.assert_awaited_once_with(
-                collection_name="repair_embeddings_hu",
-                query_vector=[0.4] * 768,
-                limit=3,
-                filter_conditions=None,
-                model_version=None,
-            )
-
-    @pytest.mark.asyncio
-    async def test_search_repairs_with_difficulty(self, service):
-        with patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search:
-            await service.search_repairs([0.4] * 768, difficulty="professional")
-            mock_search.assert_awaited_once_with(
-                collection_name="repair_embeddings_hu",
-                query_vector=[0.4] * 768,
-                limit=10,
-                filter_conditions={"difficulty": "professional"},
-                model_version=None,
-            )
+        with (
+            patch.object(service, "search", new=AsyncMock(return_value=[])) as mock_search,
+            pytest.raises(ValueError, match="Unknown payload type"),
+        ):
+            await service.search_unified([0.1] * 768, type_="symptom")
+        mock_search.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# delete operations
+# REGRESSION GUARD: the legacy collections must be structurally unreachable
+#
+# This is the class that has to fail if the drift is reintroduced - by anyone,
+# in any file, not just in the three modules that were fixed. It checks the two
+# ways a caller could name the wrong collection: writing one of the names down,
+# or accepting one as a parameter.
 # ---------------------------------------------------------------------------
 
 
-class TestDeleteOperations:
-    @pytest.mark.asyncio
-    async def test_delete_collection(self, service):
-        service.client.delete_collection = AsyncMock()
-        await service.delete_collection("test_collection")
-        service.client.delete_collection.assert_called_once()
+LEGACY_COLLECTION_NAMES = (
+    "dtc_embeddings_hu",
+    "symptom_embeddings_hu",
+    "component_embeddings_hu",
+    "repair_embeddings_hu",
+    "known_issue_embeddings_hu",
+)
+
+# The single module allowed to know the names at all, and only inside the
+# `_LEGACY_COLLECTIONS` tuple that the GDPR erasure sweep iterates.
+_NAME_OWNER = Path(__file__).resolve().parents[2] / "app" / "db" / "qdrant_client.py"
+
+
+def _docstring_ids(tree: ast.AST) -> set:
+    """ids of the Constant nodes that are docstrings.
+
+    Prose that NAMES a legacy collection ("...NOT dtc_embeddings_hu...") is
+    documentation of the fix and must not trip the guard; only a string the
+    program can actually pass to Qdrant counts. Comments never reach the AST,
+    so they are exempt for free.
+    """
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                ids.add(id(body[0].value))
+    return ids
+
+
+def _executable_legacy_literals(path: Path, allowed_in: str = "") -> list:
+    """Legacy collection names this module can actually evaluate at runtime.
+
+    Args:
+        path: Module to scan.
+        allowed_in: Name of a module-level assignment target whose literals are
+            exempt (the GDPR sweep's data list).
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    exempt = _docstring_ids(tree)
+
+    if allowed_in:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(isinstance(t, ast.Name) and t.id == allowed_in for t in targets):
+                    exempt |= {id(c) for c in ast.walk(node) if isinstance(c, ast.Constant)}
+
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value in LEGACY_COLLECTION_NAMES
+        and id(node) not in exempt
+    ]
+
+
+class TestLegacyCollectionsAreStructurallyUnreachable:
+    def test_no_other_app_module_can_name_a_legacy_collection(self):
+        """FAILS if any app module reintroduces a usable legacy collection name.
+
+        Fixing the drift took three commits because the wrong name was
+        reachable from several places: the RAG retrieval leg, the chat DTC
+        context and the admin consistency check each carried their own copy.
+        Scanning the whole package is the only check that also covers the files
+        this test does not know about.
+        """
+        app_dir = Path(__file__).resolve().parents[2] / "app"
+        offenders = {}
+        for path in sorted(app_dir.rglob("*.py")):
+            if path == _NAME_OWNER:
+                continue
+            stray = _executable_legacy_literals(path)
+            if stray:
+                offenders[str(path.relative_to(app_dir))] = stray
+
+        assert not offenders, (
+            "legacy Qdrant collection names reappeared in app code: "
+            f"{offenders}. Every vector lives in settings.QDRANT_UNIFIED_COLLECTION; "
+            "these collections are (near-)empty and searching them returns [] "
+            "instead of an error."
+        )
+
+    def test_the_owning_module_names_them_only_in_the_gdpr_sweep_list(self):
+        """Inside qdrant_client.py the names may only exist as data for the
+        erasure sweep - never as an argument, an attribute or a default."""
+        stray = _executable_legacy_literals(_NAME_OWNER, allowed_in="_LEGACY_COLLECTIONS")
+        assert not stray, (
+            f"legacy collection names used outside _LEGACY_COLLECTIONS: {stray}. "
+            "That tuple exists only so the GDPR sweep can delete a user's points "
+            "from collections that still physically exist."
+        )
+
+    def test_the_guard_actually_detects_a_reintroduced_name(self, tmp_path):
+        """A guard that cannot fail is not a guard - prove it fires."""
+        offender = tmp_path / "regressed.py"
+        offender.write_text(
+            '"""Docstring naming dtc_embeddings_hu must NOT trip the guard."""\n'
+            "# ...and neither must a comment about symptom_embeddings_hu.\n"
+            'COLLECTION = "dtc_embeddings_hu"\n',
+            encoding="utf-8",
+        )
+        assert _executable_legacy_literals(offender) == ["dtc_embeddings_hu"]
+
+    def test_no_search_entry_point_accepts_a_collection_name(self):
+        """FAILS if a collection name becomes a caller's decision again.
+
+        The write path is included: hand-typed destinations on the write side
+        are how the stale partial copies got into dtc_embeddings_hu.
+        """
+        from app.db.qdrant_client import QdrantService
+
+        forbidden = {"collection", "collection_name"}
+        offenders = {}
+        for name in dir(QdrantService):
+            if not (name.startswith("search") or name == "upsert_vectors"):
+                continue
+            member = getattr(QdrantService, name)
+            if not callable(member):
+                continue
+            params = set(inspect.signature(member).parameters) & forbidden
+            if params:
+                offenders[name] = sorted(params)
+
+        assert not offenders, (
+            f"Qdrant retrieval/write API accepts a collection name again: {offenders}"
+        )
+
+    def test_rag_retrieval_does_not_accept_a_collection_name(self):
+        """The RAG's free-text ``collection=`` argument was the drift's carrier."""
+        from app.services.rag_service import RAGService
+
+        params = inspect.signature(RAGService.retrieve_from_qdrant).parameters
+        assert "collection" not in params
+        assert "collection_name" not in params
+        # ...and the payload type is now mandatory, not an optional alternative.
+        assert params["type_"].default is inspect.Parameter.empty
+
+    def test_the_dead_legacy_search_methods_are_gone(self):
+        """They targeted collections holding 0 / ~117 stale points and had no
+        production caller. Keeping them alive keeps the drift reachable."""
+        from app.db.qdrant_client import QdrantService
+
+        for dead in ("search_similar_symptoms", "search_components", "search_repairs"):
+            assert not hasattr(QdrantService, dead), f"{dead} was resurrected"
+
+    def test_the_service_cannot_drop_a_collection(self):
+        """``dtc_embeddings_hu`` holds ~2,323 real points in production.
+
+        Dropping a collection is a human data decision at the Qdrant console;
+        the app must have no code path that can do it. ``delete_by_user``
+        (points, filtered by user id) is the only deletion that stays.
+        """
+        from app.db.qdrant_client import QdrantService
+
+        assert not hasattr(QdrantService, "delete_collection")
+        assert hasattr(QdrantService, "delete_by_user")
+
+    def test_no_class_level_collection_constants_remain(self):
+        from app.db.qdrant_client import QdrantService
+
+        leftovers = [
+            name
+            for name in dir(QdrantService)
+            if "COLLECTION" in name
+            and getattr(QdrantService, name, None) in LEGACY_COLLECTION_NAMES
+        ]
+        assert not leftovers, f"legacy collection constants still exported: {leftovers}"
 
 
 # ---------------------------------------------------------------------------
@@ -525,14 +651,14 @@ class TestDeleteByUserGDPR:
         """An instance seeded before the unification can still hold points."""
         service.client.delete = AsyncMock()
         service.client.get_collections = AsyncMock(
-            return_value=_collections(service.DTC_COLLECTION, service.SYMPTOM_COLLECTION)
+            return_value=_collections("dtc_embeddings_hu", "symptom_embeddings_hu")
         )
 
         result = await service.delete_by_user("user-123")
 
         targeted = [c.kwargs["collection_name"] for c in service.client.delete.call_args_list]
         assert targeted[0] == settings.QDRANT_UNIFIED_COLLECTION
-        assert set(targeted[1:]) == {service.DTC_COLLECTION, service.SYMPTOM_COLLECTION}
+        assert set(targeted[1:]) == {"dtc_embeddings_hu", "symptom_embeddings_hu"}
         assert result == 3
 
     @pytest.mark.asyncio
@@ -566,7 +692,7 @@ class TestDeleteByUserGDPR:
         """Purging 2 of 3 collections is a partial deletion, not a success."""
         service.client.delete = AsyncMock(side_effect=[None, Exception("boom"), None])
         service.client.get_collections = AsyncMock(
-            return_value=_collections(service.DTC_COLLECTION, service.SYMPTOM_COLLECTION)
+            return_value=_collections("dtc_embeddings_hu", "symptom_embeddings_hu")
         )
 
         with pytest.raises(QdrantException) as exc_info:
@@ -616,11 +742,11 @@ class TestDeleteByUserGDPR:
 class TestGetCollectionInfo:
     @pytest.mark.asyncio
     async def test_get_collection_info(self, service):
-        info_obj = _make_collection_info("dtc_embeddings_hu", points_count=1000, vectors_count=1000)
+        info_obj = _make_collection_info("autocognitix", points_count=1000, vectors_count=1000)
         service.client.get_collection = AsyncMock(return_value=info_obj)
 
-        info = await service.get_collection_info("dtc_embeddings_hu")
-        assert info["name"] == "dtc_embeddings_hu"
+        info = await service.get_collection_info(settings.QDRANT_UNIFIED_COLLECTION)
+        assert info["name"] == settings.QDRANT_UNIFIED_COLLECTION
         assert info["points_count"] == 1000
         assert info["vectors_count"] == 1000
         assert info["status"] == "green"
@@ -628,41 +754,86 @@ class TestGetCollectionInfo:
 
 # ---------------------------------------------------------------------------
 # get_storage_stats
+#
+# It enumerated ONLY the five legacy collections, so the store that actually
+# holds ~60k vectors - above STORAGE_WARN_THRESHOLD - was never measured and
+# check_storage_alerts could never fire for it. Capacity monitoring reported on
+# everything except the thing being filled.
 # ---------------------------------------------------------------------------
+
+
+def _stats_stub(**by_collection):
+    async def _get(collection_name):
+        if collection_name in by_collection:
+            return by_collection[collection_name]
+        raise Exception("unavailable")
+
+    return AsyncMock(side_effect=_get)
 
 
 class TestGetStorageStats:
     @pytest.mark.asyncio
-    async def test_get_storage_stats_success(self, service):
-        _make_collection_info("col", points_count=500, vectors_count=500)
+    async def test_always_reports_the_collection_that_holds_the_vectors(self, service):
+        service.client.get_collections = AsyncMock(return_value=_collections())
+        info = {"name": "autocognitix", "points_count": 60955, "vectors_count": 60955}
+
         with patch.object(
             service,
             "get_collection_info",
-            new=AsyncMock(
-                return_value={
-                    "name": "col",
-                    "points_count": 500,
-                    "vectors_count": 500,
-                    "status": "green",
+            new=_stats_stub(**{settings.QDRANT_UNIFIED_COLLECTION: info}),
+        ):
+            stats = await service.get_storage_stats()
+
+        assert settings.QDRANT_UNIFIED_COLLECTION in stats
+        assert stats[settings.QDRANT_UNIFIED_COLLECTION]["points_count"] == 60955
+
+    @pytest.mark.asyncio
+    async def test_surfaces_legacy_collections_only_while_they_exist(self, service):
+        """An operator has to see the stale points to decide about dropping them;
+        once a human drops the collection it disappears from the report."""
+        service.client.get_collections = AsyncMock(return_value=_collections("dtc_embeddings_hu"))
+
+        with patch.object(
+            service,
+            "get_collection_info",
+            new=_stats_stub(
+                **{
+                    settings.QDRANT_UNIFIED_COLLECTION: {"points_count": 60955},
+                    "dtc_embeddings_hu": {"points_count": 2323},
                 }
             ),
         ):
             stats = await service.get_storage_stats()
-            assert len(stats) == 5
-            for coll_stats in stats.values():
-                assert coll_stats["points_count"] == 500
+
+        assert set(stats) == {settings.QDRANT_UNIFIED_COLLECTION, "dtc_embeddings_hu"}
+        assert stats["dtc_embeddings_hu"]["points_count"] == 2323
 
     @pytest.mark.asyncio
     async def test_get_storage_stats_handles_errors(self, service):
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
         with patch.object(
             service,
             "get_collection_info",
             new=AsyncMock(side_effect=Exception("unavailable")),
         ):
             stats = await service.get_storage_stats()
-            assert len(stats) == 5
-            for coll_stats in stats.values():
-                assert coll_stats == {"error": "unavailable"}
+
+        assert stats == {settings.QDRANT_UNIFIED_COLLECTION: {"error": "unavailable"}}
+
+    @pytest.mark.asyncio
+    async def test_the_real_store_can_now_trigger_a_capacity_alert(self, service):
+        """The point of the fix: 60,955 > STORAGE_WARN_THRESHOLD must alert."""
+        service.client.get_collections = AsyncMock(return_value=_collections())
+
+        with patch.object(
+            service,
+            "get_collection_info",
+            new=_stats_stub(**{settings.QDRANT_UNIFIED_COLLECTION: {"points_count": 60955}}),
+        ):
+            alerts = await service.check_storage_alerts()
+
+        assert [a["collection"] for a in alerts] == [settings.QDRANT_UNIFIED_COLLECTION]
 
 
 # ---------------------------------------------------------------------------

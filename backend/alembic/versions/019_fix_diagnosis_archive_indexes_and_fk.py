@@ -34,9 +34,15 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic at runtime via globals() introspection.
-# CodeQL's static analyzer can't see that usage, so we mark them explicitly.
-revision: str = "019_fix_archive_drift"  # noqa: F841  # codeql[py/unused-global-variable]
-down_revision: Union[str, None] = "018_fix_diagnosis_fk"  # noqa: F841  # codeql[py/unused-global-variable]
+# The static analyzer can't see that usage, so we mark them explicitly with the
+# `lgtm[...]` directive this project uses everywhere else (CLAUDE.md; migrations
+# 016/017/018/020). A `codeql[...]` comment is not a suppression the scanner
+# honours, so these two lines would still have been reported. The `noqa: F841`
+# that used to sit here suppressed nothing either: F841 is a LOCAL-variable
+# rule, these are module globals, and ruff.toml excludes alembic/versions
+# outright.
+revision: str = "019_fix_archive_drift"  # lgtm[py/unused-global-variable]
+down_revision: Union[str, None] = "018_fix_diagnosis_fk"  # lgtm[py/unused-global-variable]
 
 __all__ = ["revision", "down_revision", "upgrade", "downgrade"]
 

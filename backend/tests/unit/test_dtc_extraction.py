@@ -15,6 +15,7 @@ regexes cannot drift apart again.
 No database, no network: the scripts are loaded by path with importlib.
 """
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -370,6 +371,99 @@ def test_prioritize_prefers_curated_codes_then_newest():
     assert [p["odi_id"] for p in ranked] == ["3", "2", "1"]
 
 
+# ---------------------------------------------------------------------------
+# _date_rank: the format on disk is ISO, not digits
+#
+# REGRESSION. `_date_rank` was `value if value.isdigit() else ""`, but
+# import_flat_complaints.parse_date() writes "YYYY-MM-DD" into every record of
+# the corpus (and therefore into Complaint.date_received in Neo4j). So EVERY
+# real complaint returned "" -> one undifferentiated "unknown" bucket -> the
+# "newest complaints first" half of the ranking never ran, while the capping log
+# message kept announcing it. The whole test suite missed it because every
+# fixture below used the compact "YYYYMMDD" shape, which exists only BEFORE
+# parse_date() runs. These tests use the shape that is actually on disk.
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("2020-03-15", "20200315"),  # THE format on disk (parse_date output)
+        ("2024-07-31", "20240731"),
+        ("2020-03-15T00:00:00", "20200315"),  # ISO datetime / neo4j Date repr
+        ("20240731", "20240731"),  # raw NHTSA FLAT_CMPL field
+    ],
+)
+def test_date_rank_parses_the_formats_that_actually_occur(raw, expected):
+    assert sync_neo4j._date_rank(raw) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw", ["", None, "not-a-date", "2020-13-45", "0000-00-00", "1899-12-31", "2020-03", 12345]
+)
+def test_date_rank_rejects_missing_and_malformed_dates(raw):
+    """Unknown is its own bucket - never a value that can out-rank a real date."""
+    assert sync_neo4j._date_rank(raw) == ""
+
+
+@pytest.mark.unit
+def test_unknown_dates_sort_strictly_after_every_real_date():
+    """`""` must be a predictable LAST, not "indistinguishable from everything".
+
+    A real date always inverts to a leading digit <= 8 (year >= 1900), so the
+    all-nines unknown key can never interleave with dated records.
+    """
+    assert sync_neo4j._invert_date("") == "9" * sync_neo4j._DATE_KEY_WIDTH
+    for real in ("19000101", "20240731", "21001231"):
+        assert sync_neo4j._invert_date(real) < sync_neo4j._invert_date("")
+
+
+@pytest.mark.unit
+def test_prioritize_ranks_iso_dates_newest_first():
+    """THE regression: with ISO dates the cap must keep the NEWEST mentions.
+
+    Before the fix every date parsed to "" and the tie broke on odi_id, so the
+    cap kept the LOWEST odi_ids - i.e. the OLDEST complaints, the exact opposite
+    of what the docstring and the capping log message promise.
+    """
+    pairs = [
+        {"odi_id": "900", "code": "P0301", "date_received": "2024-07-31"},
+        {"odi_id": "100", "code": "P0301", "date_received": "2005-01-01"},
+        {"odi_id": "500", "code": "P0301", "date_received": "2015-11-02"},
+    ]
+    ranked = sync_neo4j.prioritize_dtc_pairs(pairs, {"P0301"}, limit=3)
+    assert [p["odi_id"] for p in ranked] == ["900", "500", "100"]
+
+    # And the cap keeps the newest, not the numerically smallest odi_id.
+    assert [p["odi_id"] for p in sync_neo4j.prioritize_dtc_pairs(pairs, {"P0301"}, 1)] == ["900"]
+
+
+@pytest.mark.unit
+def test_prioritize_puts_undated_mentions_last_even_with_a_low_odi_id():
+    pairs = [
+        {"odi_id": "001", "code": "P0301", "date_received": ""},
+        {"odi_id": "900", "code": "P0301", "date_received": "2024-07-31"},
+    ]
+    ranked = sync_neo4j.prioritize_dtc_pairs(pairs, {"P0301"}, limit=2)
+    assert [p["odi_id"] for p in ranked] == ["900", "001"]
+
+
+@pytest.mark.unit
+def test_prioritize_warns_when_no_date_can_be_parsed(capsys):
+    """The failure mode must announce itself instead of degrading in silence."""
+    pairs = [{"odi_id": "1", "code": "P0301", "date_received": "15/03/2020"}]
+    sync_neo4j.prioritize_dtc_pairs(pairs, {"P0301"}, limit=1)
+    out = capsys.readouterr().out
+    assert "INACTIVE" in out and "date_received" in out
+
+
+@pytest.mark.unit
+def test_prioritize_does_not_warn_when_dates_parse(capsys):
+    pairs = [{"odi_id": "1", "code": "P0301", "date_received": "2020-03-15"}]
+    sync_neo4j.prioritize_dtc_pairs(pairs, {"P0301"}, limit=1)
+    assert "INACTIVE" not in capsys.readouterr().out
+
+
 @pytest.mark.unit
 def test_prioritize_caps_at_limit():
     pairs = [{"odi_id": str(i), "code": "P0301", "date_received": "20240101"} for i in range(10)]
@@ -442,3 +536,191 @@ def test_checkpoint_clear_reenables_a_step(tmp_path):
     manager.clear("dtc_complaint_rels")
     assert manager.state["dtc_complaint_rels"] is False
     assert json.loads(cp_file.read_text())["dtc_complaint_rels"] is False
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint: a run that did NOTHING must not record success
+#
+# REGRESSION. When the flat-file corpus is absent the step falls back to
+# scanning the in-graph sample; on an empty/unloaded graph that yields zero
+# pairs, and the code then called mark_complete("dtc_complaint_rels"). The
+# checkpoint file persists, so every LATER run - including one on a properly
+# provisioned machine with the full 1.66M-record corpus - printed
+# "[SKIP] ... already created" and never ran the extraction. A degraded run's
+# empty result masqueraded as a finished step, and the skip message made it look
+# deliberate. This is the same class of bug as the zero-vector embedding.
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_is_complete_reads_legacy_boolean_checkpoints(tmp_path):
+    cp_file = tmp_path / "cp.json"
+    cp_file.write_text(json.dumps({"dtc_complaint_rels": True}))
+    manager = sync_neo4j.CheckpointManager(cp_file)
+    assert manager.is_complete("dtc_complaint_rels") is True
+    assert manager.is_complete("vehicles_loaded") is False
+
+
+@pytest.mark.unit
+def test_degraded_record_is_persisted_but_is_not_complete(tmp_path):
+    """The record must be readable by an operator AND not count as done."""
+    cp_file = tmp_path / "cp.json"
+    manager = sync_neo4j.CheckpointManager(cp_file)
+    manager.mark_degraded("dtc_complaint_rels", reason="corpus_missing", created=0)
+
+    assert manager.is_complete("dtc_complaint_rels") is False
+    stored = json.loads(cp_file.read_text())["dtc_complaint_rels"]
+    assert stored["complete"] is False
+    assert stored["reason"] == "corpus_missing"
+    assert stored["created"] == 0
+    assert stored["at"]
+
+    # A fresh manager (i.e. the NEXT run) must reach the same conclusion.
+    assert sync_neo4j.CheckpointManager(cp_file).is_complete("dtc_complaint_rels") is False
+
+
+@pytest.mark.unit
+def test_degraded_record_is_truthy_so_is_complete_is_mandatory(tmp_path):
+    """Why every call site had to move off `if state[key]:`.
+
+    A degraded record is a non-empty dict. Raw truthiness reads it as "done" -
+    exactly the bug, re-introduced. This test fails the moment someone reverts a
+    call site to a plain truthiness check.
+    """
+    cp_file = tmp_path / "cp.json"
+    manager = sync_neo4j.CheckpointManager(cp_file)
+    manager.mark_degraded("dtc_complaint_rels", reason="corpus_missing")
+
+    assert bool(manager.state["dtc_complaint_rels"]) is True  # the trap
+    assert manager.is_complete("dtc_complaint_rels") is False  # the guard
+
+    source = (PROJECT_ROOT / "scripts" / "sync_neo4j_sprint9.py").read_text(encoding="utf-8")
+    for key in (
+        "dtc_loaded",
+        "vehicles_loaded",
+        "engines_loaded",
+        "complaints_loaded",
+        "dtc_complaint_rels",
+        "vehicle_complaint_rels",
+        "vehicle_engine_rels",
+    ):
+        assert f'checkpoint.state["{key}"]:' not in source, (
+            f"{key} is read through raw truthiness again - use is_complete()"
+        )
+        assert f'checkpoint.state.get("{key}"):' not in source
+
+
+@pytest.mark.unit
+def test_clear_resets_a_degraded_record_too(tmp_path):
+    cp_file = tmp_path / "cp.json"
+    manager = sync_neo4j.CheckpointManager(cp_file)
+    manager.mark_degraded("dtc_complaint_rels", reason="corpus_missing")
+    manager.clear("dtc_complaint_rels")
+    assert manager.state["dtc_complaint_rels"] is False
+    assert manager.is_complete("dtc_complaint_rels") is False
+
+
+def _degraded_loader(cp_file, pairs):
+    """A loader whose only live parts are the checkpoint and the fallback scan."""
+    loader = sync_neo4j.Neo4jSprint9Loader.__new__(sync_neo4j.Neo4jSprint9Loader)
+    loader.checkpoint = sync_neo4j.CheckpointManager(cp_file)
+    loader.stats = dict.fromkeys(
+        [
+            "dtc",
+            "vehicles",
+            "engines",
+            "complaints",
+            "dtc_complaint_rels",
+            "dtc_complaint_nodes_created",
+            "dtc_nodes_created",
+            "vehicle_complaint_rels",
+            "vehicle_engine_rels",
+        ],
+        0,
+    )
+
+    async def _fake_graph_scan():
+        return sync_neo4j.DtcScanResult(
+            pairs=list(pairs),
+            complaint_nodes={},
+            stats={
+                "complaints_scanned": 0,
+                "complaints_with_dtc": 0,
+                "mentions": len(pairs),
+                "unique_codes": 0,
+                "hit_rate": 0.0,
+                "truncated": False,
+                "source": "neo4j-nodes",
+            },
+        )
+
+    loader._scan_graph_for_dtc_mentions = _fake_graph_scan
+    return loader
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_missing_corpus_zero_rels_does_not_close_the_step(tmp_path, monkeypatch):
+    """THE regression, end to end: no corpus + empty graph => step stays open."""
+    monkeypatch.setattr(sync_neo4j, "DATA_DIR", tmp_path / "absent")
+    cp_file = tmp_path / "cp.json"
+
+    loader = _degraded_loader(cp_file, pairs=[])
+    await loader.create_dtc_complaint_relationships()
+
+    assert loader.checkpoint.is_complete("dtc_complaint_rels") is False
+    assert json.loads(cp_file.read_text())["dtc_complaint_rels"]["reason"] == "corpus_missing"
+
+    # The next run must actually RUN the step, not print "[SKIP] already created".
+    assert sync_neo4j.CheckpointManager(cp_file).is_complete("dtc_complaint_rels") is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_full_corpus_with_genuinely_zero_mentions_does_close_the_step(tmp_path, monkeypatch):
+    """A real scan that legitimately finds nothing IS a completed step.
+
+    This is the distinction the fix exists to make: an empty ANSWER from a scan
+    that really ran over the corpus is a result; an empty answer because the
+    corpus was missing is a failure. They must not be recorded the same way.
+    """
+    complaints_dir = tmp_path / "nhtsa" / "complaints_flat"
+    complaints_dir.mkdir(parents=True)
+    # Real corpus file, real scan, no DTC code anywhere in it.
+    (complaints_dir / sync_neo4j.COMPLAINT_FILES[0]).write_text(
+        json.dumps({"complaints": [_complaint(1, "the brakes squeal when cold")]})
+    )
+    monkeypatch.setattr(sync_neo4j, "DATA_DIR", tmp_path)
+    cp_file = tmp_path / "cp.json"
+
+    loader = _degraded_loader(cp_file, pairs=[])
+    await loader.create_dtc_complaint_relationships()
+
+    assert loader.checkpoint.is_complete("dtc_complaint_rels") is True
+
+
+@pytest.mark.unit
+def test_missing_complaint_data_does_not_close_the_load_step(tmp_path, monkeypatch, capsys):
+    """Same bug, sibling call site: load_complaints() marked itself complete."""
+    monkeypatch.setattr(sync_neo4j, "DATA_DIR", tmp_path / "absent")
+    cp_file = tmp_path / "cp.json"
+    loader = _degraded_loader(cp_file, pairs=[])
+
+    asyncio.run(loader.load_complaints())
+
+    assert loader.checkpoint.is_complete("complaints_loaded") is False
+    assert json.loads(cp_file.read_text())["complaints_loaded"]["reason"] == "no_complaint_data"
+    assert "NOT marked complete" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_missing_engine_specs_does_not_close_the_engine_rel_step(tmp_path, monkeypatch):
+    """Same bug, second sibling call site."""
+    monkeypatch.setattr(sync_neo4j, "DATA_DIR", tmp_path / "absent")
+    cp_file = tmp_path / "cp.json"
+    loader = _degraded_loader(cp_file, pairs=[])
+
+    asyncio.run(loader.create_vehicle_engine_relationships())
+
+    assert loader.checkpoint.is_complete("vehicle_engine_rels") is False
+    assert (
+        json.loads(cp_file.read_text())["vehicle_engine_rels"]["reason"] == "engine_specs_missing"
+    )

@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { Badge, Button, Input } from '../components/lib'
 import { PasswordStrengthMeter } from '../components/ui'
+import { segmentedItemClass } from '../lib/styles'
 import { exportData, type User } from '../services/authService'
 import { ApiError } from '../services/api'
 
@@ -43,9 +44,6 @@ const PASSWORD_REQUIREMENTS: ReadonlyArray<(p: string) => boolean> = [
   // eslint-disable-next-line no-useless-escape
   (p) => /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(p),
 ]
-
-const focusRing =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
 
 // =============================================================================
 // SettingsPage
@@ -206,11 +204,7 @@ export default function SettingsPage() {
               type="button"
               aria-pressed={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`h-9 px-5 rounded-lg text-sm font-semibold transition-colors ${focusRing} ${
-                activeTab === tab.id
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-800'
-              }`}
+              className={segmentedItemClass(activeTab === tab.id)}
             >
               {tab.label}
             </button>
