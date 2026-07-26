@@ -4,12 +4,19 @@ import ast
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from qdrant_client.http import models as qdrant_models
+from qdrant_client.http.exceptions import UnexpectedResponse
+
 from app.core.config import settings
-from app.core.exceptions import QdrantConnectionException, QdrantException
+from app.core.exceptions import (
+    QdrantConnectionException,
+    QdrantException,
+    QdrantQueryRejectedException,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -891,3 +898,101 @@ class TestGetQdrantService:
             from app.db.qdrant_client import QdrantService
 
             assert isinstance(svc, QdrantService)
+
+
+# ---------------------------------------------------------------------------
+# The payload index is a correctness requirement, not an optimisation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestTypePayloadIndexIsEstablishedAtBoot:
+    """Qdrant REFUSES to filter on a payload key that has no index.
+
+    It answers 400 `Index required but not found for "type" of one of the
+    following types: [keyword]` - not an empty result. Every semantic read in
+    this application filters on `type`, so without the index all of them fail,
+    the caller's fallback turns each failure into `[]`, and the product looks
+    like a search engine that finds nothing rather than one that is broken.
+
+    Production ran exactly that way: 62,898 correctly type-tagged points in a
+    collection reporting `status: green`, and every filtered query rejected. The
+    collection had been created by an importer that never declared the index, so
+    nothing in the boot path ever established it. These tests exist so an
+    environment cannot be born in that state again.
+    """
+
+    async def test_boot_creates_the_type_keyword_index(self):
+        from app.db.qdrant_client import QdrantService
+
+        service = QdrantService.__new__(QdrantService)
+        service.client = AsyncMock()
+        service.vector_size = 768
+        service.client.get_collections.return_value = MagicMock(collections=[MagicMock(name="x")])
+
+        await service.initialize_collections()
+
+        service.client.create_payload_index.assert_awaited_once()
+        kwargs = service.client.create_payload_index.await_args.kwargs
+        assert kwargs["collection_name"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert kwargs["field_name"] == "type"
+        assert kwargs["field_schema"] == qdrant_models.PayloadSchemaType.KEYWORD
+
+    async def test_an_index_failure_does_not_stop_the_app_booting(self):
+        """A key without index rights must not turn degraded search into no app."""
+        from app.db.qdrant_client import QdrantService
+
+        service = QdrantService.__new__(QdrantService)
+        service.client = AsyncMock()
+        service.vector_size = 768
+        service.client.get_collections.return_value = MagicMock(collections=[])
+        service.client.create_payload_index.side_effect = RuntimeError("forbidden")
+
+        await service.initialize_collections()  # must not raise
+
+
+@pytest.mark.asyncio
+class TestARefusedQueryIsNotAnEmptyResult:
+    """A 4xx from Qdrant is a config defect, not a transient miss.
+
+    It will be refused identically on every retry until the collection changes,
+    so it must reach the caller as its own type - callers log this at ERROR
+    (Sentry raises events from ERROR up) while a transient failure stays at
+    WARNING. Collapsing the two is what let a permanently-off feature look
+    like an ordinary empty result.
+    """
+
+    @staticmethod
+    def _service_rejecting_with(status: int):
+        from app.db.qdrant_client import QdrantService
+
+        service = QdrantService.__new__(QdrantService)
+        service.client = AsyncMock()
+        service.client.search.side_effect = UnexpectedResponse(
+            status_code=status,
+            reason_phrase="Bad Request",
+            content=b'Index required but not found for "type"',
+            headers=None,
+        )
+        return service
+
+    @pytest.mark.parametrize("status", [400, 403, 404, 422])
+    async def test_client_errors_raise_the_rejected_type(self, status):
+        service = self._service_rejecting_with(status)
+        with pytest.raises(QdrantQueryRejectedException):
+            await service.search(query_vector=[0.1] * 768)
+
+    @pytest.mark.parametrize("status", [500, 502, 503])
+    async def test_server_errors_stay_ordinary_qdrant_failures(self, status):
+        """5xx is retryable - it must NOT be escalated to the config-defect type."""
+        service = self._service_rejecting_with(status)
+        with pytest.raises(QdrantException) as exc:
+            await service.search(query_vector=[0.1] * 768)
+        assert not isinstance(exc.value, QdrantQueryRejectedException)
+
+    async def test_the_rejection_names_the_collection_and_status(self):
+        service = self._service_rejecting_with(400)
+        with pytest.raises(QdrantQueryRejectedException) as exc:
+            await service.search(query_vector=[0.1] * 768)
+        assert exc.value.details["collection"] == settings.QDRANT_UNIFIED_COLLECTION
+        assert exc.value.details["status"] == 400

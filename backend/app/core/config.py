@@ -10,6 +10,29 @@ from typing import List, Literal, Optional, Union
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The one string that means "we do not know which build this is".
+UNKNOWN_BUILD = "unknown"
+
+# Values that are *present* but carry no information. Every one of these is
+# something a real pipeline produces: an unexpanded `${GITHUB_SHA}` in a CI
+# expression arrives as the empty string, a Docker ARG nobody passed arrives as
+# whatever the Dockerfile defaulted it to, and a Python-formatted `None` arrives
+# as the literal "None". They must all read as "unknown", never be echoed back
+# as if they were a commit - a confident wrong answer here is exactly the thing
+# that cost 2.5 hours of bundle-hash fingerprinting.
+_UNINFORMATIVE_VALUES = frozenset({"", UNKNOWN_BUILD, "none", "null"})
+
+
+def _known(value: Optional[str]) -> Optional[str]:
+    """Return `value` stripped, or None if it carries no information.
+
+    Kept as a module-level pure function rather than a Settings method so the
+    "what counts as unknown" rule has exactly one definition and can be tested
+    without constructing a whole Settings object.
+    """
+    cleaned = (value or "").strip()
+    return cleaned if cleaned.lower() not in _UNINFORMATIVE_VALUES else None
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
@@ -30,6 +53,64 @@ class Settings(BaseSettings):
     # Railway-specific
     RAILWAY_ENVIRONMENT: Optional[str] = None
     PORT: int = 8000
+
+    # --- Build identity --------------------------------------------------
+    # Answers "which commit is actually serving?" without a login. Railway's
+    # healthcheck-gated cutover means a FAILED deploy leaves the OLD container
+    # running with a green healthcheck, so "the site responds" is not evidence
+    # that the deploy landed - only the commit is.
+    #
+    # Railway injects the RAILWAY_* trio into the runtime environment of each
+    # deployment, so on the normal push-to-deploy path this needs zero build
+    # plumbing. They are read as ordinary settings fields (not os.environ at
+    # request time) because a build identity cannot change while the process
+    # lives; freezing it at construction is both correct and this file's idiom.
+    RAILWAY_GIT_COMMIT_SHA: Optional[str] = None
+    RAILWAY_GIT_BRANCH: Optional[str] = None
+    RAILWAY_DEPLOYMENT_ID: Optional[str] = None
+    # Fallback for images Railway did not build: the GHCR image from
+    # .github/workflows/cd.yml already passes `--build-arg COMMIT_SHA`, and
+    # Dockerfile.prod now declares it. Also covers local `docker build`.
+    COMMIT_SHA: Optional[str] = None
+
+    @property
+    def build_commit_sha(self) -> str:
+        """The git commit this process is running, or "unknown".
+
+        Railway's runtime variable wins over the baked build arg: it is injected
+        fresh by the platform at container start, whereas the ARG is frozen into
+        an image layer that a cache hit could carry forward. When the platform
+        tells us what it deployed, believe the platform.
+        """
+        return _known(self.RAILWAY_GIT_COMMIT_SHA) or _known(self.COMMIT_SHA) or UNKNOWN_BUILD
+
+    @property
+    def build_commit_source(self) -> str:
+        """Where build_commit_sha came from: "railway", "build-arg" or "unknown".
+
+        Exposed because the two sources have different failure modes, and an
+        operator staring at an unexpected SHA needs to know which one they are
+        arguing with before they can tell a bad pin from a bad deploy.
+        """
+        if _known(self.RAILWAY_GIT_COMMIT_SHA):
+            return "railway"
+        if _known(self.COMMIT_SHA):
+            return "build-arg"
+        return UNKNOWN_BUILD
+
+    @property
+    def build_branch(self) -> str:
+        """Git branch of the running build, or "unknown" (Railway-only)."""
+        return _known(self.RAILWAY_GIT_BRANCH) or UNKNOWN_BUILD
+
+    @property
+    def build_deployment_id(self) -> str:
+        """Railway deployment id, or "unknown".
+
+        The handle that turns "this is the wrong commit" into "here is the
+        deploy log for the container that is actually up".
+        """
+        return _known(self.RAILWAY_DEPLOYMENT_ID) or UNKNOWN_BUILD
 
     # Security - IMPORTANT: These MUST be set via environment variables in production
     # Generate with: openssl rand -hex 32

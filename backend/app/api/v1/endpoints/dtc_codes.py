@@ -31,7 +31,7 @@ from app.api.v1.schemas.dtc import (
 )
 from app.core.config import settings
 from app.core.dtc_codes import is_valid_dtc_code, normalize_dtc_code
-from app.core.exceptions import EmbeddingUnavailableError
+from app.core.exceptions import EmbeddingUnavailableError, QdrantQueryRejectedException
 from app.core.log_sanitizer import sanitize_exception, sanitize_log
 from app.api.v1.endpoints.auth import require_role
 from app.db.postgres.models import DTCCode as DTCCodeModel
@@ -575,10 +575,27 @@ async def search_dtc_codes(
                 f"'{sanitize_log(query)}' is LEXICAL ONLY: {sanitize_exception(e)}",
                 exc_info=True,
             )
+        except QdrantQueryRejectedException as e:
+            # ERROR, same reasoning as the embedding arm above: Qdrant refused the
+            # query outright, so semantic search is not degraded-but-working, it is
+            # OFF - identically, on every request, until someone fixes the
+            # collection. At WARNING this is a Sentry breadcrumb nobody reads.
+            #
+            # This is not hypothetical. Production ran with no payload index on
+            # `type`, so Qdrant answered 400 to every filtered search while holding
+            # 62,898 correctly-tagged points in a green collection. The failure
+            # arrived here, became an empty list, and the product looked like a
+            # search engine that finds nothing.
+            logger.error(
+                f"Qdrant REFUSED the semantic search for '{sanitize_log(query)}' - "
+                f"results are LEXICAL ONLY until the collection is fixed: "
+                f"{sanitize_exception(e)}",
+                exc_info=True,
+            )
         except Exception as e:
-            # Qdrant failure/empty must never 500 the endpoint: fall back to the
-            # lexical results already collected above (or an empty list). Less
-            # severe than a dead backend, so it stays at WARNING.
+            # A transient Qdrant failure or a genuinely empty index must never 500
+            # the endpoint: fall back to the lexical results already collected
+            # above (or an empty list). Retryable, so it stays at WARNING.
             logger.warning(
                 f"Semantic search failed for query '{sanitize_log(query)}', "
                 f"falling back to lexical results: {sanitize_exception(e)}"

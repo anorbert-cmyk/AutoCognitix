@@ -200,8 +200,32 @@ RUN mkdir -p /app/logs /app/tmp && \
 # disagree about which model revision produced the vectors.
 ARG HUBERT_REVISION=028baac7feb87a7b2f042bbdaa5deec6513c6060
 
+# Build identity: which commit is baked into this image.
+# .github/workflows/cd.yml has ALWAYS passed `--build-arg COMMIT_SHA=...`, but
+# no stage declared the ARG, so Docker discarded it with a warning nobody read.
+# Declaring it is what turns an already-plumbed input into an answer.
+#
+# The default is deliberately EMPTY, never a literal SHA: config.py treats ""
+# (and "unknown") as absent, so an image built without the arg reports "unknown"
+# instead of a plausible-looking lie. A stale SHA is worse than no SHA.
+#
+# Railway builds this Dockerfile itself and passes no build args - there this is
+# empty and the RUNTIME variable RAILWAY_GIT_COMMIT_SHA supplies the value,
+# which is why config.py gives that source precedence.
+#
+# Declared HERE, late in the stage, on purpose: only instructions that reference
+# the ARG are cache-busted when it changes. Every commit therefore rebuilds just
+# the ENV/LABEL metadata layers below, not apt-get, the venv copy or the 440 MB
+# ONNX graph above.
+ARG COMMIT_SHA=""
+
+# The OCI standard field for "which commit is this image", so `docker inspect`
+# / `crane config` can answer the same question without running the container.
+LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
+
 # Environment variables
-ENV PYTHONPATH=/app \
+ENV COMMIT_SHA=${COMMIT_SHA} \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONFAULTHANDLER=1 \
@@ -242,7 +266,16 @@ EXPOSE 8000
 # Using exec to make gunicorn PID 1 for proper signal handling
 # Shell form (no JSON array) so ${PORT} and ${WEB_CONCURRENCY} are expanded by
 # /bin/sh at container start - Railway injects PORT, WEB_CONCURRENCY is ours.
-CMD alembic upgrade head && exec gunicorn app.main:app \
+#
+# The boot banner is the FIRST line of every deploy log, printed before the
+# migration so it survives even a container that dies during `alembic upgrade`.
+# Same precedence as app/core/config.py (runtime Railway var, then baked ARG,
+# then honest "unknown"), so the log and /health/live can never tell different
+# stories. This is the log-side half of the answer: the deploy log says which
+# commit booted, /health/live says which commit is still serving, and when a
+# deploy fails those two disagree instead of both staying silent.
+CMD echo "[boot] commit=${RAILWAY_GIT_COMMIT_SHA:-${COMMIT_SHA:-unknown}} branch=${RAILWAY_GIT_BRANCH:-unknown} deployment=${RAILWAY_DEPLOYMENT_ID:-unknown} env=${ENVIRONMENT:-unknown}" && \
+    alembic upgrade head && exec gunicorn app.main:app \
      --bind "0.0.0.0:${PORT:-8000}" \
      --workers "${WEB_CONCURRENCY:-2}" \
      --worker-class uvicorn.workers.UvicornWorker \

@@ -57,11 +57,29 @@ async def is_neo4j_available() -> bool:
         if now - _neo4j_last_check < NEO4J_CHECK_INTERVAL:
             return _neo4j_available
         try:
-            await asyncio.to_thread(lambda: db.cypher_query("RETURN 1", timeout=5))
+            # NO ``timeout=`` kwarg. neomodel's Database.cypher_query does not
+            # accept one, so passing it raised TypeError on EVERY call - which
+            # this bare ``except`` then recorded as "Neo4j unavailable". The
+            # probe never reached the network: the graph could be perfectly
+            # healthy and this still returned False, permanently, since the
+            # kwarg was introduced. Every feature gated on this function has
+            # been dark ever since, and restoring the database would not have
+            # changed anything.
+            #
+            # The timeout that was intended belongs on the driver, not on the
+            # query call - see the connection config where the driver is built.
+            await asyncio.to_thread(lambda: db.cypher_query("RETURN 1"))
             _neo4j_available = True
-        except Exception:
+        except Exception as e:
             _neo4j_available = False
-            logger.warning("Neo4j unavailable - using PostgreSQL-only fallback")
+            # Log the exception TYPE. A TypeError here means we broke the probe
+            # itself; a ServiceUnavailable means the graph is genuinely down.
+            # Collapsing both into one message is what hid this for months.
+            logger.warning(
+                "Neo4j unavailable (%s: %s) - using PostgreSQL-only fallback",
+                type(e).__name__,
+                e,
+            )
         _neo4j_last_check = now
         return _neo4j_available
 
@@ -685,14 +703,25 @@ async def delete_user_data(user_id: str) -> bool:
         # delete them here with: MATCH (n:UserSession {user_id: $uid}) DETACH DELETE n
         from neomodel import db
 
+        # Same dead ``timeout=5`` kwarg as the availability probe had: neomodel's
+        # cypher_query does not accept it, so this raised TypeError before it
+        # ever reached the graph. Under GDPR Article 17 that is the worst place
+        # for it - the erasure was never attempted, the exception was swallowed
+        # below, and the only trace was one log line nobody read.
         await asyncio.to_thread(
             db.cypher_query,
             "MATCH (n:UserSession {user_id: $uid}) DETACH DELETE n",
             {"uid": user_id},
-            timeout=5,
         )
         logger.info(f"Neo4j GDPR cleanup completed for user {user_id}")
         return True
     except Exception as e:
-        logger.error(f"Neo4j GDPR cleanup failed for user {user_id}: {e}")
+        # ERROR with the exception type: an erasure that silently reports
+        # failure-as-a-return-value is exactly what Article 17 cannot tolerate.
+        logger.error(
+            "Neo4j GDPR cleanup FAILED for user %s (%s: %s)",
+            user_id,
+            type(e).__name__,
+            e,
+        )
         return False

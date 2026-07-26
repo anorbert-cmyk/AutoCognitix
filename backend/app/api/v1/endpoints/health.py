@@ -9,10 +9,16 @@ Provides detailed health status for all system components:
 - System metrics
 
 Endpoints:
-- /health/live - Kubernetes liveness probe (is the app running?)
+- /health/live - Kubernetes liveness probe (is the app running?) + BUILD IDENTITY
 - /health/ready - Kubernetes readiness probe (is the app ready to serve?)
 - /health/detailed - Comprehensive health status for all services
 - /health/db - Database-specific statistics
+
+Build identity (/health/live, unauthenticated) exists because "the site is up"
+is not evidence that a deploy landed: Railway only cuts traffic over to a new
+container once its healthcheck passes, so a failed deploy leaves the previous
+container serving happily behind a green /health. The commit SHA is the only
+thing that distinguishes them.
 """
 
 import asyncio
@@ -57,11 +63,43 @@ class ServiceHealth(BaseModel):
     error: Optional[str] = None
 
 
+class BuildInfo(BaseModel):
+    """Identity of the build that is actually serving this request.
+
+    Every field is a plain string that is either real or the literal "unknown" -
+    never a fabricated or stale placeholder. This replaced a hardcoded
+    ``version: "0.1.0"`` that had never changed and therefore answered nothing.
+    """
+
+    commit: str
+    commit_source: str
+    branch: str
+    deployment_id: str
+
+
+def get_build_info() -> BuildInfo:
+    """Snapshot the running build's identity.
+
+    Thin by design: all the "what counts as unknown" logic lives in
+    app/core/config.py so the API layer cannot develop a second opinion.
+    """
+    return BuildInfo(
+        commit=settings.build_commit_sha,
+        commit_source=settings.build_commit_source,
+        branch=settings.build_branch,
+        deployment_id=settings.build_deployment_id,
+    )
+
+
 class DetailedHealthResponse(BaseModel):
     """Detailed health response with all services."""
 
     status: str
-    version: str
+    # Was `version: "0.1.0"` - a literal that shipped unchanged through every
+    # release and so could never distinguish two builds. Dropped rather than
+    # "fixed": this project deploys merges, not semver tags, so the honest
+    # identity of a running build is its commit, not a version number.
+    build: BuildInfo
     environment: str
     uptime_seconds: float
     services: Dict[str, ServiceHealth]
@@ -77,10 +115,22 @@ class ReadinessResponse(BaseModel):
 
 
 class LivenessResponse(BaseModel):
-    """Liveness probe response."""
+    """Liveness probe response.
+
+    Deliberately carries build identity: this is the only *unauthenticated*
+    endpoint whose implementation is shared by the root ``/health/live`` proxy
+    and ``/api/v1/health/live``, so one field added here answers "which build is
+    live?" on both, for anyone, with a single unauthenticated GET.
+    """
 
     status: str
     checked_at: str
+    # Seconds since this process started. The second half of "did my deploy
+    # land?": a container that has been up for 40 hours did not just receive
+    # your merge, whatever the SHA says - and it stays decisive even where the
+    # commit is genuinely "unknown".
+    uptime_seconds: float
+    build: BuildInfo
 
 
 class DatabaseStats(BaseModel):
@@ -106,15 +156,20 @@ class ConsistencyResponse(BaseModel):
     errors: list = []
 
 
-# Track startup time for uptime calculation
-_startup_time: Optional[float] = None
+# Captured at IMPORT time - this module is imported while the API router is
+# assembled, i.e. within a second of process start.
+#
+# It used to be initialized lazily on the first call, which meant uptime was
+# measured from "the first time anyone asked", not from boot: a container up for
+# days reported ~0 s to whoever checked first. That is precisely backwards for
+# the question this value exists to answer ("did a new container actually
+# start?"), and it read as a fresh deploy at the exact moment you needed proof
+# of one.
+_startup_time: float = time.time()
 
 
 def get_startup_time() -> float:
-    """Get or initialize startup time."""
-    global _startup_time
-    if _startup_time is None:
-        _startup_time = time.time()
+    """Process start (module import) as a UNIX timestamp."""
     return _startup_time
 
 
@@ -514,12 +569,26 @@ async def liveness_check():
     Use this for container orchestration liveness probes.
     If this fails, the container should be restarted.
 
+    ALSO the public answer to "which build is live?". It is unauthenticated and
+    reachable at both ``/health/live`` (root proxy in app/main.py) and
+    ``/api/v1/health/live``, touches no database, and cannot be cached (the
+    CacheControlMiddleware default marks it ``private, no-store``), so the
+    answer is always about the container that served *this* request::
+
+        curl -s https://<host>/health/live | jq -r .build.commit
+
+    Compare that to the SHA you merged. If it differs, the deploy did not land -
+    on Railway a failed deploy leaves the OLD container serving with a green
+    healthcheck, so a 200 from ``/health`` proves nothing on its own.
+
     Returns:
-        LivenessResponse: Status "alive" with timestamp
+        LivenessResponse: Status "alive", timestamp, uptime and build identity
     """
     return LivenessResponse(
         status="alive",
         checked_at=datetime.now(timezone.utc).isoformat(),
+        uptime_seconds=round(time.time() - get_startup_time(), 2),
+        build=get_build_info(),
     )
 
 
@@ -533,6 +602,16 @@ async def readiness_check():
 
     Use this for container orchestration readiness probes.
     If this fails, traffic should be routed away from this instance.
+
+    PostgreSQL ONLY, deliberately. Qdrant and Neo4j were considered and left
+    out: readiness gates traffic, so failing it on a degraded-but-serving
+    dependency would take the whole site down every time semantic search broke -
+    a strictly worse outcome than the degradation itself. This is the same call
+    the codebase already makes in check_embedding_health(), where an unusable
+    embedding backend maps to "degraded" rather than "unhealthy" because lexical
+    and graph diagnosis keep working. Dependency state belongs on
+    /health/detailed, which reports it without steering traffic. Do not "fix"
+    this by adding datastores here.
 
     Returns:
         ReadinessResponse: Status and individual check results
@@ -700,7 +779,7 @@ async def detailed_health_check(
 
     return DetailedHealthResponse(
         status=overall_status,
-        version="0.1.0",
+        build=get_build_info(),
         environment=settings.ENVIRONMENT,
         uptime_seconds=round(uptime, 2),
         services=services,

@@ -8,8 +8,14 @@ configuration for the AutoCognitix diagnostic system.
 Usage:
     python scripts/init_qdrant.py                    # Initialize collections
     python scripts/init_qdrant.py --verify           # Verify collections exist
-    python scripts/init_qdrant.py --recreate         # Drop and recreate all
     python scripts/init_qdrant.py --info             # Show collection info
+    python scripts/init_qdrant.py --recreate         # Drop and recreate all
+    python scripts/init_qdrant.py --drop             # Drop all collections
+    python scripts/init_qdrant.py --drop --collection X   # Drop just X
+
+Destructive operations refuse any collection that still holds points. Add
+--force to override, and read it as "for every collection this command touches",
+not just one. See assert_safe_to_delete().
 
 Collections:
     - dtc_embeddings_hu: Hungarian DTC code descriptions (768-dim huBERT)
@@ -35,7 +41,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from qdrant_client import QdrantClient
     from qdrant_client.http import models as qdrant_models
-    from qdrant_client.http.exceptions import UnexpectedResponse
 except ImportError:
     print("Error: qdrant-client not installed. Run: pip install qdrant-client")
     sys.exit(1)
@@ -161,6 +166,7 @@ COLLECTIONS: List[Dict[str, Any]] = [
 # Qdrant Client
 # =============================================================================
 
+
 def get_qdrant_client() -> QdrantClient:
     """Create Qdrant client based on configuration."""
     if QDRANT_URL:
@@ -183,6 +189,7 @@ def get_qdrant_client() -> QdrantClient:
 # Collection Management
 # =============================================================================
 
+
 def collection_exists(client: QdrantClient, name: str) -> bool:
     """Check if a collection exists."""
     try:
@@ -193,10 +200,72 @@ def collection_exists(client: QdrantClient, name: str) -> bool:
         return False
 
 
+def assert_safe_to_delete(client: QdrantClient, name: str, force: bool = False) -> None:
+    """Refuse to delete a collection that still holds points, unless forced.
+
+    The guard is on the POINT COUNT, not on a list of protected names. A name
+    list would have to be maintained by whoever adds the next collection, and
+    would be wrong the moment it was not - whereas "this collection has data in
+    it" is true or false at the moment of the call and needs no upkeep.
+
+    This exists because these names are not empty in production the way the code
+    assumes: ``dtc_embeddings_hu`` holds 2,323 points and
+    ``symptom_embeddings_hu`` 117, written by the indexer scripts. They are a
+    partial stale copy that the application no longer reads - but the decision to
+    destroy them belongs to a human who has seen the count, not to a flag that
+    happens to be on.
+
+    Note this covers ``--drop --collection <name>`` too, which takes a free-form
+    name and never consults ``COLLECTIONS`` - so it can target the unified
+    ``autocognitix`` store holding every vector the application actually reads.
+    Nothing about the COLLECTIONS list bounds the blast radius; this function is
+    the only thing that does.
+
+    Raises:
+        RuntimeError: if the collection holds points and ``force`` is not set,
+            or if the point count cannot be read at all.
+    """
+    try:
+        count = client.count(collection_name=name, exact=True).count
+    except Exception as e:
+        # Fail CLOSED, and note --force does NOT open this branch: "destroy it
+        # anyway" is a decision about a known quantity, and here the quantity is
+        # unknown. Deliberately does not tell the operator to retry with --force,
+        # because that produces a byte-identical refusal - an instruction that
+        # loops the reader is worse than none.
+        raise RuntimeError(
+            f"Refusing to delete '{name}': could not read its point count ({e}). "
+            f"Fix the connection or the API key's permissions so the count can be "
+            f"read, or delete the collection from the Qdrant console if you have "
+            f"confirmed there what it holds. --force does not bypass this."
+        ) from e
+
+    # `count is None` is treated as unknown, not as zero. CountResult.count is a
+    # required int so a real server cannot produce it, but a bare `if count`
+    # would silently read None as "empty" and unlock the delete - the one
+    # direction this function must never fail in.
+    if count is None:
+        raise RuntimeError(
+            f"Refusing to delete '{name}': the server returned no point count. "
+            f"--force does not bypass this."
+        )
+
+    if count > 0 and not force:
+        raise RuntimeError(
+            f"Refusing to delete '{name}': it holds {count:,} points. "
+            f"Nothing in the application reads this collection, but the data is "
+            f"real and its removal is not reversible. Re-run with --force if you "
+            f"have decided to destroy it."
+        )
+    if count > 0:
+        logger.warning(f"--force given: destroying {count:,} points in '{name}'")
+
+
 def create_collection(
     client: QdrantClient,
     config: Dict[str, Any],
     recreate: bool = False,
+    force: bool = False,
 ) -> bool:
     """
     Create a collection with the specified configuration.
@@ -218,6 +287,9 @@ def create_collection(
 
         if exists:
             if recreate:
+                # --recreate had NO confirmation of any kind, unlike --drop which
+                # at least prompts. It was the sharper of the two edges.
+                assert_safe_to_delete(client, name, force=force)
                 logger.info(f"Deleting existing collection: {name}")
                 client.delete_collection(collection_name=name)
             else:
@@ -225,7 +297,9 @@ def create_collection(
                 return True
 
         # Create the collection
-        logger.info(f"Creating collection: {name} (vectors: {vector_size}-dim, distance: {distance})")
+        logger.info(
+            f"Creating collection: {name} (vectors: {vector_size}-dim, distance: {distance})"
+        )
 
         client.create_collection(
             collection_name=name,
@@ -265,6 +339,12 @@ def create_collection(
         logger.info(f"Successfully created collection: {name}")
         return True
 
+    except RuntimeError:
+        # The deletion guard refused. Do NOT let it decay into `return False`:
+        # the caller treats False as "this one collection had a problem, carry
+        # on with the rest", which turns a deliberate refusal to destroy data
+        # into a line in a tally. Abort the run so the operator sees it.
+        raise
     except Exception as e:
         logger.error(f"Error creating collection {name}: {e}")
         return False
@@ -294,8 +374,12 @@ def get_collection_info(client: QdrantClient, name: str) -> Dict[str, Any]:
             "points_count": info.points_count,
             "indexed_vectors_count": info.indexed_vectors_count,
             "config": {
-                "vector_size": info.config.params.vectors.size if hasattr(info.config.params.vectors, 'size') else "multi",
-                "distance": str(info.config.params.vectors.distance) if hasattr(info.config.params.vectors, 'distance') else "unknown",
+                "vector_size": info.config.params.vectors.size
+                if hasattr(info.config.params.vectors, "size")
+                else "multi",
+                "distance": str(info.config.params.vectors.distance)
+                if hasattr(info.config.params.vectors, "distance")
+                else "unknown",
             },
         }
     except Exception:
@@ -306,9 +390,27 @@ def get_collection_info(client: QdrantClient, name: str) -> Dict[str, Any]:
 # CLI Commands
 # =============================================================================
 
-def cmd_init(recreate: bool = False, skip_legacy: bool = True) -> bool:
-    """Initialize all collections."""
+
+def cmd_init(recreate: bool = False, skip_legacy: bool = True, force: bool = False) -> bool:
+    """Initialize all collections.
+
+    With ``recreate``, every candidate is checked BEFORE any is deleted, for the
+    same reason ``cmd_drop`` does it: a run that deletes and recreates two
+    collections and then refuses on the third leaves a state nobody chose.
+
+    Without the pre-flight this was safe only by list ORDERING - the collection
+    holding the most points happens to sit first in ``COLLECTIONS``, so it
+    refused before anything was touched. That is luck, and it inverts the moment
+    someone reorders the list or empties that collection.
+    """
     client = get_qdrant_client()
+
+    targets = [c for c in COLLECTIONS if not (c.get("legacy") and skip_legacy)]
+
+    if recreate:
+        for config in targets:
+            if collection_exists(client, config["name"]):
+                assert_safe_to_delete(client, config["name"], force=force)
 
     success_count = 0
     total_count = 0
@@ -320,7 +422,7 @@ def cmd_init(recreate: bool = False, skip_legacy: bool = True) -> bool:
             continue
 
         total_count += 1
-        if create_collection(client, config, recreate=recreate):
+        if create_collection(client, config, recreate=recreate, force=force):
             success_count += 1
 
     logger.info(f"\nInitialization complete: {success_count}/{total_count} collections")
@@ -407,13 +509,30 @@ def cmd_info() -> None:
     print("\n" + "=" * 70)
 
 
-def cmd_drop(collection_name: Optional[str] = None) -> bool:
-    """Drop one or all collections."""
+def cmd_drop(collection_name: Optional[str] = None, force: bool = False) -> bool:
+    """Drop one or all collections.
+
+    Every deletion goes through :func:`assert_safe_to_delete` first, so a
+    collection that still holds points is refused unless ``--force`` is given.
+
+    ``collection_name`` is a free-form name resolved against the LIVE server, not
+    against ``COLLECTIONS`` - so this can target the unified ``autocognitix``
+    store. That is exactly why the guard counts points instead of checking a
+    name list.
+    """
     client = get_qdrant_client()
+
+    # Read the live list ONCE and let failures propagate. Going through
+    # collection_exists() per name swallows the error and returns False, which
+    # turns "Qdrant is unreachable" into "there was nothing to drop" - reported
+    # as success, with exit 0. The error has to stay distinguishable from a
+    # genuinely empty result.
+    existing = {c.name for c in client.get_collections().collections}
 
     if collection_name:
         # Drop specific collection
-        if collection_exists(client, collection_name):
+        if collection_name in existing:
+            assert_safe_to_delete(client, collection_name, force=force)
             client.delete_collection(collection_name=collection_name)
             logger.info(f"Dropped collection: {collection_name}")
             return True
@@ -421,20 +540,25 @@ def cmd_drop(collection_name: Optional[str] = None) -> bool:
             logger.warning(f"Collection not found: {collection_name}")
             return False
     else:
-        # Drop all collections
-        for config in COLLECTIONS:
-            name = config["name"]
-            if collection_exists(client, name):
-                client.delete_collection(collection_name=name)
-                logger.info(f"Dropped collection: {name}")
+        # Drop all collections. Every candidate is checked BEFORE anything is
+        # deleted: a partial drop that stops halfway through leaves the store in
+        # a state nobody chose, which is worse than refusing outright.
+        present = [c["name"] for c in COLLECTIONS if collection_exists(client, c["name"])]
+        for name in present:
+            assert_safe_to_delete(client, name, force=force)
 
-        logger.info("All collections dropped")
+        for name in present:
+            client.delete_collection(collection_name=name)
+            logger.info(f"Dropped collection: {name}")
+
+        logger.info(f"Dropped {len(present)} collection(s)")
         return True
 
 
 # =============================================================================
 # Main Entry Point
 # =============================================================================
+
 
 def main():
     """Main entry point."""
@@ -445,9 +569,13 @@ def main():
 Examples:
     python scripts/init_qdrant.py              # Initialize all collections
     python scripts/init_qdrant.py --verify     # Verify collections exist
-    python scripts/init_qdrant.py --recreate   # Drop and recreate all
     python scripts/init_qdrant.py --info       # Show collection details
+    python scripts/init_qdrant.py --recreate   # Drop and recreate all
     python scripts/init_qdrant.py --drop       # Drop all collections
+    python scripts/init_qdrant.py --drop --collection dtc_embeddings_hu
+
+--recreate and --drop REFUSE any collection that still holds points. Add --force
+to override - it applies to every collection the command touches, not one.
         """,
     )
 
@@ -459,7 +587,11 @@ Examples:
     parser.add_argument(
         "--recreate",
         action="store_true",
-        help="Drop and recreate all collections",
+        help=(
+            "Drop and recreate ALL non-legacy collections. Refused for any that "
+            "still holds points unless --force is also given. Cannot be scoped "
+            "with --collection."
+        ),
     )
     parser.add_argument(
         "--info",
@@ -469,7 +601,10 @@ Examples:
     parser.add_argument(
         "--drop",
         action="store_true",
-        help="Drop all collections (dangerous!)",
+        help=(
+            "Drop all collections, or just --collection if given (dangerous!). "
+            "Refused for any that still holds points unless --force is given."
+        ),
     )
     parser.add_argument(
         "--include-legacy",
@@ -481,8 +616,29 @@ Examples:
         type=str,
         help="Operate on specific collection only",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Allow --drop/--recreate to destroy collections that still hold "
+            "points. Without it, any non-empty collection is refused. NOTE this "
+            "applies to EVERY collection the command touches, not just one."
+        ),
+    )
 
     args = parser.parse_args()
+
+    # --recreate loops all non-legacy COLLECTIONS and has never read
+    # --collection. Silently ignoring it was survivable while every deletion was
+    # unconditional; combined with --force it is not, because the operator reads
+    # "--recreate --collection X --force" as scoping the destruction to X and
+    # gets all of them. Refuse the combination rather than honour half of it.
+    if args.recreate and args.collection:
+        parser.error(
+            "--collection cannot be combined with --recreate: --recreate always "
+            "operates on every non-legacy collection. Use --drop --collection "
+            "<name> to act on a single collection."
+        )
 
     try:
         if args.verify:
@@ -492,23 +648,33 @@ Examples:
             cmd_info()
             sys.exit(0)
         elif args.drop:
-            confirm = input("Are you sure you want to drop all collections? (yes/no): ")
-            if confirm.lower() == "yes":
-                cmd_drop(args.collection)
-            else:
+            scope = f"collection '{args.collection}'" if args.collection else "ALL collections"
+            confirm = input(f"Are you sure you want to drop {scope}? (yes/no): ")
+            if confirm.lower() != "yes":
                 print("Aborted.")
-            sys.exit(0)
+                sys.exit(0)
+            # The return value used to be discarded, so dropping a collection
+            # that was not there reported success.
+            sys.exit(0 if cmd_drop(args.collection, force=args.force) else 1)
         else:
             # Default: initialize
             success = cmd_init(
                 recreate=args.recreate,
                 skip_legacy=not args.include_legacy,
+                force=args.force,
             )
             sys.exit(0 if success else 1)
 
     except ConnectionError as e:
         logger.error(f"Could not connect to Qdrant: {e}")
         logger.error("Make sure Qdrant is running or QDRANT_URL is configured correctly.")
+        sys.exit(1)
+    except RuntimeError as e:
+        # A refusal by assert_safe_to_delete. It is a decision, not a crash, so
+        # it exits cleanly instead of dumping a traceback - a stack trace reads
+        # as "the tool broke" to a human and to anything scraping stderr, and the
+        # message already says exactly what happened and what to do about it.
+        logger.error(str(e))
         sys.exit(1)
     except Exception as e:
         logger.error(f"Error: {e}")

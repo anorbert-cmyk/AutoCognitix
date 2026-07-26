@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.exceptions import (
     QdrantConnectionException,
     QdrantException,
+    QdrantQueryRejectedException,
 )
 from app.core.logging import get_logger
 
@@ -170,6 +171,7 @@ class QdrantService:
         deleted - see :data:`_LEGACY_COLLECTIONS`.
         """
         await self._create_collection_if_not_exists(settings.QDRANT_UNIFIED_COLLECTION)
+        await self._ensure_payload_index(settings.QDRANT_UNIFIED_COLLECTION, "type")
 
         surviving = await self._legacy_collections_present()
         if surviving:
@@ -184,6 +186,46 @@ class QdrantService:
             "type-discriminated payloads)",
             settings.QDRANT_UNIFIED_COLLECTION,
         )
+
+    async def _ensure_payload_index(self, collection_name: str, field: str) -> None:
+        """Ensure a keyword payload index exists for ``field``.
+
+        This is not an optimisation. Qdrant REFUSES to filter on a payload key
+        that has no index - it answers 400 ``Index required but not found for
+        "type" of one of the following types: [keyword]``, not an empty result.
+        Every semantic read in this application filters on ``type``, so without
+        this index all of them fail, the caller's ``except`` turns the failure
+        into ``[]``, and the product looks like a search engine that finds
+        nothing rather than one that is broken.
+
+        That is exactly what production was doing: 62,898 points present and
+        correctly type-tagged, ``status: green``, and every filtered query
+        rejected. The collection was created by an importer script that never
+        declared the index, so nothing in the boot path ever established it.
+        Creating it here means an environment cannot be born in that state.
+
+        Idempotent: Qdrant treats re-creating an identical index as a no-op, so
+        this runs on every boot and every worker without special-casing.
+        """
+        try:
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field,
+                field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+            )
+            logger.info(f"Payload index ensured: {collection_name}.{field} (keyword)")
+        except Exception as e:
+            # Deliberately NOT fatal: a running cluster that already has the
+            # index, or a key without index-management rights, must not stop the
+            # app from booting. It is logged at ERROR rather than WARNING
+            # because a genuinely missing index silently disables every semantic
+            # feature, and Sentry only raises events from ERROR up.
+            logger.error(
+                f"Could not ensure payload index {collection_name}.{field}: {e}. "
+                f"Filtered searches will FAIL (Qdrant rejects filters on unindexed "
+                f"keys) until this index exists.",
+                extra={"error_type": type(e).__name__},
+            )
 
     async def _create_collection_if_not_exists(self, collection_name: str) -> None:
         """Create a collection if it doesn't exist."""
@@ -380,6 +422,33 @@ class QdrantService:
                 message="Nem sikerult csatlakozni a Qdrant adatbazishoz.",
                 original_error=e,
             )
+        except UnexpectedResponse as e:
+            # A 4xx means Qdrant understood the request and refused it. That is a
+            # configuration defect, not an outage: it will be refused identically
+            # on every retry, forever, until the collection changes. Callers must
+            # be able to tell the two apart, because the operational response is
+            # "page someone" versus "shrug and fall back".
+            # Plain range check rather than HTTPStatus.is_client_error: that
+            # property only exists from Python 3.13 and this targets 3.9+.
+            # An absent status_code falls through to the generic arm - claiming
+            # "permanent config defect" without knowing the status would send
+            # someone chasing a collection change for a transient blip.
+            status = e.status_code
+            if status is not None and 400 <= status < 500:
+                logger.error(
+                    f"Qdrant REFUSED the search in {collection_name} - this is a "
+                    f"configuration defect and will not fix itself",
+                    extra={"error_type": type(e).__name__, "error_message": str(e)},
+                )
+                raise QdrantQueryRejectedException(
+                    details={"collection": collection_name, "status": status},
+                    original_error=e,
+                ) from e
+            raise QdrantException(
+                message="Vektor kereses sikertelen.",
+                details={"collection": collection_name},
+                original_error=e,
+            ) from e
         except Exception as e:
             logger.error(
                 f"Qdrant search error in {collection_name}",
