@@ -51,13 +51,14 @@ export {
   getDTCCategories,
   getDTCCodeDetail,
   getRelatedDTCCodes,
+  getSeverityChip,
   getSeverityColorClass,
   getSeverityLabelHu,
   isValidDTCFormat,
   searchDTCCodes,
 } from './dtcService'
 
-export type { DTCSearchParams } from './dtcService'
+export type { DTCSearchParams, SeverityChip } from './dtcService'
 
 // Diagnosis Service
 export {

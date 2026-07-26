@@ -33,15 +33,14 @@
 import { useState } from 'react'
 import { AlertTriangle, Car, Wrench } from 'lucide-react'
 import { EmptyState, ErrorState, Skeleton } from '../../ui'
+import { segmentedItemClass } from '../../../lib/styles'
 import { useVehicleCommonIssues } from '../../../services/hooks/useVehicle'
+import { getSeverityChip } from '../../../services/dtcService'
 import type { VehicleComplaintComponent } from '../../../services/api'
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-const focusRing =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
 
 /** A backend `_frequency_bucket` szókészlete. Ismeretlen érték → nem jelenítjük meg. */
 const FREQUENCY_LABELS: Record<string, string> = {
@@ -49,14 +48,6 @@ const FREQUENCY_LABELS: Record<string, string> = {
   uncommon: 'Nem gyakori',
   common: 'Gyakori',
   very_common: 'Nagyon gyakori',
-}
-
-/** WCAG AA-t teljesítő súlyosság-chipek (a dtcService színpárjai ennél halványabbak). */
-const SEVERITY_CHIPS: Record<string, { label: string; className: string }> = {
-  low: { label: 'Alacsony', className: 'bg-green-100 text-green-800' },
-  medium: { label: 'Közepes', className: 'bg-yellow-100 text-yellow-800' },
-  high: { label: 'Magas', className: 'bg-orange-100 text-orange-800' },
-  critical: { label: 'Kritikus', className: 'bg-red-100 text-red-800' },
 }
 
 // =============================================================================
@@ -199,11 +190,7 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
         type="button"
         onClick={() => setYearFilter(undefined)}
         aria-pressed={yearFilter === undefined}
-        className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${focusRing} ${
-          yearFilter === undefined
-            ? 'bg-white text-slate-900 shadow-sm'
-            : 'text-slate-600 hover:text-slate-800'
-        }`}
+        className={segmentedItemClass(yearFilter === undefined, 'sm')}
       >
         Minden évjárat
       </button>
@@ -211,11 +198,7 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
         type="button"
         onClick={() => setYearFilter(vehicleYear)}
         aria-pressed={yearFilter === vehicleYear}
-        className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${focusRing} ${
-          yearFilter === vehicleYear
-            ? 'bg-white text-slate-900 shadow-sm'
-            : 'text-slate-600 hover:text-slate-800'
-        }`}
+        className={segmentedItemClass(yearFilter === vehicleYear, 'sm')}
       >
         Csak {vehicleYear}
       </button>
@@ -417,7 +400,10 @@ export default function CommonIssuesPanel({ make, model, vehicleYear }: CommonIs
           </div>
           <ul className="divide-y divide-slate-100">
             {issues.map((issue) => {
-              const severityChip = issue.severity ? SEVERITY_CHIPS[issue.severity] : undefined
+              // A chip szándékosan PARCIÁLIS: ismeretlen/hiányzó súlyosságnál
+              // `undefined`, és ilyenkor nem rajzolunk helykitöltő címkét — ez
+              // ugyanaz a szabály, mint a `FREQUENCY_LABELS`-nél.
+              const severityChip = getSeverityChip(issue.severity)
               const frequencyLabel = issue.frequency
                 ? FREQUENCY_LABELS[issue.frequency]
                 : undefined

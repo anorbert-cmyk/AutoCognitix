@@ -20,14 +20,8 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { useDiagnosisHistory, useUpcomingReminders, useVehicles } from '@/services/hooks'
 import { cn } from '@/lib/utils'
+import { focusRing, focusRingDark } from '@/lib/styles'
 import { EmptyState, Skeleton } from '@/components/ui'
-
-// Shared focus ring for links/buttons on light surfaces
-const focusRing =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-// Focus ring variant for elements sitting on the dark hero gradient
-const focusRingDark =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary-800'
 
 export default function HomePage() {
   const { isAuthenticated, isLoading } = useAuth()
